@@ -17,3 +17,4 @@ backend/build/
 backend/dist/
 frontend/node_modules/
 frontend/dist/
+workspaces/

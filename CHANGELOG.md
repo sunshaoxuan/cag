@@ -2,6 +2,26 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.2.0
+
+发布日期：2026-07-27
+
+### Added
+
+* YAML 项目注册表和 Project 查询 API。
+* Project 与 Task 工作区字段的数据库迁移。
+* 每个任务独占的 Git 克隆工作区及提交版本记录。
+* `workspace.preparing` 与 `workspace.ready` 事件。
+* React 任务控制台、事件时间线与最终报告页面。
+* 前端容器和统一 Docker Compose 启动。
+* 工作区隔离、项目 API、前端组件和浏览器验收测试。
+
+### Runtime decision
+
+* 真实运行时继续限定为本机已通过 ChatGPT 订阅登录的 Codex。
+* Phase 2 使用 Fake Agent Runtime 完成无配额的确定性验收。
+* Phase 3 将接入本机 `codex app-server`，不引入 `OPENAI_API_KEY`。
+
 ## 0.1.0
 
 发布日期：2026-07-27

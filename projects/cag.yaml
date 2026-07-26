@@ -1,0 +1,23 @@
+physical_id: 6ee71a6a-f30a-4a2d-a281-309c7511b832
+id: cag
+name: Codex/ChatGPT Agent Gateway
+version: "1"
+
+repository:
+  url: https://github.com/sunshaoxuan/cag.git
+  default_branch: master
+
+workspace:
+  type: git_clone
+
+instructions:
+  files:
+    - AGENTS.md
+    - README.md
+
+runtime:
+  default_profile: general-engineering
+  allowed_profiles:
+    - general-engineering
+    - read-only-analysis
+    - ci-repair

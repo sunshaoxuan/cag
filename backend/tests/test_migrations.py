@@ -13,7 +13,8 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
 
     command.upgrade(config, "head")
 
-    tables = set(inspect(create_engine(database_url)).get_table_names())
+    inspector = inspect(create_engine(database_url))
+    tables = set(inspector.get_table_names())
     assert {
         "alembic_version",
         "projects",
@@ -21,3 +22,5 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "tasks",
         "task_events",
     } <= tables
+    task_columns = {column["name"] for column in inspector.get_columns("tasks")}
+    assert {"workspace_id", "workspace_path", "workspace_commit"} <= task_columns

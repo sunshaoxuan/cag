@@ -4,20 +4,20 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.1.0`，对应规格中的 Phase 1。
+当前版本为 `0.2.0`，对应规格中的 Phase 2。
 
 已实现：
 
-* FastAPI 服务骨架。
-* SQLAlchemy 数据模型和 Alembic 迁移。
-* Fake Agent Runtime。
-* 创建任务、查询任务和 SSE 事件读取。
-* Docker Compose 中的 Gateway、PostgreSQL 和 Redis。
-* 不消耗 Codex 或 OpenAI 配额的测试。
+* FastAPI、SQLAlchemy、Alembic 和 Fake Agent Runtime。
+* YAML 项目注册表及 Project 查询 API。
+* 每个任务独占的 Git 克隆工作区。
+* 创建任务、查询任务和 8 类顺序 SSE 事件。
+* React 任务控制台与最终报告页面。
+* Docker Compose 中的前端、Gateway、PostgreSQL 和 Redis。
+* 不消耗 Codex 或 OpenAI 配额的自动化与浏览器测试。
 
 规划中：
 
-* Phase 2 工作区、项目配置加载、完整事件流和前端页面。
 * Phase 3 本地 Codex app-server 运行时。
 * Phase 4 Skill、Runtime Profile 和工具策略。
 * Phase 5 审批、Git diff 和 Artifact。
@@ -54,7 +54,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-服务默认地址为 `http://127.0.0.1:8000`，OpenAPI 地址为 `http://127.0.0.1:8000/docs`。
+服务默认地址为 `http://127.0.0.1:8000`，OpenAPI 地址为 `http://127.0.0.1:8000/docs`。项目配置默认从 `projects/*.yaml` 加载，任务工作区默认写入 `workspaces/{project_physical_id}/{task_id}`。
 
 ## Docker Compose
 
@@ -71,11 +71,16 @@ docker compose up --build
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
+浏览器任务控制台地址为 `http://127.0.0.1:5173`。
+
 ## 测试
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest --cov=app --cov-fail-under=90
+cd ..\frontend
+pnpm test
+pnpm build
 ```
 
 测试默认使用临时 SQLite 数据库和 Fake Runtime，不连接生产系统。

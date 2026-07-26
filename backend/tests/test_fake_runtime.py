@@ -1,9 +1,10 @@
 import asyncio
+from pathlib import Path
 
 from app.runtimes.fake import FakeAgentRuntime
 
 
-def test_fake_runtime_emits_deterministic_events() -> None:
+def test_fake_runtime_emits_deterministic_events(tmp_path: Path) -> None:
     emitted: list[tuple[str, dict[str, object]]] = []
 
     async def emit(event_type: str, data: dict[str, object]) -> None:
@@ -15,6 +16,7 @@ def test_fake_runtime_emits_deterministic_events() -> None:
             project_code="project-code",
             prompt="run tests",
             runtime_profile="general-engineering",
+            workspace_path=tmp_path,
             emit=emit,
         )
     )
@@ -28,3 +30,4 @@ def test_fake_runtime_emits_deterministic_events() -> None:
     assert result.validation == [
         {"command": "fake-runtime-validation", "status": "passed"}
     ]
+    assert emitted[0][1]["workspace_ready"] is True

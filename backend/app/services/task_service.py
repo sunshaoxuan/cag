@@ -1,9 +1,8 @@
-from uuid import UUID
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Conversation, Project, Task, TaskEvent
+from app.projects.registry import ProjectConfig, ProjectRegistry
 
 
 class ProjectNotFoundError(Exception):
@@ -18,29 +17,42 @@ class TaskNotFoundError(Exception):
     pass
 
 
-def is_uuid(value: str) -> bool:
-    try:
-        UUID(value)
-    except ValueError:
-        return False
-    return True
-
-
 class TaskService:
-    def resolve_project(self, session: Session, project_reference: str) -> Project:
-        if is_uuid(project_reference):
-            project = session.get(Project, project_reference)
-            if project is None:
-                raise ProjectNotFoundError(project_reference)
-            return project
+    def __init__(self, project_registry: ProjectRegistry) -> None:
+        self.project_registry = project_registry
 
-        project = session.scalar(
-            select(Project).where(Project.code == project_reference)
-        )
+    def resolve_project(self, session: Session, project_reference: str) -> Project:
+        config = self.project_registry.resolve(project_reference)
+        if config is None:
+            raise ProjectNotFoundError(project_reference)
+        return self.sync_project(session, config)
+
+    def sync_project(
+        self,
+        session: Session,
+        config: ProjectConfig,
+    ) -> Project:
+        project = session.get(Project, config.physical_id_string)
         if project is None:
-            project = Project(code=project_reference, name=project_reference)
+            conflicting_project = session.scalar(
+                select(Project).where(Project.code == config.id)
+            )
+            if conflicting_project is not None:
+                raise ProjectNotFoundError(
+                    f"Project code {config.id} has a conflicting physical ID"
+                )
+            project = Project(
+                id=config.physical_id_string,
+                code=config.id,
+                name=config.name,
+            )
             session.add(project)
-            session.flush()
+        project.code = config.id
+        project.name = config.name
+        project.repository_url = config.repository.url
+        project.default_branch = config.repository.default_branch
+        project.config_version = config.version
+        session.flush()
         return project
 
     def create_task(

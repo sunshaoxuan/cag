@@ -66,3 +66,33 @@ POST /api/v1/tasks
 GET  /api/v1/tasks/{task_id}
 GET  /api/v1/tasks/{task_id}/events
 ```
+
+## Phase 2 validation
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest --cov=app --cov-report=term-missing --cov-fail-under=90
+
+cd ..\frontend
+pnpm test
+pnpm build
+
+cd ..
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+docker compose exec -T gateway alembic current
+```
+
+Live Phase 2 checks:
+
+```text
+GET  /api/v1/projects
+GET  /api/v1/projects/{project_reference}
+POST /api/v1/tasks
+GET  /api/v1/tasks/{task_id}
+GET  /api/v1/tasks/{task_id}/events?follow=false
+GET  http://127.0.0.1:5173/health
+```
+
+The task console was tested in the in-app browser at `http://127.0.0.1:5173`. Prompt submission, eight ordered events, final report, browser console and a full-page screenshot were checked.

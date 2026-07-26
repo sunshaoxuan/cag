@@ -9,6 +9,7 @@ from app.models.base import Base, PhysicalIdMixin, utc_now
 
 class TaskStatus:
     QUEUED = "queued"
+    PREPARING = "preparing"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
     COMPLETED = "completed"
@@ -43,6 +44,9 @@ class Task(PhysicalIdMixin, Base):
     next_event_sequence: Mapped[int] = mapped_column(Integer, default=1)
     final_report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workspace_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

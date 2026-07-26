@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.database import Database
+from app.projects.registry import ProjectRegistry
 from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
 
@@ -15,6 +16,10 @@ def get_database(request: Request) -> Database:
 
 def get_app_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_project_registry(request: Request) -> ProjectRegistry:
+    return request.app.state.project_registry
 
 
 def get_session(request: Request) -> Iterator[Session]:

@@ -4,7 +4,7 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Phase 1 is a development foundation. Its public Task API has no production authentication and must only bind to trusted local or isolated networks. Authentication and project authorization are required before any shared deployment.
+Phase 2 is a development foundation. Its public Project and Task APIs have no production authentication and must only bind to trusted local or isolated networks. Authentication and project authorization are required before any shared deployment.
 
 ## 2. Codex subscription credentials
 
@@ -79,14 +79,17 @@ Protected branch push and production deployment remain forbidden defaults. Proje
 
 Each writing task receives its own Git clone or worktree. The executor prevents two writing tasks from sharing one Git working directory. Task processes receive explicit filesystem roots and resource limits.
 
+Phase 2 implements one Git clone per task under the configured workspace root and keeps the host filesystem path out of API responses. Runtime sandbox enforcement, resource limits, cleanup policy, URL allowlisting and credential-safe private repository cloning remain production gates.
+
 ## 8. Network and service exposure
 
 * PostgreSQL and Redis have no host ports in the default Compose file.
 * Gateway exposes port 8000 for development.
+* Frontend exposes port 5173 for development.
 * Codex app-server uses stdio by default.
 * Loopback WebSocket mode is reserved for controlled local integration.
 * Non-loopback app-server WebSocket mode is excluded until its experimental support and authentication constraints are explicitly accepted.
 
-## 9. Phase 1 limitations
+## 9. Phase 2 limitations
 
-Phase 1 provides data integrity, deterministic runtime tests and private container services. It does not yet provide identity authentication, authorization, rate limiting, command policy enforcement, isolated Git workspaces, Secret Scanner, approval persistence or audit immutability. Those items remain open in the requirement matrix.
+Phase 2 provides data integrity, deterministic runtime tests, private database services and isolated Git clones. Identity authentication, authorization, rate limiting, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.

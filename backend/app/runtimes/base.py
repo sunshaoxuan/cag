@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -37,5 +38,6 @@ class AgentRuntime(Protocol):
         project_code: str,
         prompt: str,
         runtime_profile: str,
+        workspace_path: Path,
         emit: RuntimeEventCallback,
     ) -> RuntimeResult: ...

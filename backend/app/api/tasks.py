@@ -68,6 +68,8 @@ class TaskResponse(BaseModel):
     status: str
     final_report: dict[str, Any] | None
     error: str | None
+    workspace_id: str | None
+    workspace_commit: str | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -84,6 +86,8 @@ def to_response(task: Task) -> TaskResponse:
         status=task.status,
         final_report=task.final_report,
         error=task.error,
+        workspace_id=task.workspace_id,
+        workspace_commit=task.workspace_commit,
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,

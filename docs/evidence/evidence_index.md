@@ -1,6 +1,6 @@
 # Evidence index
 
-Version: 0.1.0
+Version: 0.2.0
 
 | Evidence | Purpose | Result |
 |---|---|---|
@@ -18,3 +18,13 @@ Version: 0.1.0
 | Live task SSE | Ordered runtime events | Sequences 1 through 6 |
 | Local Codex `login status` | Authentication boundary | Logged in using ChatGPT |
 | Local Codex help output | Installed capability | app-server and exec JSON available |
+| `docs/adr/0003-project-registry-and-task-workspaces.md` | Phase 2 identity and isolation decision | Accepted |
+| `backend/tests` | Phase 2 backend behavior | 18 passed, 94.05 percent coverage |
+| `frontend/src/App.test.tsx` | Task console component behavior | 3 passed |
+| Frontend production build | TypeScript and Vite output | Passed |
+| Project API smoke | YAML registry exposed through HTTP | Configured `cag` project returned |
+| Live workspace isolation | Two task clones | Distinct workspace IDs |
+| Live Phase 2 SSE | Ordered lifecycle | Sequences 1 through 8 |
+| `docs/evidence/screenshots/phase2-task-completed.png` | Browser task console | Completed task and report visible |
+| Browser console | UI runtime diagnostics | Zero warnings and errors |
+| `docs/evidence/phase2_test_results.md` | Phase 2 acceptance record | Passed |

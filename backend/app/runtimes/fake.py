@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
 
@@ -18,6 +19,7 @@ class FakeAgentRuntime:
         project_code: str,
         prompt: str,
         runtime_profile: str,
+        workspace_path: Path,
         emit: RuntimeEventCallback,
     ) -> RuntimeResult:
         await emit(
@@ -29,6 +31,7 @@ class FakeAgentRuntime:
                     "produce_report",
                 ],
                 "runtime": "fake",
+                "workspace_ready": workspace_path.is_dir(),
             },
         )
         await self._pause()

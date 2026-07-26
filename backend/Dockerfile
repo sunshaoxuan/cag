@@ -5,9 +5,14 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml alembic.ini ./
-COPY alembic ./alembic
-COPY app ./app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/pyproject.toml backend/alembic.ini ./
+COPY backend/alembic ./alembic
+COPY backend/app ./app
+COPY projects /projects
 
 RUN python -m pip install --no-cache-dir .
 

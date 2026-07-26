@@ -4,7 +4,7 @@
 
 Agent Gateway receives a project reference and natural language Prompt, resolves policy and runtime configuration, runs a local Codex agent in an isolated workspace, streams structured events, pauses for approvals, and stores auditable results.
 
-Phase 1 establishes the service boundary and validates task lifecycle behavior with a deterministic Fake Runtime.
+Phase 2 adds configuration-driven projects, one isolated Git clone per task, and a browser task console. Task lifecycle behavior remains deterministic through Fake Runtime until the local Codex adapter is enabled in Phase 3.
 
 ## 2. Runtime decision
 
@@ -23,7 +23,7 @@ Compatibility integration:
 * It reuses saved Codex CLI authentication.
 * It is suitable for controlled jobs where deep approval and conversation control are not required.
 
-Phase 1 integration:
+Phase 2 validation integration:
 
 * `FakeAgentRuntime` emits deterministic events and final output.
 * Tests never call Codex and never consume subscription credits.
@@ -61,19 +61,19 @@ Approval Service
 Task Store, Audit Log and Artifacts
 ```
 
-## 4. Phase 1 components
+## 4. Phase 2 components
 
 ### API
 
-FastAPI exposes health endpoints and the first Task API.
+FastAPI exposes health, Project and Task APIs. A React console submits tasks and renders named SSE events.
 
 ### Task service
 
-The service creates Project, Task and TaskEvent records in one transaction. It resolves the Phase 1 compatible project reference into a Project physical ID.
+The service loads `projects/*.yaml`, synchronizes configured Project metadata, creates Task and TaskEvent records, and resolves either a business Code or physical UUID into the stored Project physical ID.
 
 ### Task executor
 
-The executor changes a task from `queued` to `running`, invokes the selected runtime, stores every emitted event in sequence, and closes the task as `completed` or `failed`.
+The executor changes a task from `queued` to `preparing`, creates its isolated Git workspace, records the resolved commit, moves to `running`, invokes the selected runtime, stores every emitted event in sequence, and closes the task as `completed` or `failed`.
 
 ### Fake runtime
 
@@ -85,7 +85,19 @@ The SSE endpoint reads committed TaskEvent rows in sequence order. `after_sequen
 
 ### Persistence
 
-SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests. Alembic owns schema versioning. Phase 1 application startup can create missing tables for local development; production deployment runs Alembic before serving traffic.
+SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests. Alembic owns schema versioning through revision `20260727_0002`. Local development can create missing tables; container deployment runs Alembic before serving traffic.
+
+### Project registry
+
+Each YAML file declares a stable physical ID, business Code, repository, default branch, workspace mode, instruction files and permitted runtime profiles. Repository metadata is synchronized into PostgreSQL while strong references continue to use the physical ID.
+
+### Workspace manager
+
+The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only the configured default branch, resolves `HEAD`, and returns a public workspace identifier without returning the host filesystem path through the API.
+
+### Frontend
+
+The React console loads configured projects, submits a Prompt, subscribes to named SSE events, keeps them ordered by sequence, and retrieves the final task report on a terminal event.
 
 ## 5. Data identity
 
@@ -97,7 +109,7 @@ Every business record has an independent UUID physical ID.
 * `Task.conversation_id` references `Conversation.id`.
 * `TaskEvent.task_id` references `Task.id`.
 
-The Phase 1 request field `project_id` accepts a project UUID or project Code for compatibility with the source specification. Storage always uses the physical UUID. Responses expose `project_id` and `project_code`.
+The request field `project_id` accepts a project UUID or project Code for compatibility with the source specification. Storage always uses the physical UUID. Responses expose `project_id` and `project_code`.
 
 ## 6. Task lifecycle
 
@@ -106,13 +118,19 @@ POST /tasks
   |
 validate request
   |
-resolve or create development project
+resolve configured project
   |
 create queued task and task.created event
   |
 background executor
   |
 task.started
+  |
+workspace.preparing
+  |
+clone configured branch into task workspace
+  |
+workspace.ready
   |
 runtime events
   |
@@ -121,15 +139,15 @@ task.completed or task.failed
 
 Terminal states are `completed`, `failed`, and `cancelled`.
 
-## 7. Runtime isolation roadmap
+## 7. Runtime isolation
 
-Phase 2 will allocate one writable task workspace per writing task:
+Phase 2 allocates one writable Git clone per task:
 
 ```text
 workspaces/{project_id}/{task_id}
 ```
 
-The runtime receives only the task workspace plus explicitly allowed read paths. Concurrent writing tasks never share a Git worktree.
+The runtime receives its task workspace path. Concurrent tasks have distinct physical directories. Phase 4 will enforce the complete filesystem permission boundary for explicitly allowed read paths.
 
 ## 8. Security boundaries
 
@@ -142,7 +160,7 @@ The runtime receives only the task workspace plus explicitly allowed read paths.
 
 ## 9. Observability
 
-Phase 1 records task ID, project ID, event type, sequence and timestamp. Later phases add conversation ID, user ID, model, Prompt version, Skill version, tool calls, token usage, duration, approvals, Git diff and test artifacts. OpenTelemetry integration belongs to the observability phase.
+Phase 2 records task ID, project ID, workspace ID, workspace commit, event type, sequence and timestamp. Later phases add user ID, model, Prompt version, Skill version, token usage, duration, approvals, Git diff and test artifacts. OpenTelemetry integration belongs to the observability phase.
 
 ## 10. Defaults
 
@@ -155,3 +173,6 @@ Noncritical defaults are controlled by settings and recorded in ADR 0002:
 * Fake event delay: 25 milliseconds.
 * SSE poll interval: 100 milliseconds.
 * Runtime profile: `general-engineering`.
+* Project configuration directory: `projects`.
+* Workspace root: `workspaces`.
+* Workspace type: `git_clone`.

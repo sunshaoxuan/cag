@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.1.0 | Evidence |
+| Requirement | Status for 0.2.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -23,9 +23,9 @@ Legend:
 | Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events` |
 | Docker Compose | Implemented | `docker-compose.yml` |
 | Unit and API tests | Implemented | `backend/tests` |
-| Isolated Git workspace | Planned for Phase 2 | Acceptance test required |
-| Project YAML loader | Planned for Phase 2 | Acceptance test required |
-| Frontend task page | Planned for Phase 2 | Browser and screenshot validation required |
+| Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
+| Project YAML loader | Implemented | Project registry tests and live Project API |
+| Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
 | Local Codex app-server runtime | Planned for Phase 3 | Live subscription smoke test required |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
 | Runtime Profiles | Planned for Phase 4 | Permission intersection tests required |

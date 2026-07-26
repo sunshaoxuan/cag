@@ -1,12 +1,38 @@
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://127.0.0.1:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1/health
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
   gateway:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       AGENT_GATEWAY_ENVIRONMENT: container
       AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://agent_gateway:agent_gateway@postgres:5432/agent_gateway
       AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
       AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
+      AGENT_GATEWAY_PROJECTS_DIR: /projects
+      AGENT_GATEWAY_WORKSPACE_ROOT: /workspaces
       AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS: ${AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS:-25}
       AGENT_GATEWAY_LOG_LEVEL: ${AGENT_GATEWAY_LOG_LEVEL:-INFO}
     ports:
@@ -25,6 +51,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    volumes:
+      - agent_gateway_workspaces:/workspaces
 
   postgres:
     image: postgres:16-alpine
@@ -62,3 +90,4 @@ services:
 volumes:
   agent_gateway_postgres:
   agent_gateway_redis:
+  agent_gateway_workspaces:
