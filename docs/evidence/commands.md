@@ -96,3 +96,30 @@ GET  http://127.0.0.1:5173/health
 ```
 
 The task console was tested in the in-app browser at `http://127.0.0.1:5173`. Prompt submission, eight ordered events, final report, browser console and a full-page screenshot were checked.
+
+## Phase 3 local subscription validation
+
+Local capability and account boundary:
+
+```powershell
+codex.exe --version
+codex.exe login status
+codex.exe app-server generate-json-schema --experimental --out <task-temp-dir>
+```
+
+Host Gateway:
+
+```powershell
+.\scripts\run-local-codex-gateway.ps1
+```
+
+Live validation called:
+
+```text
+GET  http://127.0.0.1:8001/health/ready
+POST http://127.0.0.1:8001/api/v1/tasks
+GET  http://127.0.0.1:8001/api/v1/tasks/{task_id}
+GET  http://127.0.0.1:8001/api/v1/tasks/{task_id}/events?follow=false
+```
+
+The live Prompt requested one fixed response line under the read-only profile. The result was `GATEWAY_LOCAL_CODEX_SUBSCRIPTION_OK`.

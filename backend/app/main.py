@@ -8,6 +8,7 @@ from app.api.router import router
 from app.config import APP_NAME, APP_VERSION, Settings, get_settings
 from app.database import Database
 from app.runtimes.base import AgentRuntime
+from app.runtimes.codex_app_server import CodexAppServerRuntime
 from app.runtimes.fake import FakeAgentRuntime
 from app.projects.registry import ProjectRegistry
 from app.services.task_service import TaskService
@@ -28,9 +29,36 @@ def create_app(
         git_executable=active_settings.git_executable,
         prepare_timeout_seconds=active_settings.workspace_prepare_timeout_seconds,
     )
-    active_runtime = runtime or FakeAgentRuntime(
-        delay_ms=active_settings.fake_runtime_delay_ms
-    )
+    if runtime is not None:
+        active_runtime = runtime
+    elif active_settings.runtime_provider == "fake":
+        active_runtime = FakeAgentRuntime(
+            delay_ms=active_settings.fake_runtime_delay_ms
+        )
+    elif active_settings.runtime_provider == "codex-app-server":
+        if active_settings.codex_executable is None:
+            raise ValueError(
+                "AGENT_GATEWAY_CODEX_EXECUTABLE is required for "
+                "codex-app-server"
+            )
+        active_runtime = CodexAppServerRuntime(
+            command=[
+                str(active_settings.codex_executable),
+                "app-server",
+                "--stdio",
+            ],
+            startup_timeout_seconds=(
+                active_settings.codex_startup_timeout_seconds
+            ),
+            turn_timeout_seconds=active_settings.codex_turn_timeout_seconds,
+            require_chatgpt_auth=(
+                active_settings.codex_require_chatgpt_auth
+            ),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported runtime provider: {active_settings.runtime_provider}"
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

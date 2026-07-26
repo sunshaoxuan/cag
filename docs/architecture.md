@@ -4,7 +4,7 @@
 
 Agent Gateway receives a project reference and natural language Prompt, resolves policy and runtime configuration, runs a local Codex agent in an isolated workspace, streams structured events, pauses for approvals, and stores auditable results.
 
-Phase 2 adds configuration-driven projects, one isolated Git clone per task, and a browser task console. Task lifecycle behavior remains deterministic through Fake Runtime until the local Codex adapter is enabled in Phase 3.
+Phase 3 adds a real local Codex app-server adapter authenticated through the existing ChatGPT subscription session. Configuration-driven projects, isolated task clones and the browser console remain the execution foundation.
 
 ## 2. Runtime decision
 
@@ -23,10 +23,19 @@ Compatibility integration:
 * It reuses saved Codex CLI authentication.
 * It is suitable for controlled jobs where deep approval and conversation control are not required.
 
-Phase 2 validation integration:
+Validation integration:
 
 * `FakeAgentRuntime` emits deterministic events and final output.
 * Tests never call Codex and never consume subscription credits.
+
+Phase 3 production-path integration:
+
+* One local `codex app-server --stdio` child process is started per Gateway task.
+* The Gateway performs protocol initialization and then calls `account/read`.
+* The task is rejected unless the reported account type is `chatgpt`.
+* A Codex thread and turn run inside the task workspace.
+* App-server notifications map into durable Gateway events and a structured final report.
+* The Gateway never reads the Codex credential store.
 
 The detailed decision and verified local capability are recorded in [ADR 0001](adr/0001-local-codex-runtime.md).
 
@@ -61,7 +70,7 @@ Approval Service
 Task Store, Audit Log and Artifacts
 ```
 
-## 4. Phase 2 components
+## 4. Phase 3 components
 
 ### API
 
@@ -98,6 +107,12 @@ The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only th
 ### Frontend
 
 The React console loads configured projects, submits a Prompt, subscribes to named SSE events, keeps them ordered by sequence, and retrieves the final task report on a terminal event.
+
+### Local Codex app-server runtime
+
+The adapter communicates through stdio JSONL. It declares the experimental API capability required by `runtimeWorkspaceRoots`, verifies ChatGPT authentication, creates an ephemeral thread and starts one turn.
+
+`read-only-analysis` selects the read-only sandbox. Other Phase 3 profiles select workspace-write. Approval policy remains `never` until durable pause and resume support is released in Phase 5. Any approval callback is declined and recorded.
 
 ## 5. Data identity
 
@@ -169,7 +184,8 @@ Noncritical defaults are controlled by settings and recorded in ADR 0002:
 * Development database: local SQLite file.
 * Container database: PostgreSQL 16.
 * Redis: Redis 7.
-* Runtime: Fake Runtime until the local Codex adapter is enabled.
+* Container runtime: Fake Runtime for deterministic tests.
+* Host runtime: `codex-app-server` when started through `scripts/run-local-codex-gateway.ps1`.
 * Fake event delay: 25 milliseconds.
 * SSE poll interval: 100 milliseconds.
 * Runtime profile: `general-engineering`.

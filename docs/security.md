@@ -13,11 +13,13 @@ The runtime reuses the locally saved Codex CLI session created by `codex login` 
 Rules:
 
 * The Gateway checks only whether Codex reports an authenticated state.
+* Phase 3 requires app-server `account/read` to report account type `chatgpt`.
 * The Gateway does not open or parse `auth.json`.
 * The Gateway does not copy credential files into task workspaces or containers.
 * Credential contents never enter prompts, logs, events, artifacts or database rows.
 * Codex app-server is started locally and is not exposed directly to untrusted networks.
 * A remote app-server listener requires TLS and transport authentication.
+* `OPENAI_API_KEY` is neither read nor accepted as the Phase 3 authentication boundary.
 
 ## 3. Secrets
 
@@ -75,6 +77,8 @@ High-risk actions create a durable approval request and suspend the task. Approv
 
 Protected branch push and production deployment remain forbidden defaults. Project administrators may define stricter policies.
 
+Phase 3 runs app-server with approval policy `never`. If an approval callback still arrives, the adapter declines it and records the decision. Durable pause, human resolution and resume are Phase 5 work.
+
 ## 7. Workspace isolation
 
 Each writing task receives its own Git clone or worktree. The executor prevents two writing tasks from sharing one Git working directory. Task processes receive explicit filesystem roots and resource limits.
@@ -92,4 +96,4 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 
 ## 9. Phase 2 limitations
 
-Phase 2 provides data integrity, deterministic runtime tests, private database services and isolated Git clones. Identity authentication, authorization, rate limiting, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.
+Phase 3 adds a ChatGPT-authenticated local Codex runtime and conservative approval rejection. Identity authentication, authorization, rate limiting, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.

@@ -1,6 +1,6 @@
 # Evidence index
 
-Version: 0.2.0
+Version: 0.3.0
 
 | Evidence | Purpose | Result |
 |---|---|---|
@@ -28,3 +28,9 @@ Version: 0.2.0
 | `docs/evidence/screenshots/phase2-task-completed.png` | Browser task console | Completed task and report visible |
 | Browser console | UI runtime diagnostics | Zero warnings and errors |
 | `docs/evidence/phase2_test_results.md` | Phase 2 acceptance record | Passed |
+| Generated installed app-server schemas | Current local protocol contract | Inspected |
+| `backend/tests/test_codex_app_server_runtime.py` | Protocol mapping and auth enforcement | Passed |
+| Direct local app-server turn | ChatGPT subscription execution | Completed |
+| Live Gateway local Codex task | HTTP through workspace and app-server | Completed |
+| `docs/adr/0004-app-server-chatgpt-runtime.md` | Phase 3 runtime decision | Accepted |
+| `docs/evidence/phase3_test_results.md` | Phase 3 acceptance record | Passed |

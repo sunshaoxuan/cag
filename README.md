@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.2.0`，对应规格中的 Phase 2。
+当前版本为 `0.3.0`，对应规格中的 Phase 3。
 
 已实现：
 
@@ -13,12 +13,14 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 * 每个任务独占的 Git 克隆工作区。
 * 创建任务、查询任务和 8 类顺序 SSE 事件。
 * React 任务控制台与最终报告页面。
+* 本机 Codex app-server 适配器。
+* ChatGPT 账户类型强制校验。
+* app-server 通知到 Gateway 事件与最终报告的转换。
 * Docker Compose 中的前端、Gateway、PostgreSQL 和 Redis。
 * 不消耗 Codex 或 OpenAI 配额的自动化与浏览器测试。
 
 规划中：
 
-* Phase 3 本地 Codex app-server 运行时。
 * Phase 4 Skill、Runtime Profile 和工具策略。
 * Phase 5 审批、Git diff 和 Artifact。
 * Phase 6 MCP 与外部系统工具。
@@ -37,6 +39,16 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 3. `FakeAgentRuntime` 用于测试和无配额验证。
 
 当前本机调查记录见 [本地 Codex 运行时 ADR](docs/adr/0001-local-codex-runtime.md)。
+
+## 启动本机订阅运行时
+
+先安装后端开发依赖并确认本机 Codex 已通过 ChatGPT 登录，然后运行：
+
+```powershell
+.\scripts\run-local-codex-gateway.ps1
+```
+
+该脚本检查 `codex login status`，设置 `codex-app-server` 运行时并启动 Gateway。它不会读取 Codex 凭据文件，也不会要求 API Key。
 
 ## 本地启动
 
@@ -71,7 +83,7 @@ docker compose up --build
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
-浏览器任务控制台地址为 `http://127.0.0.1:5173`。
+浏览器任务控制台地址为 `http://127.0.0.1:5173`。默认 Compose Gateway 使用 Fake Runtime，适合无配额的确定性测试。本机订阅运行时通过上面的主机脚本启动。
 
 ## 测试
 

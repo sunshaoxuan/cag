@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tomllib
 
 from app.config import APP_VERSION
@@ -10,6 +11,12 @@ def test_version_is_consistent_across_release_files() -> None:
     pyproject = tomllib.loads(
         (repository_root / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     )
+    frontend_package = json.loads(
+        (repository_root / "frontend" / "package.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert APP_VERSION == version_file
     assert pyproject["project"]["version"] == version_file
+    assert frontend_package["version"] == version_file

@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.2.0 | Evidence |
+| Requirement | Status for 0.3.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -26,7 +26,7 @@ Legend:
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
-| Local Codex app-server runtime | Planned for Phase 3 | Live subscription smoke test required |
+| Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
 | Runtime Profiles | Planned for Phase 4 | Permission intersection tests required |
 | Command Policy Engine | Planned for Phase 4 | Safe, approval and forbidden tests required |

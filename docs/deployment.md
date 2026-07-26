@@ -1,6 +1,6 @@
 # Deployment
 
-## Phase 2 development deployment
+## Phase 3 development deployment
 
 Requirements:
 
@@ -65,15 +65,33 @@ The cloned commit SHA is persisted with the Task. Named volumes are retained by 
 
 ## Local Codex runtime prerequisites
 
-Phase 3 deployment will require:
+Local subscription execution requires:
 
 1. A supported local Codex CLI.
 2. A completed `codex login` ChatGPT browser flow.
-3. `codex login status` reporting a ChatGPT login.
+3. `codex login status` reporting `Logged in using ChatGPT`.
 4. `codex app-server` support.
 5. A private `CODEX_HOME` policy that prevents task workspaces from reading credential material.
 
-The Codex process runs on the trusted host. A containerized Gateway will require a dedicated host-side runtime bridge because ChatGPT credentials are intentionally not copied into containers.
+The Codex process runs on the trusted host. Start the host Gateway with:
+
+```powershell
+.\scripts\run-local-codex-gateway.ps1
+```
+
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`.
+
+The default Compose Gateway explicitly uses Fake Runtime. A future container deployment requires a dedicated authenticated host-side runtime bridge because ChatGPT credentials are not copied into containers.
+
+## Local runtime settings
+
+| Setting | Purpose |
+|---|---|
+| `AGENT_GATEWAY_RUNTIME_PROVIDER` | `fake` or `codex-app-server` |
+| `AGENT_GATEWAY_CODEX_EXECUTABLE` | Callable local Codex executable |
+| `AGENT_GATEWAY_CODEX_STARTUP_TIMEOUT_SECONDS` | Protocol initialization timeout |
+| `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
+| `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
 
 ## Production gate
 

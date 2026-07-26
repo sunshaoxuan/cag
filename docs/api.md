@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.2.0`
+Current version: `0.3.0`
 
 ## Conventions
 
@@ -24,7 +24,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
 ```
 
@@ -138,6 +138,21 @@ agent.message
 test.completed
 task.completed
 ```
+
+The local Codex runtime additionally emits event types derived from app-server notifications:
+
+```text
+runtime.connected
+agent.plan
+agent.message
+command.started
+command.completed
+file.changed
+approval.requested
+approval.resolved
+```
+
+`runtime.connected` contains the runtime provider and authentication type. It never contains tokens, credential paths or account email.
 
 ## Planned endpoints
 
