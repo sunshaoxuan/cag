@@ -1,0 +1,64 @@
+services:
+  gateway:
+    build:
+      context: ./backend
+    environment:
+      AGENT_GATEWAY_ENVIRONMENT: container
+      AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://agent_gateway:agent_gateway@postgres:5432/agent_gateway
+      AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
+      AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
+      AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS: ${AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS:-25}
+      AGENT_GATEWAY_LOG_LEVEL: ${AGENT_GATEWAY_LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_gateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_gateway}
+    volumes:
+      - agent_gateway_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pg_isready -U ${POSTGRES_USER:-agent_gateway} -d ${POSTGRES_DB:-agent_gateway}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - agent_gateway_redis:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  agent_gateway_postgres:
+  agent_gateway_redis:
