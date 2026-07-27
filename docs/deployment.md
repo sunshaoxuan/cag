@@ -83,6 +83,16 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 
 The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. It handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
+For an interactive desktop test that must remain available after the launching shell exits, register and start the on-demand background task:
+
+```powershell
+.\scripts\manage-local-codex-gateway-task.ps1 start
+```
+
+Use the same script with `status`, `stop` or `uninstall` to inspect, stop or remove the background task. The task has no automatic trigger and runs only when explicitly started. Status and stop operations verify the actual port listener because the Windows virtual-environment launcher can leave the runtime Python child active after the scheduler action completes.
+
+The host Gateway stores its SQLite runtime state under `workspaces/.gateway`, which is excluded from version control. An explicit `AGENT_GATEWAY_DATABASE_URL` value takes precedence.
+
 When sibling directory `D:\workspace\codex-selfimp` exists, the script configures it as the self-improvement root. An explicit `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` value takes precedence.
 
 The default Compose Gateway explicitly uses Fake Runtime. A future container deployment requires a dedicated authenticated host-side runtime bridge because ChatGPT credentials are not copied into containers.

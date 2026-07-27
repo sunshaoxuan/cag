@@ -44,6 +44,16 @@ $env:AGENT_GATEWAY_RUNTIME_PROVIDER = "codex-app-server"
 $env:AGENT_GATEWAY_CODEX_EXECUTABLE = $CodexExecutable
 $env:AGENT_GATEWAY_PROJECTS_DIR = Join-Path $repositoryRoot "projects"
 $env:AGENT_GATEWAY_WORKSPACE_ROOT = Join-Path $repositoryRoot "workspaces"
+if (-not $env:AGENT_GATEWAY_DATABASE_URL) {
+    $gatewayStateRoot = Join-Path $repositoryRoot "workspaces\.gateway"
+    New-Item -ItemType Directory -Path $gatewayStateRoot -Force | Out-Null
+    $gatewayDatabasePath = (
+        Join-Path $gatewayStateRoot "agent_gateway.db"
+    ).Replace("\", "/")
+    $env:AGENT_GATEWAY_DATABASE_URL = (
+        "sqlite+pysqlite:///$gatewayDatabasePath"
+    )
+}
 if (-not $env:AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT) {
     $selfImprovementRoot = Join-Path (Split-Path $repositoryRoot -Parent) "codex-selfimp"
     if (Test-Path -LiteralPath $selfImprovementRoot -PathType Container) {
