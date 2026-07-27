@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -95,6 +96,7 @@ class KnowledgeSource(PhysicalIdMixin, Base):
         String(32), default=KnowledgeStatus.DRAFT, index=True
     )
     source_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approved_for_codex: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -117,6 +119,8 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     files_seen: Mapped[int] = mapped_column(Integer, default=0)
     chunks_written: Mapped[int] = mapped_column(Integer, default=0)
     rejected_files: Mapped[int] = mapped_column(Integer, default=0)
+    unchanged_files: Mapped[int] = mapped_column(Integer, default=0)
+    vectors_reused: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(
@@ -145,6 +149,13 @@ class KnowledgeIngestionEvent(PhysicalIdMixin, Base):
 
 class KnowledgeDocument(PhysicalIdMixin, Base):
     __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "canonical_path",
+            name="uq_knowledge_documents_source_path",
+        ),
+    )
 
     source_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
@@ -161,6 +172,13 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
 
 class KnowledgeChunk(PhysicalIdMixin, Base):
     __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "ordinal",
+            name="uq_knowledge_chunks_document_ordinal",
+        ),
+    )
 
     document_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True

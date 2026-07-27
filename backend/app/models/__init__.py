@@ -19,12 +19,27 @@ from app.models.knowledge import (
     Tenant,
 )
 from app.models.project import Project
+from app.models.harness import (
+    AgentArtifact,
+    AgentRun,
+    ApprovalRequest,
+    HarnessProfile,
+    HarnessRun,
+    LearningSignal,
+    QualityScore,
+    ReviewFinding,
+    TaskGraphNode,
+    VerificationRun,
+)
 from app.models.task import Task, TaskStatus
 from app.models.task_event import TaskEvent
 
 __all__ = [
     "Base",
     "Conversation",
+    "AgentArtifact",
+    "AgentRun",
+    "ApprovalRequest",
     "DataQualityMetric",
     "KnowledgeChunk",
     "KnowledgeConflict",
@@ -35,14 +50,21 @@ __all__ = [
     "KnowledgeSource",
     "KnowledgeStatus",
     "KnowledgeUsage",
+    "HarnessRun",
+    "HarnessProfile",
+    "LearningSignal",
     "MemoryCandidate",
     "MemoryStatus",
     "Product",
     "ProductVersion",
     "Project",
+    "QualityScore",
+    "ReviewFinding",
     "RiskRecord",
     "Task",
     "TaskEvent",
     "TaskStatus",
+    "TaskGraphNode",
     "Tenant",
+    "VerificationRun",
 ]

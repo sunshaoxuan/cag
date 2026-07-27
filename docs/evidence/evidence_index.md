@@ -60,3 +60,8 @@ Version: 0.4.0
 | Managed Ollama container | Private listener and pinned image | 0.23.3 |
 | Real local Ollama RAG smoke | Ingestion, search, citation and memory | Passed |
 | `docs/evidence/enterprise_knowledge_test_results.md` | 0.5.0 acceptance record | Passed |
+| `docs/agent-harness.md` | 0.6.0 Harness architecture and policy boundary | Implemented |
+| `docs/adr/0008-governed-parallel-agent-harness.md` | Parallel role and single writer decision | Accepted |
+| `docs/evidence/agent_harness_test_results.md` | 0.6.0 automated acceptance | Passed |
+| `docs/evidence/AGENT_HARNESS_FINAL_RECEIPT.md` | 0.6.0 release receipt | Passed |
+| `docs/evidence/screenshots/agent-harness-0.6.0.png` | Balanced Harness browser acceptance | Passed |

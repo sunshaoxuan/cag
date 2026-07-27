@@ -1,6 +1,8 @@
 # Deployment
 
-## 0.5.0 development deployment
+## 0.6.0 development deployment
+
+Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
 Requirements:
 

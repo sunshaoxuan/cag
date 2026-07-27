@@ -9,6 +9,7 @@ from app.runtimes.base import AgentRuntime
 from app.services.task_service import TaskNotFoundError, TaskService
 from app.workspaces.manager import WorkspaceManager
 from app.knowledge.service import KnowledgeService
+from app.harness.service import AgentHarness
 
 
 class TaskExecutor:
@@ -20,6 +21,7 @@ class TaskExecutor:
         workspace_manager: WorkspaceManager,
         self_improvement_root: Path | None = None,
         knowledge_service: KnowledgeService | None = None,
+        harness: AgentHarness | None = None,
     ) -> None:
         self._database = database
         self._runtime = runtime
@@ -27,6 +29,8 @@ class TaskExecutor:
         self._workspace_manager = workspace_manager
         self._self_improvement_root = self_improvement_root
         self._knowledge_service = knowledge_service
+        self._harness = harness
+        self._event_lock = asyncio.Lock()
 
     async def execute(self, task_id: str) -> None:
         with self._database.session_factory() as session:
@@ -47,6 +51,8 @@ class TaskExecutor:
             prompt = task.prompt
             runtime_profile = task.runtime_profile
             knowledge_mode = task.knowledge_mode
+            harness_profile = task.harness_profile
+            learning_mode = task.learning_mode
             conversation_id = task.conversation_id
             conversation_thread_id = (
                 task.conversation.codex_thread_id
@@ -177,7 +183,7 @@ class TaskExecutor:
             )
 
         try:
-            result = await self._runtime.execute(
+            runtime_arguments = dict(
                 task_id=task_id,
                 project_code=project_code,
                 prompt=prompt,
@@ -189,6 +195,24 @@ class TaskExecutor:
                 developer_instructions=developer_instructions,
                 emit=emit,
             )
+            if harness_profile == "single":
+                result = await self._runtime.execute(**runtime_arguments)
+            else:
+                if self._harness is None:
+                    raise RuntimeError("Agent Harness is not configured")
+                result = await self._harness.execute(
+                    task_id=task_id,
+                    project_code=project_code,
+                    project=project_config,
+                    prompt=prompt,
+                    harness_profile=harness_profile,
+                    persistent_conversation=conversation_id is not None,
+                    conversation_thread_id=conversation_thread_id,
+                    workspace_path=workspace.path,
+                    additional_workspace_roots=additional_workspace_roots,
+                    developer_instructions=developer_instructions,
+                    emit=emit,
+                )
         except Exception as exc:
             await self._fail_task(task_id, str(exc))
             return
@@ -203,7 +227,8 @@ class TaskExecutor:
             session.commit()
 
         if (
-            knowledge_mode != "off"
+            learning_mode != "off"
+            and knowledge_mode != "off"
             and self._knowledge_service is not None
             and self._knowledge_service.configured
         ):
@@ -251,15 +276,16 @@ class TaskExecutor:
         event_type: str,
         data: dict[str, Any],
     ) -> None:
-        with self._database.session_factory() as event_session:
-            event_task = self._task_service.get_task(event_session, task_id)
-            self._task_service.append_event(
-                event_session,
-                task=event_task,
-                event_type=event_type,
-                data=data,
-            )
-            event_session.commit()
+        async with self._event_lock:
+            with self._database.session_factory() as event_session:
+                event_task = self._task_service.get_task(event_session, task_id)
+                self._task_service.append_event(
+                    event_session,
+                    task=event_task,
+                    event_type=event_type,
+                    data=data,
+                )
+                event_session.commit()
 
     async def _fail_task(self, task_id: str, error: str) -> None:
         with self._database.session_factory() as session:

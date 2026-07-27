@@ -114,6 +114,8 @@ class TaskService:
         conversation_id: str | None,
         runtime_profile: str,
         knowledge_mode: str = "assist",
+        harness_profile: str = "single",
+        learning_mode: str = "capture",
     ) -> Task:
         project = self.resolve_project(session, project_reference)
         project_config = self.project_registry.resolve(project_reference)
@@ -142,6 +144,8 @@ class TaskService:
             prompt=prompt,
             runtime_profile=runtime_profile,
             knowledge_mode=knowledge_mode,
+            harness_profile=harness_profile,
+            learning_mode=learning_mode,
         )
         session.add(task)
         session.flush()
@@ -154,6 +158,8 @@ class TaskService:
                 "project_code": project.code,
                 "runtime_profile": runtime_profile,
                 "knowledge_mode": knowledge_mode,
+                "harness_profile": harness_profile,
+                "learning_mode": learning_mode,
             },
         )
         session.commit()

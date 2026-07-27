@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.5.0`。本机订阅 Codex、持续会话、企业知识平面和受控自增强候选已经形成可运行基础。
+当前版本为 `0.6.0`。本机订阅 Codex、持续会话、企业知识平面、并行 Agent Harness、命令策略和持久化审批已经形成可运行基础。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -30,10 +30,10 @@ CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划�
 
 规划中：
 
-* 0.6.0 并行 Agent Harness、完整 Runtime Profile 和工具策略。
-* Phase 5 审批、Git diff 和 Artifact。
+* 0.6.0 提供 `single`、`fast`、`balanced`、`deep` Harness Profile、结构化 Artifact、独立复核和统一 SSE。
+* 持久化审批、Command Policy Engine、单写者规则和并发限额。
 * Phase 6 MCP 与外部系统工具。
-* Phase 7 Skill 改进提案和评测闭环。
+* 0.7.0 Skill、Tool、Validator 和 Harness Profile 改进提案、评测、灰度提升及回滚闭环。
 
 完整状态见 [需求矩阵](docs/requirements-matrix.md)。
 

@@ -5,6 +5,9 @@ from typing import Any, Protocol
 
 
 RuntimeEventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+RuntimeApprovalCallback = Callable[
+    [str, str], Awaitable[tuple[str, str | None]]
+]
 
 
 @dataclass(frozen=True)
@@ -45,4 +48,5 @@ class AgentRuntime(Protocol):
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        request_approval: RuntimeApprovalCallback | None = None,
     ) -> RuntimeResult: ...

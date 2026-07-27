@@ -34,6 +34,10 @@ local memory candidate extraction
 
 The initial implementation supports code, Markdown and common text source files. Build outputs, dependencies, binaries, Git metadata and files over two megabytes are excluded.
 
+## Idempotent vector index
+
+Every cleaned file is identified by source physical ID, canonical relative path and SHA 256 content hash. A source fingerprint is derived from the sorted path and hash set. Repeating ingestion with the same fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files replace only their own chunks. Removed files delete their indexed documents. Database uniqueness on source plus path and document plus ordinal prevents duplicate results.
+
 ## Scope rules
 
 Tenant chunks match only the current Project Tenant physical ID. Product chunks match the current ProductVersion physical ID. A source becomes retrievable only after local indexing and explicit Codex approval.

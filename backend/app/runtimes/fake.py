@@ -25,6 +25,7 @@ class FakeAgentRuntime:
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        request_approval=None,
     ) -> RuntimeResult:
         await emit(
             "agent.plan",

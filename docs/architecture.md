@@ -4,7 +4,7 @@
 
 Agent Gateway receives a project reference and natural language Prompt, resolves policy and runtime configuration, runs a local Codex agent in an isolated workspace, streams structured events, pauses for approvals, and stores auditable results.
 
-Version 0.5.0 adds the governed enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. ChatGPT-authenticated Codex remains the engineering Agent runtime.
+Version 0.6.0 adds the governed parallel Agent Harness around the enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. ChatGPT-authenticated Codex remains the engineering Agent runtime. CAG owns child scheduling, single-writer enforcement, Artifact persistence, approval and unified SSE.
 
 ## 2. Runtime decision
 
@@ -120,7 +120,7 @@ Feedback controls are frontend projections over the complete CAG event sequence.
 
 The adapter communicates through stdio JSONL. It declares the experimental API capability required by `runtimeWorkspaceRoots`, verifies ChatGPT authentication and selects `thread/start` or `thread/resume` from the CAG Conversation mapping.
 
-`read-only-analysis` selects the read-only sandbox. Other Phase 3 profiles select workspace-write. Approval policy remains `never` until durable pause and resume support is released in Phase 5. Any approval callback is declined and recorded.
+`read-only-analysis` selects the read-only sandbox. Executor selects workspace-write. Version 0.6.0 uses app-server approval policy `untrusted` when the persistent approval callback is configured. Command Policy Engine allows mechanical verification commands, denies destructive patterns and pauses other commands for a stored decision.
 
 ### Self-improvement candidate profile
 

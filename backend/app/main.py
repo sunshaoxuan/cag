@@ -17,6 +17,9 @@ from app.workspaces.manager import WorkspaceManager
 from app.knowledge.ollama import OllamaClient
 from app.knowledge.security import load_knowledge_cipher
 from app.knowledge.service import KnowledgeService
+from app.approvals.service import ApprovalService
+from app.harness.service import AgentHarness
+from app.policies.command_policy import CommandPolicyService
 
 
 def create_app(
@@ -74,6 +77,20 @@ def create_app(
         raise ValueError(
             f"Unsupported runtime provider: {active_settings.runtime_provider}"
         )
+    approval_service = ApprovalService(
+        database=database,
+        task_service=task_service,
+        policy=CommandPolicyService(),
+        timeout_seconds=active_settings.approval_timeout_seconds,
+    )
+    harness = AgentHarness(
+        database=database,
+        runtime=active_runtime,
+        workspace_manager=workspace_manager,
+        approval_service=approval_service,
+        max_parallel_agents=active_settings.harness_max_parallel_agents,
+        agent_timeout_seconds=active_settings.harness_agent_timeout_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -95,6 +112,8 @@ def create_app(
     application.state.project_registry = project_registry
     application.state.task_service = task_service
     application.state.knowledge_service = knowledge_service
+    application.state.approval_service = approval_service
+    application.state.harness = harness
     application.state.task_executor = TaskExecutor(
         database=database,
         runtime=active_runtime,
@@ -102,12 +121,15 @@ def create_app(
         workspace_manager=workspace_manager,
         self_improvement_root=active_settings.self_improvement_root,
         knowledge_service=knowledge_service,
+        harness=harness,
     )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
         ],
         allow_credentials=False,
         allow_methods=["GET", "POST"],

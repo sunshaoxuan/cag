@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
@@ -13,6 +14,7 @@ from app.knowledge.security import (
 )
 from app.knowledge.service import KnowledgeService
 from app.main import create_app
+from app.models import KnowledgeChunk, KnowledgeDocument
 from app.tasks.executor import TaskExecutor
 
 
@@ -120,6 +122,24 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         )
         assert ingestion.json()["status"] == "completed"
         assert ingestion.json()["chunks_written"] == 1
+        embedded_after_first_ingestion = len(
+            service._provider.embedded_texts
+        )
+
+        repeated_response = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        )
+        repeated = client.get(
+            f"/api/v1/knowledge/ingestions/{repeated_response.json()['id']}"
+        ).json()
+        assert repeated["status"] == "completed"
+        assert repeated["chunks_written"] == 0
+        assert repeated["unchanged_files"] == 1
+        assert repeated["vectors_reused"] == 1
+        assert len(service._provider.embedded_texts) == embedded_after_first_ingestion
+        with app.state.database.session_factory() as session:
+            assert session.scalar(select(func.count(KnowledgeDocument.id))) == 1
+            assert session.scalar(select(func.count(KnowledgeChunk.id))) == 1
 
         search = client.post(
             "/api/v1/knowledge/search",

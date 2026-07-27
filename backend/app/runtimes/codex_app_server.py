@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import APP_VERSION
-from app.runtimes.base import RuntimeEventCallback, RuntimeResult
+from app.runtimes.base import RuntimeApprovalCallback, RuntimeEventCallback, RuntimeResult
 
 
 class CodexAppServerError(RuntimeError):
@@ -41,6 +41,7 @@ class CodexAppServerRuntime:
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        request_approval: RuntimeApprovalCallback | None = None,
     ) -> RuntimeResult:
         process = await asyncio.create_subprocess_exec(
             *self._command,
@@ -98,15 +99,44 @@ class CodexAppServerRuntime:
                 "applyPatchApproval",
                 "execCommandApproval",
             }:
-                approvals.append({"method": method, "decision": "decline"})
+                request_type = (
+                    "file_change"
+                    if "fileChange" in method or "applyPatch" in method
+                    else "command"
+                )
+                params = message.get("params") or {}
+                subject = str(
+                    params.get("command")
+                    or params.get("reason")
+                    or params.get("changes")
+                    or method
+                )
+                if request_approval is None:
+                    decision, approval_id = "decline", None
+                else:
+                    decision, approval_id = await request_approval(
+                        request_type, subject
+                    )
+                approval_record = {"method": method, "decision": decision}
+                if approval_id is not None:
+                    approval_record["approval_id"] = approval_id
+                approvals.append(approval_record)
                 await emit(
                     "approval.requested",
-                    {"method": method, "automatic_decision": "decline"},
+                    {
+                        "method": method,
+                        "subject": subject,
+                        "approval_id": approval_id,
+                    },
                 )
-                await send({"id": request_id, "result": {"decision": "decline"}})
+                await send({"id": request_id, "result": {"decision": decision}})
                 await emit(
                     "approval.resolved",
-                    {"method": method, "decision": "decline"},
+                    {
+                        "method": method,
+                        "decision": decision,
+                        "approval_id": approval_id,
+                    },
                 )
                 return
             if method == "item/tool/requestUserInput":
@@ -340,7 +370,7 @@ class CodexAppServerRuntime:
                     "cwd": str(workspace_path),
                     "runtimeWorkspaceRoots": runtime_workspace_roots,
                     "sandbox": sandbox,
-                    "approvalPolicy": "never",
+                    "approvalPolicy": "untrusted" if request_approval else "never",
                     "ephemeral": not persistent_conversation,
                     "serviceName": f"agent-gateway:{project_code}",
                     "developerInstructions": developer_instructions,
@@ -352,7 +382,7 @@ class CodexAppServerRuntime:
                     "cwd": str(workspace_path),
                     "runtimeWorkspaceRoots": runtime_workspace_roots,
                     "sandbox": sandbox,
-                    "approvalPolicy": "never",
+                    "approvalPolicy": "untrusted" if request_approval else "never",
                     "developerInstructions": developer_instructions,
                 }
             thread_result = await request(
@@ -379,7 +409,7 @@ class CodexAppServerRuntime:
                     "input": [{"type": "text", "text": prompt}],
                     "cwd": str(workspace_path),
                     "runtimeWorkspaceRoots": runtime_workspace_roots,
-                    "approvalPolicy": "never",
+                    "approvalPolicy": "untrusted" if request_approval else "never",
                 },
                 timeout=self._startup_timeout_seconds,
             )

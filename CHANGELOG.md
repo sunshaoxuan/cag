@@ -2,6 +2,28 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.6.0
+
+发布日期：2026-07-27
+
+### Added
+
+* `single`、`fast`、`balanced` 和 `deep` Agent Harness Profile。
+* 并行只读调查、唯一写入 Executor、独立 Review 和 Validator 运行。
+* HarnessRun、AgentRun、TaskGraphNode、AgentArtifact、ReviewFinding、VerificationRun、QualityScore 和 LearningSignal 记录。
+* Command Policy Engine 和持久化 ApprovalRequest 生命周期。
+* Harness、子 Agent、审批、复核和质量公共接口。
+* 汇入单一 Task SSE 的子 Agent 事实事件。
+* 前端 Harness Profile、学习模式和实时子 Agent 状态。
+* pgvector 向量库约束、来源指纹和文件内容哈希驱动的幂等增量索引。
+* 未变化文件复用原有文档、分块和向量，变化文件独立重建，删除文件清理索引。
+
+### Validated
+
+* 47 个后端测试通过，覆盖率 87.72%。
+* 并发 Agent、单写者、Artifact、策略判定、审批和事件顺序使用 Fake Runtime 验证。
+* 5 个前端测试及生产构建通过。
+
 ## 0.5.0
 
 发布日期：2026-07-27

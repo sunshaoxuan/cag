@@ -27,6 +27,14 @@ const EVENT_TYPES = [
   "task.started",
   "workspace.preparing",
   "workspace.ready",
+  "harness.started",
+  "harness.preflight.completed",
+  "harness.synthesis.completed",
+  "agent.run.queued",
+  "agent.run.started",
+  "agent.run.completed",
+  "agent.run.failed",
+  "harness.completed",
   "knowledge.retrieval.started",
   "knowledge.retrieval.completed",
   "knowledge.context.injected",
@@ -67,6 +75,14 @@ const EVENT_LABELS: Record<string, string> = {
   "task.started": "本轮已启动",
   "workspace.preparing": "正在准备独立工作区",
   "workspace.ready": "工作区已就绪",
+  "harness.started": "Harness 已启动",
+  "harness.preflight.completed": "Harness 预检完成",
+  "harness.synthesis.completed": "调查证据已汇总",
+  "agent.run.queued": "子 Agent 已排队",
+  "agent.run.started": "子 Agent 已启动",
+  "agent.run.completed": "子 Agent 已完成",
+  "agent.run.failed": "子 Agent 运行失败",
+  "harness.completed": "Harness 已完成",
   "runtime.connected": "本机 Codex 已连接",
   "runtime.thread": "Codex 会话已连接",
   "knowledge.retrieval.started": "正在检索企业知识",
@@ -121,6 +137,10 @@ const DELTA_EVENT_TYPES = new Set([
 const ESSENTIAL_EVENT_TYPES = new Set([
   "task.created",
   "task.started",
+  "harness.started",
+  "agent.run.started",
+  "agent.run.completed",
+  "harness.completed",
   "runtime.connected",
   "runtime.thread",
   "agent.message",
@@ -162,6 +182,16 @@ function summarizeEvent(event: TaskEvent): string {
   }
   if (event.type === "runtime.thread") {
     return event.data.action === "resumed" ? "恢复持续上下文" : "建立持续上下文";
+  }
+  if (event.type.startsWith("agent.run.")) {
+    return `${String(event.data.role ?? "Agent")} · ${String(
+      event.data.phase ?? event.type,
+    )}`;
+  }
+  if (event.type.startsWith("harness.")) {
+    return `${String(event.data.profile ?? "Harness")} · ${String(
+      event.data.harness_run_id ?? "",
+    ).slice(0, 8)}`;
   }
   if (event.type === "test.completed") {
     return `${String(event.data.command ?? "验证")}：${String(
@@ -206,6 +236,8 @@ export default function App() {
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [knowledgeRoot, setKnowledgeRoot] = useState("");
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
+  const [harnessProfile, setHarnessProfile] = useState("single");
+  const [learningMode, setLearningMode] = useState("capture");
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -398,6 +430,8 @@ export default function App() {
         trimmedPrompt,
         activeConversation.id,
         knowledgeMode,
+        harnessProfile,
+        learningMode,
       );
       setTask(createdTask);
       setTurns((current) => [
@@ -617,6 +651,35 @@ export default function App() {
                 <option value="off">关闭</option>
               </select>
             </label>
+            <div className="harness-controls">
+              <label>
+                <span>Agent Harness</span>
+                <select
+                  aria-label="Agent Harness"
+                  value={harnessProfile}
+                  onChange={(event) => setHarnessProfile(event.target.value)}
+                  disabled={submitting || busy}
+                >
+                  <option value="single">单 Agent</option>
+                  <option value="fast">快速 Harness</option>
+                  <option value="balanced">平衡 Harness</option>
+                  <option value="deep">深度 Harness</option>
+                </select>
+              </label>
+              <label>
+                <span>学习模式</span>
+                <select
+                  aria-label="学习模式"
+                  value={learningMode}
+                  onChange={(event) => setLearningMode(event.target.value)}
+                  disabled={submitting || busy}
+                >
+                  <option value="off">关闭</option>
+                  <option value="capture">记录候选</option>
+                  <option value="evaluate">记录并评测</option>
+                </select>
+              </label>
+            </div>
             <textarea
               id="prompt"
               value={prompt}

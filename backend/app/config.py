@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     codex_startup_timeout_seconds: int = Field(default=30, ge=5, le=300)
     codex_turn_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
     codex_require_chatgpt_auth: bool = True
+    harness_max_parallel_agents: int = Field(default=3, ge=1, le=8)
+    harness_agent_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
+    approval_timeout_seconds: int = Field(default=300, ge=1, le=3_600)
     self_improvement_root: Path | None = None
     knowledge_enabled: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"

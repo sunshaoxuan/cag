@@ -24,3 +24,11 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
     } <= tables
     task_columns = {column["name"] for column in inspector.get_columns("tasks")}
     assert {"workspace_id", "workspace_path", "workspace_commit"} <= task_columns
+    assert {"harness_profile", "learning_mode"} <= task_columns
+    assert {
+        "harness_runs",
+        "agent_runs",
+        "agent_artifacts",
+        "approval_requests",
+        "quality_scores",
+    } <= tables

@@ -52,6 +52,14 @@ class TaskCreate(BaseModel):
         default="assist",
         pattern=r"^(off|assist|required)$",
     )
+    harness_profile: str = Field(
+        default="single",
+        pattern=r"^(single|fast|balanced|deep)$",
+    )
+    learning_mode: str = Field(
+        default="capture",
+        pattern=r"^(off|capture|evaluate)$",
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -72,6 +80,8 @@ class TaskResponse(BaseModel):
     prompt: str
     runtime_profile: str
     knowledge_mode: str
+    harness_profile: str
+    learning_mode: str
     knowledge_usage: dict[str, Any] | None
     status: str
     final_report: dict[str, Any] | None
@@ -92,6 +102,8 @@ def to_response(task: Task) -> TaskResponse:
         prompt=task.prompt,
         runtime_profile=task.runtime_profile,
         knowledge_mode=task.knowledge_mode,
+        harness_profile=task.harness_profile,
+        learning_mode=task.learning_mode,
         knowledge_usage=task.knowledge_usage,
         status=task.status,
         final_report=task.final_report,
@@ -120,6 +132,8 @@ async def create_task(
             conversation_id=request.conversation_id,
             runtime_profile=request.runtime_profile,
             knowledge_mode=request.knowledge_mode,
+            harness_profile=request.harness_profile,
+            learning_mode=request.learning_mode,
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc

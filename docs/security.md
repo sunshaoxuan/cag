@@ -4,7 +4,7 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Version 0.5.0 is a local enterprise knowledge foundation. Its public APIs remain limited to trusted loopback or isolated networks until authentication and project authorization are released.
+Version 0.6.0 is a local enterprise knowledge and governed Harness foundation. Its public APIs remain limited to trusted loopback or isolated networks until authentication and project authorization are released.
 
 ## 2. Codex subscription credentials
 
@@ -81,7 +81,7 @@ High-risk actions create a durable approval request and suspend the task. Approv
 
 Protected branch push and production deployment remain forbidden defaults. Project administrators may define stricter policies.
 
-Phase 3 runs app-server with approval policy `never`. If an approval callback still arrives, the adapter declines it and records the decision. Durable pause, human resolution and resume are Phase 5 work.
+Harness roles apply a permission intersection. Investigators and reviewers use read-only app-server sandboxes. Executor receives workspace-write. Approval callbacks pass through Command Policy Engine and persistent ApprovalRequest records. Unknown commands wait for an explicit decision until the configured timeout.
 
 ## 7. Workspace isolation
 

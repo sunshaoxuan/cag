@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.5.0 | Evidence |
+| Requirement | Status for 0.6.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -40,9 +40,14 @@ Legend:
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
 | Runtime Profiles | Partial | Project allowlist and restricted candidate profile implemented; complete permission intersection remains |
-| Command Policy Engine | Planned for Phase 4 | Safe, approval and forbidden tests required |
-| Approval workflow | Planned for Phase 5 | Pause and resume tests required |
-| Git diff and artifacts | Planned for Phase 5 | Artifact integrity tests required |
+| Command Policy Engine | Implemented | `backend/app/policies/command_policy.py`, policy tests |
+| Approval workflow | Implemented | `ApprovalRequest`, resolve API and runtime callback tests |
+| Agent Harness | Implemented | `backend/app/harness`, fast and balanced tests |
+| Parallel read-only investigation and single writer | Implemented | distinct investigator clones and Executor access mode |
+| Structured Agent artifacts | Implemented | `AgentArtifact` SHA 256 record and API tests |
+| Unified Harness SSE | Implemented | parent TaskEvent sequence and Harness event tests |
+| Idempotent vector indexing | Implemented | source fingerprint, path and ordinal uniqueness, vector reuse test |
+| Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
 | Skill proposals and evaluation | Partial | Restricted candidate output path implemented; durable proposal and evaluation records remain |
 | Complete required data model | Partial | Project, Conversation, Task and TaskEvent exist; later phase models remain |

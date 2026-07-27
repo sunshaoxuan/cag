@@ -120,6 +120,7 @@ class FakeOllamaClient:
     def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
         self.generated: list[str] = []
+        self.embedded_texts: list[str] = []
 
     async def status(self) -> dict[str, Any]:
         return {
@@ -133,6 +134,7 @@ class FakeOllamaClient:
         }
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.embedded_texts.extend(texts)
         result: list[list[float]] = []
         for text in texts:
             vector = [0.0] * self.dimensions

@@ -40,6 +40,8 @@ function queuedTask(id: string, prompt: string): Task {
     prompt,
     runtime_profile: "general-engineering",
     knowledge_mode: "assist",
+    harness_profile: "single",
+    learning_mode: "capture",
     knowledge_usage: null,
     status: "queued",
     final_report: null,

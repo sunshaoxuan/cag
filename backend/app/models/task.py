@@ -37,6 +37,8 @@ class Task(PhysicalIdMixin, Base):
         default="general-engineering",
     )
     knowledge_mode: Mapped[str] = mapped_column(String(32), default="assist")
+    harness_profile: Mapped[str] = mapped_column(String(32), default="single")
+    learning_mode: Mapped[str] = mapped_column(String(32), default="capture")
     knowledge_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),

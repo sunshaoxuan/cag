@@ -168,6 +168,16 @@ class KnowledgeService:
             source = session.get(KnowledgeSource, source_id)
             if source is None:
                 raise KeyError(source_id)
+            active = session.scalar(
+                select(KnowledgeIngestion)
+                .where(
+                    KnowledgeIngestion.source_id == source_id,
+                    KnowledgeIngestion.status.in_(("queued", "running")),
+                )
+                .order_by(KnowledgeIngestion.created_at.desc())
+            )
+            if active is not None:
+                return active
             ingestion = KnowledgeIngestion(source_id=source_id)
             source.status = KnowledgeStatus.INDEXING
             source.error = None
@@ -229,6 +239,49 @@ class KnowledgeService:
                         )
                     )
 
+            document_hashes: dict[str, str] = {}
+            for file_path, _, _, _, document_hash in chunks:
+                document_hashes[
+                    file_path.relative_to(source_path).as_posix()
+                ] = document_hash
+            fingerprint_input = "\n".join(
+                f"{path}:{content_hash}"
+                for path, content_hash in sorted(document_hashes.items())
+            )
+            index_fingerprint = hashlib.sha256(
+                fingerprint_input.encode("utf-8")
+            ).hexdigest()
+            with self._database.session_factory() as session:
+                source = session.get(KnowledgeSource, source_id)
+                if source is None:
+                    return
+                existing_documents = list(
+                    session.scalars(
+                        select(KnowledgeDocument)
+                        .options(selectinload(KnowledgeDocument.chunks))
+                        .where(KnowledgeDocument.source_id == source_id)
+                    )
+                )
+                existing_by_path = {
+                    item.canonical_path: item for item in existing_documents
+                }
+                unchanged_paths = {
+                    path
+                    for path, content_hash in document_hashes.items()
+                    if path in existing_by_path
+                    and existing_by_path[path].content_hash == content_hash
+                }
+                changed_paths = set(document_hashes) - unchanged_paths
+                removed_paths = set(existing_by_path) - set(document_hashes)
+                vectors_reused = sum(
+                    len(existing_by_path[path].chunks) for path in unchanged_paths
+                )
+
+            chunks = [
+                chunk
+                for chunk in chunks
+                if chunk[0].relative_to(source_path).as_posix() in changed_paths
+            ]
             embeddings: list[list[float]] = []
             for start in range(0, len(chunks), 8):
                 embeddings.extend(
@@ -242,11 +295,14 @@ class KnowledgeService:
                 source = session.get(KnowledgeSource, source_id)
                 if ingestion is None or source is None:
                     return
-                session.execute(
-                    delete(KnowledgeDocument).where(
-                        KnowledgeDocument.source_id == source.id
+                replaced_paths = changed_paths | removed_paths
+                if replaced_paths:
+                    session.execute(
+                        delete(KnowledgeDocument).where(
+                            KnowledgeDocument.source_id == source.id,
+                            KnowledgeDocument.canonical_path.in_(replaced_paths),
+                        )
                     )
-                )
                 document_by_path: dict[str, KnowledgeDocument] = {}
                 for chunk_data, embedding in zip(chunks, embeddings, strict=True):
                     file_path, ordinal, text, injection, document_hash = chunk_data
@@ -287,6 +343,7 @@ class KnowledgeService:
                         )
                     )
                 source.source_commit = self._git_commit(source_path)
+                source.index_fingerprint = index_fingerprint
                 source.status = (
                     KnowledgeStatus.APPROVED
                     if source.approved_for_codex
@@ -296,6 +353,8 @@ class KnowledgeService:
                 ingestion.files_seen = len(files)
                 ingestion.chunks_written = len(chunks)
                 ingestion.rejected_files = rejected_files
+                ingestion.unchanged_files = len(unchanged_paths)
+                ingestion.vectors_reused = vectors_reused
                 ingestion.completed_at = utc_now()
                 self._append_ingestion_event(
                     session,
@@ -305,6 +364,9 @@ class KnowledgeService:
                         "files_seen": len(files),
                         "chunks_written": len(chunks),
                         "rejected_files": rejected_files,
+                        "unchanged_files": len(unchanged_paths),
+                        "vectors_reused": vectors_reused,
+                        "index_fingerprint": index_fingerprint,
                     },
                 )
                 session.add(

@@ -40,6 +40,8 @@ export type Task = {
   prompt: string;
   runtime_profile: string;
   knowledge_mode: string;
+  harness_profile: string;
+  learning_mode: string;
   knowledge_usage: {
     status?: string;
     citation_count?: number;
@@ -136,6 +138,8 @@ export function createTask(
   prompt: string,
   conversationId?: string,
   knowledgeMode = "assist",
+  harnessProfile = "single",
+  learningMode = "capture",
 ): Promise<Task> {
   return request<Task>("/api/v1/tasks", {
     method: "POST",
@@ -145,6 +149,8 @@ export function createTask(
       prompt,
       conversation_id: conversationId,
       knowledge_mode: knowledgeMode,
+      harness_profile: harnessProfile,
+      learning_mode: learningMode,
     }),
   });
 }

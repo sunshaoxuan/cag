@@ -161,6 +161,23 @@ h1 {
   margin-bottom: 10px;
 }
 
+.harness-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.harness-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.harness-controls span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 760px) {
   .knowledge-grid {
     grid-template-columns: 1fr;
