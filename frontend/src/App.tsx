@@ -20,14 +20,19 @@ const EVENT_TYPES = [
   "workspace.ready",
   "runtime.connected",
   "runtime.thread",
+  "agent.message.started",
+  "agent.message.delta",
   "agent.message",
+  "agent.plan.delta",
   "agent.plan",
+  "agent.reasoning.summary.delta",
   "skill.selected",
   "tool.called",
   "tool.completed",
   "command.requested",
   "command.started",
   "command.output",
+  "command.output.delta",
   "command.completed",
   "file.read",
   "file.changed",
@@ -48,7 +53,12 @@ const EVENT_LABELS: Record<string, string> = {
   "runtime.connected": "本机 Codex 已连接",
   "runtime.thread": "Codex 会话已连接",
   "agent.plan": "Agent 已生成计划",
+  "agent.plan.delta": "Agent 计划增量",
+  "agent.message.started": "Agent 开始回复",
+  "agent.message.delta": "Agent 输出增量",
   "agent.message": "Agent 消息",
+  "agent.reasoning.summary.delta": "Agent 推理摘要",
+  "command.output.delta": "命令输出增量",
   "test.completed": "验证已完成",
   "task.completed": "本轮已完成",
   "task.failed": "本轮执行失败",
@@ -73,6 +83,32 @@ type ChatTurn = {
   error: string | null;
 };
 
+type FeedbackLevel = "essential" | "standard" | "full";
+type FeedbackLimit = 20 | 50 | 100 | "all";
+
+const DELTA_EVENT_TYPES = new Set([
+  "agent.message.delta",
+  "agent.plan.delta",
+  "agent.reasoning.summary.delta",
+  "command.output.delta",
+]);
+
+const ESSENTIAL_EVENT_TYPES = new Set([
+  "task.created",
+  "task.started",
+  "runtime.connected",
+  "runtime.thread",
+  "agent.message",
+  "command.completed",
+  "file.changed",
+  "test.completed",
+  "approval.requested",
+  "approval.resolved",
+  "task.completed",
+  "task.failed",
+  "task.cancelled",
+]);
+
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
@@ -82,7 +118,16 @@ function formatTime(value: string): string {
 }
 
 function summarizeEvent(event: TaskEvent): string {
-  if (event.type === "agent.message") {
+  if (
+    event.type === "agent.message" ||
+    event.type === "agent.message.delta" ||
+    event.type === "agent.plan.delta" ||
+    event.type === "agent.reasoning.summary.delta" ||
+    event.type === "command.output.delta"
+  ) {
+    if (event.type.endsWith(".delta")) {
+      return String(event.data.delta ?? "");
+    }
     return String(event.data.text ?? "");
   }
   if (event.type === "workspace.ready") {
@@ -105,6 +150,17 @@ function isTerminal(status: string): boolean {
   return ["completed", "failed", "cancelled"].includes(status);
 }
 
+function includeFeedbackEvent(
+  event: TaskEvent,
+  feedbackLevel: FeedbackLevel,
+): boolean {
+  if (feedbackLevel === "full") return true;
+  if (feedbackLevel === "essential") {
+    return ESSENTIAL_EVENT_TYPES.has(event.type);
+  }
+  return !DELTA_EVENT_TYPES.has(event.type);
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -113,6 +169,9 @@ export default function App() {
   const [task, setTask] = useState<Task | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [feedbackLevel, setFeedbackLevel] =
+    useState<FeedbackLevel>("standard");
+  const [feedbackLimit, setFeedbackLimit] = useState<FeedbackLimit>(20);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +201,13 @@ export default function App() {
     () => projects.find((project) => project.id === projectId),
     [projectId, projects],
   );
+  const visibleEvents = useMemo(() => {
+    const filteredEvents = events.filter((event) =>
+      includeFeedbackEvent(event, feedbackLevel),
+    );
+    if (feedbackLimit === "all") return filteredEvents;
+    return filteredEvents.slice(-feedbackLimit);
+  }, [events, feedbackLevel, feedbackLimit]);
   const busy = task !== null && !isTerminal(task.status);
 
   function completeTurn(taskId: string) {
@@ -164,6 +230,58 @@ export default function App() {
       .catch((reason: Error) => setError(reason.message));
   }
 
+  function reflectLiveEvent(event: TaskEvent) {
+    let nextStatus: string | null = null;
+    if (event.type === "task.created") {
+      nextStatus = "queued";
+    } else if (
+      event.type === "task.started" ||
+      event.type === "workspace.preparing"
+    ) {
+      nextStatus = "preparing";
+    } else if (event.type === "approval.requested") {
+      nextStatus = "waiting_approval";
+    } else if (event.type === "task.completed") {
+      nextStatus = "completed";
+    } else if (event.type === "task.failed") {
+      nextStatus = "failed";
+    } else if (event.type === "task.cancelled") {
+      nextStatus = "cancelled";
+    } else {
+      nextStatus = "running";
+    }
+
+    let liveAnswer: string | null = null;
+    if (event.type === "agent.message.delta") {
+      liveAnswer = String(event.data.text ?? "");
+    } else if (
+      event.type === "agent.message" &&
+      event.data.level !== "warning"
+    ) {
+      liveAnswer = String(event.data.text ?? "");
+    }
+
+    setTask((current) =>
+      current?.id === event.task_id
+        ? {
+            ...current,
+            status: nextStatus ?? current.status,
+          }
+        : current,
+    );
+    setTurns((current) =>
+      current.map((turn) =>
+        turn.taskId === event.task_id
+          ? {
+              ...turn,
+              status: nextStatus ?? turn.status,
+              answer: liveAnswer || turn.answer,
+            }
+          : turn,
+      ),
+    );
+  }
+
   function connectConversationEvents(activeConversation: Conversation) {
     sourceRef.current?.close();
     const source = new EventSource(
@@ -179,6 +297,7 @@ export default function App() {
         }
         return [...current, event].sort((a, b) => a.sequence - b.sequence);
       });
+      reflectLiveEvent(event);
 
       if (
         event.type === "task.completed" ||
@@ -316,6 +435,9 @@ export default function App() {
                 </div>
                 <div className="message message-agent">
                   <span>Codex</span>
+                  {turn.answer && !isTerminal(turn.status) && (
+                    <em className="message-live">实时反馈</em>
+                  )}
                   {turn.answer && <p>{turn.answer}</p>}
                   {turn.error && <p className="message-error">{turn.error}</p>}
                   {!turn.answer && !turn.error && (
@@ -366,6 +488,48 @@ export default function App() {
             )}
           </div>
 
+          <div className="feedback-controls">
+            <label>
+              <span>反馈粒度</span>
+              <select
+                aria-label="反馈粒度"
+                value={feedbackLevel}
+                onChange={(event) =>
+                  setFeedbackLevel(event.target.value as FeedbackLevel)
+                }
+              >
+                <option value="essential">关键反馈</option>
+                <option value="standard">标准反馈</option>
+                <option value="full">完整反馈</option>
+              </select>
+            </label>
+            <label>
+              <span>画面条数</span>
+              <select
+                aria-label="画面条数"
+                value={feedbackLimit}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFeedbackLimit(
+                    value === "all"
+                      ? "all"
+                      : (Number(value) as FeedbackLimit),
+                  );
+                }}
+              >
+                <option value="20">20 条</option>
+                <option value="50">50 条</option>
+                <option value="100">100 条</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <p>
+              后端已反馈 {events.length.toLocaleString()} 条
+              <span aria-hidden="true"> · </span>
+              当前显示 {visibleEvents.length.toLocaleString()} 条
+            </p>
+          </div>
+
           {events.length === 0 && (
             <div className="empty-state">
               <div className="empty-mark" aria-hidden="true">
@@ -376,9 +540,15 @@ export default function App() {
             </div>
           )}
 
-          {events.length > 0 && (
+          {events.length > 0 && visibleEvents.length === 0 && (
+            <div className="feedback-empty">
+              当前粒度没有可显示事件，后端事件仍然完整保留。
+            </div>
+          )}
+
+          {visibleEvents.length > 0 && (
             <ol className="event-list">
-              {events.map((event) => (
+              {visibleEvents.map((event) => (
                 <li key={event.event_id}>
                   <span className="event-sequence">
                     {String(event.sequence).padStart(2, "0")}

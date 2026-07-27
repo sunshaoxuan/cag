@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -248,6 +254,138 @@ describe("Agent Gateway conversation page", () => {
     expect(JSON.parse(String(taskRequests[1][1]?.body))).toMatchObject({
       conversation_id: conversation.id,
       prompt: "第二轮",
+    });
+  });
+
+  it("projects live Agent deltas into the conversation independently of the event filter", async () => {
+    render(<App />);
+    await screen.findByRole("option", {
+      name: "Codex/ChatGPT Agent Gateway · cag",
+    });
+    fireEvent.change(screen.getByLabelText("发送消息"), {
+      target: { value: "查询天气" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("查询天气");
+
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit("task.started", {
+        event_id: "event-live-1",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 1,
+        task_sequence: 1,
+        type: "task.started",
+        timestamp: "2026-07-27T00:00:01Z",
+        data: {},
+      });
+      source.emit("agent.message.started", {
+        event_id: "event-live-2",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 2,
+        task_sequence: 2,
+        type: "agent.message.started",
+        timestamp: "2026-07-27T00:00:02Z",
+        data: { item_id: "message-1" },
+      });
+      source.emit("agent.message.delta", {
+        event_id: "event-live-3",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 3,
+        task_sequence: 3,
+        type: "agent.message.delta",
+        timestamp: "2026-07-27T00:00:03Z",
+        data: {
+          item_id: "message-1",
+          delta: "正在查询东京天气",
+          text: "正在查询东京天气",
+        },
+      });
+    });
+
+    expect(await screen.findByText("正在查询东京天气")).toBeInTheDocument();
+    expect(screen.getByText("实时反馈")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "本轮执行中" }),
+    ).toBeDisabled();
+    expect(screen.queryByText("Agent 输出增量")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("反馈粒度"), {
+      target: { value: "full" },
+    });
+    expect(await screen.findByText("Agent 输出增量")).toBeInTheDocument();
+    expect(screen.getAllByText("正在查询东京天气")).toHaveLength(2);
+
+    act(() => {
+      source.emit("task.completed", {
+        event_id: "event-live-4",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 4,
+        task_sequence: 4,
+        type: "task.completed",
+        timestamp: "2026-07-27T00:00:04Z",
+        data: {},
+      });
+    });
+    expect(await screen.findByText("已完成：查询天气")).toBeInTheDocument();
+    expect(screen.queryByText("实时反馈")).not.toBeInTheDocument();
+  });
+
+  it("limits visible feedback rows without dropping received events", async () => {
+    render(<App />);
+    await screen.findByRole("option", {
+      name: "Codex/ChatGPT Agent Gateway · cag",
+    });
+    fireEvent.change(screen.getByLabelText("发送消息"), {
+      target: { value: "反馈数量测试" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("反馈数量测试");
+
+    const source = MockEventSource.instances[0];
+    act(() => {
+      for (let sequence = 1; sequence <= 25; sequence += 1) {
+        source.emit("task.started", {
+          event_id: `event-count-${sequence}`,
+          conversation_id: conversation.id,
+          task_id: "task-1",
+          sequence,
+          task_sequence: sequence,
+          type: "task.started",
+          timestamp: "2026-07-27T00:00:01Z",
+          data: {},
+        });
+      }
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(
+          ".event-list > li:not(.event-pending)",
+        ),
+      ).toHaveLength(20);
+    });
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.textContent ===
+          "后端已反馈 25 条 · 当前显示 20 条",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("画面条数"), {
+      target: { value: "50" },
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(
+          ".event-list > li:not(.event-pending)",
+        ),
+      ).toHaveLength(25);
     });
   });
 });

@@ -6,6 +6,8 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 当前版本为 `0.4.0`。Phase 3 本机订阅运行时已经完成，Phase 4 首个功能组提供持久会话和受控自增强候选。
 
+CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
+
 已实现：
 
 * FastAPI、SQLAlchemy、Alembic 和 Fake Agent Runtime。

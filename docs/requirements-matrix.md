@@ -31,6 +31,8 @@ Legend:
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
 | CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
 | Continuous conversation frontend | Implemented | Component, build and browser evidence |
+| Truthful runtime feedback | Implemented | User-visible app-server deltas are durable CAG events; hidden reasoning and credentials remain excluded |
+| Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
 | Runtime Profiles | Partial | Project allowlist and restricted candidate profile implemented; complete permission intersection remains |
 | Command Policy Engine | Planned for Phase 4 | Safe, approval and forbidden tests required |

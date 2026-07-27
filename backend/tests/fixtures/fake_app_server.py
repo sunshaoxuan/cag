@@ -94,6 +94,17 @@ for raw_line in sys.stdin:
                     )
         send(
             {
+                "method": "item/plan/delta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "item-plan",
+                    "delta": "inspect",
+                },
+            }
+        )
+        send(
+            {
                 "method": "turn/plan/updated",
                 "params": {
                     "threadId": "thread-1",
@@ -119,6 +130,17 @@ for raw_line in sys.stdin:
                     "turnId": "turn-1",
                     "startedAtMs": 1,
                     "item": command,
+                },
+            }
+        )
+        send(
+            {
+                "method": "item/commandExecution/outputDelta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "item-command",
+                    "delta": "clean workspace\n",
                 },
             }
         )
@@ -164,11 +186,50 @@ for raw_line in sys.stdin:
         )
         send(
             {
+                "method": "item/reasoning/summaryTextDelta",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "item-reasoning",
+                    "summaryIndex": 0,
+                    "delta": "fixture summary",
+                },
+            }
+        )
+        send(
+            {
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "startedAtMs": 4,
+                    "item": {
+                        "id": "item-message",
+                        "type": "agentMessage",
+                        "text": "",
+                    },
+                },
+            }
+        )
+        for delta in ("LOCAL_CODEX_", "FIXTURE_OK"):
+            send(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": "item-message",
+                        "delta": delta,
+                    },
+                }
+            )
+        send(
+            {
                 "method": "item/completed",
                 "params": {
                     "threadId": "thread-1",
                     "turnId": "turn-1",
-                    "completedAtMs": 4,
+                    "completedAtMs": 5,
                     "item": {
                         "id": "item-message",
                         "type": "agentMessage",

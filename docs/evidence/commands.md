@@ -151,3 +151,25 @@ cd ..
 docker compose config --quiet
 docker compose build gateway frontend
 ```
+
+## Truthful runtime feedback validation
+
+Reload the managed host Gateway and rebuild only the frontend service:
+
+```powershell
+.\scripts\manage-local-codex-gateway-task.ps1 stop
+.\scripts\manage-local-codex-gateway-task.ps1 start
+docker compose build frontend
+docker compose up -d --no-deps frontend
+```
+
+Replay the tail of a completed Conversation:
+
+```text
+GET /api/v1/conversations/{conversation_id}/events?follow=false
+Last-Event-ID: 189
+```
+
+The real local Codex run persisted 197 events, including 188
+`agent.message.delta` events. The browser verified live answer projection,
+complete feedback, the 20-row display limit and zero console errors.

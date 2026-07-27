@@ -96,6 +96,8 @@ The Task SSE endpoint reads committed TaskEvent rows in Task sequence order and 
 
 The Conversation SSE endpoint remains open across multiple Tasks. `Conversation.next_event_sequence` assigns a continuous sequence, heartbeat comments keep idle connections alive, and `Last-Event-ID` supports standard EventSource reconnection. The frontend never connects to Codex app-server.
 
+The local runtime maps every permitted user-visible app-server delta into a durable event before SSE delivery. This includes Agent message, plan, command output and reasoning-summary deltas. Completed events remain authoritative snapshots. Hidden reasoning text and credential material are outside the feedback contract.
+
 ### Persistence
 
 SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests. Alembic owns schema versioning through revision `20260727_0004`. Local development can create missing tables; container deployment runs Alembic before serving traffic.
@@ -110,7 +112,9 @@ The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only th
 
 ### Frontend
 
-The React console loads configured projects, submits a Prompt, subscribes to named SSE events, keeps them ordered by sequence, and retrieves the final task report on a terminal event.
+The React console loads configured projects, submits a Prompt, subscribes to named SSE events, keeps them ordered by sequence, projects live Agent message deltas into the active conversation bubble and retrieves the final task report on a terminal event.
+
+Feedback controls are frontend projections over the complete CAG event sequence. Key, standard and full detail levels determine visible categories, while a row limit controls how many matching events are rendered. The controls never ask the backend to drop or rewrite events.
 
 ### Local Codex app-server runtime
 

@@ -44,3 +44,12 @@ Version: 0.4.0
 | `docs/evidence/screenshots/phase4-continuous-conversation.png` | Two-turn Conversation UI | Visually verified |
 | Browser console | Frontend runtime diagnostics | Zero warnings and errors |
 | PostgreSQL `alembic_version` | 0.4.0 schema | `20260727_0004` |
+| `docs/adr/0006-truthful-runtime-feedback.md` | Backend ledger and frontend projection decision | Accepted |
+| `backend/tests/test_codex_app_server_runtime.py` | Visible app-server notification mapping | Passed |
+| `backend/tests/test_conversations_api.py` | SSE preservation of every feedback delta | Passed |
+| `frontend/src/App.test.tsx` | Feedback levels, row limits and live answer projection | 5 passed |
+| Real local Codex Conversation | User-visible runtime feedback | 197 events, 188 Agent deltas |
+| CAG Conversation SSE resume | Replay after `Last-Event-ID: 189` | IDs 190 through 197 |
+| Browser feedback controls | Full and limited projections | 197 rows and 20 rows |
+| Browser console | Truthful feedback runtime diagnostics | Zero errors |
+| `docs/evidence/truthful_feedback_test_results.md` | Truthful feedback acceptance record | Passed |

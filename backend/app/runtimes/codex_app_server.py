@@ -59,6 +59,7 @@ class CodexAppServerRuntime:
         approvals: list[dict[str, Any]] = []
         warnings: list[str] = []
         final_message = ""
+        message_text_by_item: dict[str, str] = {}
         next_request_id = 1
 
         async def send(message: dict[str, Any]) -> None:
@@ -166,21 +167,90 @@ class CodexAppServerRuntime:
                         "runtime": "codex-app-server",
                     },
                 )
+            elif method == "item/plan/delta":
+                await emit(
+                    "agent.plan.delta",
+                    {
+                        "item_id": str(params.get("itemId", "")),
+                        "turn_id": str(params.get("turnId", "")),
+                        "delta": str(params.get("delta", "")),
+                    },
+                )
             elif method == "item/agentMessage/delta":
-                final_message += str(params.get("delta", ""))
+                item_id = str(params.get("itemId", ""))
+                delta = str(params.get("delta", ""))
+                message_text = message_text_by_item.get(item_id, "") + delta
+                message_text_by_item[item_id] = message_text
+                final_message = message_text
+                await emit(
+                    "agent.message.delta",
+                    {
+                        "item_id": item_id,
+                        "turn_id": str(params.get("turnId", "")),
+                        "delta": delta,
+                        "text": message_text,
+                    },
+                )
+            elif method == "item/commandExecution/outputDelta":
+                await emit(
+                    "command.output.delta",
+                    {
+                        "item_id": str(params.get("itemId", "")),
+                        "turn_id": str(params.get("turnId", "")),
+                        "delta": str(params.get("delta", "")),
+                    },
+                )
+            elif method == "item/reasoning/summaryTextDelta":
+                await emit(
+                    "agent.reasoning.summary.delta",
+                    {
+                        "item_id": str(params.get("itemId", "")),
+                        "turn_id": str(params.get("turnId", "")),
+                        "summary_index": params.get("summaryIndex"),
+                        "delta": str(params.get("delta", "")),
+                    },
+                )
             elif method == "item/started":
                 item = params.get("item") or {}
-                if item.get("type") == "commandExecution":
+                item_type = item.get("type")
+                if item_type == "agentMessage":
+                    item_id = str(item.get("id", ""))
+                    message_text_by_item[item_id] = str(item.get("text", ""))
+                    await emit(
+                        "agent.message.started",
+                        {
+                            "item_id": item_id,
+                            "turn_id": str(params.get("turnId", "")),
+                        },
+                    )
+                elif item_type == "commandExecution":
                     await emit(
                         "command.started",
-                        {"command": item.get("command", "")},
+                        {
+                            "item_id": str(item.get("id", "")),
+                            "turn_id": str(params.get("turnId", "")),
+                            "command": item.get("command", ""),
+                        },
                     )
             elif method == "item/completed":
                 item = params.get("item") or {}
                 item_type = item.get("type")
                 if item_type == "agentMessage":
-                    final_message = str(item.get("text") or final_message)
-                    await emit("agent.message", {"text": final_message})
+                    item_id = str(item.get("id", ""))
+                    final_message = str(
+                        item.get("text")
+                        or message_text_by_item.get(item_id)
+                        or final_message
+                    )
+                    await emit(
+                        "agent.message",
+                        {
+                            "item_id": item_id,
+                            "turn_id": str(params.get("turnId", "")),
+                            "text": final_message,
+                        },
+                    )
+                    message_text_by_item.pop(item_id, None)
                 elif item_type == "commandExecution":
                     command_result = {
                         "command": item.get("command", ""),
@@ -188,7 +258,14 @@ class CodexAppServerRuntime:
                         "exit_code": item.get("exitCode"),
                     }
                     commands.append(command_result)
-                    await emit("command.completed", command_result)
+                    await emit(
+                        "command.completed",
+                        {
+                            "item_id": str(item.get("id", "")),
+                            "turn_id": str(params.get("turnId", "")),
+                            **command_result,
+                        },
+                    )
                 elif item_type == "fileChange":
                     change_result = {
                         "status": item.get("status", "unknown"),

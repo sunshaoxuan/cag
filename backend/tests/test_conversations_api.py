@@ -96,6 +96,63 @@ class PersistentThreadRuntime:
         )
 
 
+class TruthfulFeedbackRuntime:
+    async def execute(
+        self,
+        *,
+        task_id: str,
+        project_code: str,
+        prompt: str,
+        runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
+        workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
+        emit: RuntimeEventCallback,
+    ) -> RuntimeResult:
+        await emit(
+            "agent.message.started",
+            {"item_id": "message-1", "turn_id": "turn-1"},
+        )
+        await emit(
+            "agent.message.delta",
+            {
+                "item_id": "message-1",
+                "turn_id": "turn-1",
+                "delta": "实时",
+                "text": "实时",
+            },
+        )
+        await emit(
+            "agent.message.delta",
+            {
+                "item_id": "message-1",
+                "turn_id": "turn-1",
+                "delta": "反馈",
+                "text": "实时反馈",
+            },
+        )
+        await emit(
+            "agent.message",
+            {
+                "item_id": "message-1",
+                "turn_id": "turn-1",
+                "text": "实时反馈",
+            },
+        )
+        return RuntimeResult(
+            summary="实时反馈",
+            root_cause=None,
+            changes=[],
+            validation=[],
+            approvals=[],
+            warnings=[],
+            next_actions=[],
+            runtime_thread_id="thread-feedback",
+        )
+
+
 def test_tasks_reuse_persisted_codex_thread(app_factory) -> None:
     runtime = PersistentThreadRuntime()
     with TestClient(app_factory(runtime)) as client:
@@ -155,6 +212,63 @@ def test_tasks_reuse_persisted_codex_thread(app_factory) -> None:
         5,
     ]
     assert all(event["conversation_id"] == conversation["id"] for event in events)
+
+
+def test_conversation_sse_preserves_every_feedback_delta(app_factory) -> None:
+    with TestClient(app_factory(TruthfulFeedbackRuntime())) as client:
+        conversation = create_conversation(client)
+        created = client.post(
+            "/api/v1/tasks",
+            json={
+                "project_id": "test-project",
+                "conversation_id": conversation["id"],
+                "prompt": "反馈测试",
+            },
+        )
+        assert created.status_code == 202
+        task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+        assert task["status"] == "completed"
+
+        response = client.get(
+            f"/api/v1/conversations/{conversation['id']}/events",
+            params={"follow": "false"},
+        )
+
+    events = parse_sse(response.text)
+    feedback_events = [
+        event
+        for event in events
+        if str(event["type"]).startswith("agent.message")
+    ]
+    assert [event["type"] for event in feedback_events] == [
+        "agent.message.started",
+        "agent.message.delta",
+        "agent.message.delta",
+        "agent.message",
+    ]
+    assert [event["data"] for event in feedback_events] == [
+        {"item_id": "message-1", "turn_id": "turn-1"},
+        {
+            "item_id": "message-1",
+            "turn_id": "turn-1",
+            "delta": "实时",
+            "text": "实时",
+        },
+        {
+            "item_id": "message-1",
+            "turn_id": "turn-1",
+            "delta": "反馈",
+            "text": "实时反馈",
+        },
+        {
+            "item_id": "message-1",
+            "turn_id": "turn-1",
+            "text": "实时反馈",
+        },
+    ]
+    assert [event["sequence"] for event in events] == list(
+        range(1, len(events) + 1)
+    )
 
 
 def test_conversation_event_stream_resumes_from_header(app_factory) -> None:

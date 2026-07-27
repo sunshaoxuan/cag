@@ -76,17 +76,56 @@ def test_codex_app_server_maps_protocol_to_gateway_events(
     assert [event_type for event_type, _ in events] == [
         "runtime.connected",
         "runtime.thread",
+        "agent.plan.delta",
         "agent.plan",
         "command.started",
+        "command.output.delta",
         "command.completed",
         "file.changed",
         "agent.message",
+        "agent.reasoning.summary.delta",
+        "agent.message.started",
+        "agent.message.delta",
+        "agent.message.delta",
         "agent.message",
     ]
     assert events[0][1]["authentication"] == "chatgpt"
     assert events[1][1] == {
         "thread_id": "thread-1",
         "action": "started",
+    }
+    assert events[2][1] == {
+        "item_id": "item-plan",
+        "turn_id": "turn-1",
+        "delta": "inspect",
+    }
+    assert events[5][1] == {
+        "item_id": "item-command",
+        "turn_id": "turn-1",
+        "delta": "clean workspace\n",
+    }
+    assert events[9][1] == {
+        "item_id": "item-reasoning",
+        "turn_id": "turn-1",
+        "summary_index": 0,
+        "delta": "fixture summary",
+    }
+    assert events[11][1] == {
+        "item_id": "item-message",
+        "turn_id": "turn-1",
+        "delta": "LOCAL_CODEX_",
+        "text": "LOCAL_CODEX_",
+    }
+    assert events[12][1] == {
+        "item_id": "item-message",
+        "turn_id": "turn-1",
+        "delta": "FIXTURE_OK",
+        "text": "LOCAL_CODEX_FIXTURE_OK",
+    }
+    assert events[13][1] == {
+        "item_id": "item-message",
+        "turn_id": "turn-1",
+        "text": "LOCAL_CODEX_FIXTURE_OK",
     }
 
 

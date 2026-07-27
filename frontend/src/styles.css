@@ -184,6 +184,7 @@ h1 {
 }
 
 .message-agent {
+  position: relative;
   justify-self: start;
   border: 1px solid #d7dfda;
   border-bottom-left-radius: 5px;
@@ -193,6 +194,17 @@ h1 {
 
 .message-agent > span {
   color: #347457;
+}
+
+.message-live {
+  position: absolute;
+  top: 11px;
+  right: 13px;
+  color: #347457;
+  font-size: 0.64rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .message-pending {
@@ -320,6 +332,51 @@ button:disabled {
 
 .execution-panel {
   min-height: 540px;
+}
+
+.feedback-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: -6px 0 24px;
+  padding: 14px;
+  border: 1px solid #dfe5e1;
+  border-radius: 14px;
+  background: rgba(244, 247, 244, 0.82);
+}
+
+.feedback-controls label {
+  margin: 0;
+}
+
+.feedback-controls label > span {
+  display: block;
+  margin-bottom: 7px;
+  color: #66716c;
+  font-size: 0.7rem;
+}
+
+.feedback-controls select {
+  height: 40px;
+  background: #fff;
+  font-size: 0.8rem;
+}
+
+.feedback-controls p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #78817e;
+  font-size: 0.72rem;
+}
+
+.feedback-empty {
+  padding: 28px 18px;
+  border: 1px dashed #ccd6d0;
+  border-radius: 14px;
+  color: #6f7975;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-align: center;
 }
 
 .empty-state {
@@ -575,6 +632,14 @@ button:disabled {
   .task-summary,
   .result-grid {
     grid-template-columns: 1fr;
+  }
+
+  .feedback-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .feedback-controls p {
+    grid-column: auto;
   }
 
   .event-title {

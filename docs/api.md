@@ -228,13 +228,32 @@ The local Codex runtime additionally emits event types derived from app-server n
 runtime.connected
 runtime.thread
 agent.plan
+agent.plan.delta
+agent.message.started
+agent.message.delta
 agent.message
 command.started
+command.output.delta
 command.completed
+agent.reasoning.summary.delta
 file.changed
 approval.requested
 approval.resolved
 ```
+
+Delta payloads preserve the app-server item and turn identity:
+
+```json
+{
+  "item_id": "item-id",
+  "turn_id": "turn-id",
+  "delta": "新增文本"
+}
+```
+
+`agent.message.delta` also contains `text`, the cumulative text for the current message item. A reconnecting frontend should replace its live projection with `text` and use the completed `agent.message` or `task.completed` event as the authoritative final value.
+
+`command.output.delta` contains exact permitted command output chunks. `agent.reasoning.summary.delta` contains the app-server reasoning summary intended for clients. Hidden reasoning text, credentials and unsupported raw notifications are not part of the CAG API.
 
 `runtime.connected` contains the runtime provider and authentication type. It never contains tokens, credential paths or account email.
 
