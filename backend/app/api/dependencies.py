@@ -10,6 +10,7 @@ from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
 from app.knowledge.service import KnowledgeService
 from app.approvals.service import ApprovalService
+from app.capabilities.service import CapabilityService
 
 
 def get_database(request: Request) -> Database:
@@ -43,3 +44,7 @@ def get_knowledge_service(request: Request) -> KnowledgeService:
 
 def get_approval_service(request: Request) -> ApprovalService:
     return request.app.state.approval_service
+
+
+def get_capability_service(request: Request) -> CapabilityService:
+    return request.app.state.capability_service

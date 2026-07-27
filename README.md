@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.6.0`。本机订阅 Codex、持续会话、企业知识平面、并行 Agent Harness、命令策略和持久化审批已经形成可运行基础。
+当前版本为 `0.7.0`。本机订阅 Codex、持续会话、企业知识平面、并行 Agent Harness、命令策略、持久化审批和受治理自学习已经形成可运行基础。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -25,15 +25,14 @@ CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划�
 * `self-improvement-candidate` 任务专属候选输出目录。
 * 本机 Ollama、pgvector、混合检索和经过批准的最小知识上下文注入。
 * 客户私有知识、产品共享知识和记忆候选治理。
+* 内容哈希、来源指纹和路径约束驱动的幂等向量索引。
+* Skill、Tool、Validator 和 Harness Profile 注册表。
+* 回放评测、影子运行、金丝雀、Gateway 范围启用和自动回滚。
+* 安装回执、Gardener 记录和标准控制矩阵。
 * Docker Compose 中的前端、Gateway、PostgreSQL 和 Redis。
 * 不消耗 Codex 或 OpenAI 配额的自动化与浏览器测试。
 
-规划中：
-
-* 0.6.0 提供 `single`、`fast`、`balanced`、`deep` Harness Profile、结构化 Artifact、独立复核和统一 SSE。
-* 持久化审批、Command Policy Engine、单写者规则和并发限额。
-* Phase 6 MCP 与外部系统工具。
-* 0.7.0 Skill、Tool、Validator 和 Harness Profile 改进提案、评测、灰度提升及回滚闭环。
+后续生产强化包括身份授权、不可变审计、外部 MCP 集成和分布式队列。
 
 完整状态见 [需求矩阵](docs/requirements-matrix.md)。
 

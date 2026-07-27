@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select
 
@@ -32,8 +33,16 @@ class ApprovalService:
         agent_run_id: str | None,
         request_type: str,
         subject: str,
+        on_pending: Callable[[dict[str, str]], Awaitable[None]] | None = None,
+        access_mode: str = "workspace_write",
     ) -> tuple[str, str]:
         policy = self._policy.evaluate(subject, request_type)
+        if access_mode == "read_only" and policy.decision == "approval_required":
+            policy = type(policy)(
+                decision="allow",
+                risk_level="low",
+                reason="Read-only Harness sandbox constrains the command",
+            )
         initial_status = (
             "approved"
             if policy.decision == "allow"
@@ -62,6 +71,16 @@ class ApprovalService:
             approval_id = approval.id
         if initial_status != "pending":
             return ("accept" if initial_status == "approved" else "decline", approval_id)
+        if on_pending is not None:
+            await on_pending(
+                {
+                    "approval_id": approval_id,
+                    "request_type": request_type,
+                    "subject": subject,
+                    "risk_level": policy.risk_level,
+                    "policy_decision": policy.decision,
+                }
+            )
 
         deadline = asyncio.get_running_loop().time() + self._timeout_seconds
         while asyncio.get_running_loop().time() < deadline:

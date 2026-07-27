@@ -49,7 +49,7 @@ Static validation
   |
 Replay evaluation on representative tasks
   |
-Human review and approval
+Promotion Service policy decision
   |
 Install into project or user capability directory
   |
@@ -60,11 +60,33 @@ Monitor later task outcomes
 Rollback when acceptance regresses
 ```
 
+## Promotion state machine
+
+```text
+proposed
+  |
+validated
+  |
+benchmarked
+  |
+shadow after 10 successful runs
+  |
+canary after 5 successful runs
+  |
+active in the current Gateway registry
+```
+
+Benchmark promotion requires 20 isolated replay cases across two projects or
+product versions, complete security and architecture checks, at least five
+percent quality gain, no success rate regression, and a bounded P95 time
+increase. Sensitive identifiers, secrets, raw prompts and private paths fail
+the governance gate.
+
 ## Safety boundary
 
 Candidate generation and installation are separate authorities.
 
-The candidate task cannot overwrite formal Skills, formal rules or formal validators through the candidate output root. Formal installation remains a future approval API and requires:
+The candidate task cannot overwrite formal Skills, formal rules or formal validators through the candidate output root. Formal activation is executed only by the Promotion Service and requires:
 
 1. exact source candidate;
 2. evaluation cases and results;
@@ -88,6 +110,14 @@ The Codex credential store is outside all task workspace roots.
 
 The caller reads progress through the same CAG Conversation SSE endpoint. Candidate files are server-side artifacts until a later Artifact API exposes reviewed downloads.
 
-## Remaining implementation
+## Implemented records and APIs
 
-Phase 7 will add durable `SkillProposal`, `EvaluationRun`, approval and installation receipt records. It will also add replay datasets, automated validators and rollback status. Current 0.4.0 provides the restricted candidate-writing execution path and documented human gate.
+Version 0.7.0 persists CapabilityAsset, CapabilityEvaluation,
+CapabilityPromotion, CapabilityRollback and GardenerRun. Public endpoints are
+available under `/api/v1/capabilities`, `/api/v1/evaluations`,
+`/api/v1/promotions`, `/api/v1/rollbacks` and `/api/v1/gardeners`.
+
+An active asset is registered only in the current Agent Gateway deployment.
+The service does not modify another Codex installation. Every activation and
+rollback writes a JSON receipt below
+`D:\workspace\codex-selfimp\installation-receipts` when that root is configured.

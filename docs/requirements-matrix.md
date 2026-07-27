@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.6.0 | Evidence |
+| Requirement | Status for 0.7.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -36,10 +36,10 @@ Legend:
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
 | Governed Modular RAG | Implemented | Ingestion, hybrid recall, citations and context isolation |
-| Standards control mapping | Partial | `docs/standards-control-matrix.md` |
+| Standards control mapping | Implemented | `docs/standards-control-matrix.md`, `GET /api/v1/standards/controls` |
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
-| Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
-| Runtime Profiles | Partial | Project allowlist and restricted candidate profile implemented; complete permission intersection remains |
+| Skill discovery | Implemented | Gateway capability registry and seeded Skill catalog |
+| Runtime Profiles | Implemented | Project allowlist, Harness Profile and permission intersection |
 | Command Policy Engine | Implemented | `backend/app/policies/command_policy.py`, policy tests |
 | Approval workflow | Implemented | `ApprovalRequest`, resolve API and runtime callback tests |
 | Agent Harness | Implemented | `backend/app/harness`, fast and balanced tests |
@@ -49,11 +49,14 @@ Legend:
 | Idempotent vector indexing | Implemented | source fingerprint, path and ordinal uniqueness, vector reuse test |
 | Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
-| Skill proposals and evaluation | Partial | Restricted candidate output path implemented; durable proposal and evaluation records remain |
-| Complete required data model | Partial | Project, Conversation, Task and TaskEvent exist; later phase models remain |
+| Skill proposals and evaluation | Implemented | CapabilityAsset, CapabilityEvaluation and promotion API tests |
+| Shadow, canary and automatic rollback | Implemented | ten shadow and five canary gates, rollback tests and receipts |
+| Learning trigger pipeline | Implemented | durable LearningSignal and repeated pattern candidate test |
+| Daily capability gardeners | Implemented | Doc, Skill, Tool and Memory Gardener records |
+| Complete required data model | Implemented | knowledge, Harness, learning, promotion, rollback and control entities |
 | Authentication and project authorization | Planned | Production blocker |
-| Rate and concurrency limits | Planned | Production blocker |
-| Secret scanning | Planned | Production blocker |
+| Rate and concurrency limits | Partial | Harness concurrency limit implemented, distributed rate limiting remains |
+| Secret scanning | Implemented | knowledge and capability proposal scanners |
 | OpenTelemetry tracing | Planned | Compatibility test required |
 
 ## First-round acceptance

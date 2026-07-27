@@ -20,6 +20,8 @@ from app.knowledge.service import KnowledgeService
 from app.approvals.service import ApprovalService
 from app.harness.service import AgentHarness
 from app.policies.command_policy import CommandPolicyService
+from app.capabilities.service import CapabilityService
+from app.learning.service import LearningService
 
 
 def create_app(
@@ -91,11 +93,22 @@ def create_app(
         max_parallel_agents=active_settings.harness_max_parallel_agents,
         agent_timeout_seconds=active_settings.harness_agent_timeout_seconds,
     )
+    capability_service = CapabilityService(
+        database=database,
+        self_improvement_root=active_settings.self_improvement_root,
+    )
+    learning_service = LearningService(
+        database=database,
+        capabilities=capability_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if active_settings.auto_create_schema:
             database.create_schema()
+        with database.session_factory() as recovery_session:
+            task_service.recover_interrupted_tasks(recovery_session)
+        capability_service.seed_defaults()
         yield
         database.dispose()
 
@@ -114,6 +127,8 @@ def create_app(
     application.state.knowledge_service = knowledge_service
     application.state.approval_service = approval_service
     application.state.harness = harness
+    application.state.capability_service = capability_service
+    application.state.learning_service = learning_service
     application.state.task_executor = TaskExecutor(
         database=database,
         runtime=active_runtime,
@@ -122,6 +137,7 @@ def create_app(
         self_improvement_root=active_settings.self_improvement_root,
         knowledge_service=knowledge_service,
         harness=harness,
+        learning_service=learning_service,
     )
     application.add_middleware(
         CORSMiddleware,

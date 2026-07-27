@@ -10,6 +10,7 @@ from app.services.task_service import TaskNotFoundError, TaskService
 from app.workspaces.manager import WorkspaceManager
 from app.knowledge.service import KnowledgeService
 from app.harness.service import AgentHarness
+from app.learning.service import LearningService
 
 
 class TaskExecutor:
@@ -22,6 +23,7 @@ class TaskExecutor:
         self_improvement_root: Path | None = None,
         knowledge_service: KnowledgeService | None = None,
         harness: AgentHarness | None = None,
+        learning_service: LearningService | None = None,
     ) -> None:
         self._database = database
         self._runtime = runtime
@@ -30,6 +32,7 @@ class TaskExecutor:
         self._self_improvement_root = self_improvement_root
         self._knowledge_service = knowledge_service
         self._harness = harness
+        self._learning_service = learning_service
         self._event_lock = asyncio.Lock()
 
     async def execute(self, task_id: str) -> None:
@@ -258,6 +261,40 @@ class TaskExecutor:
                     {"error": str(exc)},
                 )
 
+        if learning_mode != "off" and self._learning_service is not None:
+            await self._emit(task_id, "learning.capture.started", {})
+            try:
+                learning_result = await asyncio.to_thread(
+                    self._learning_service.capture_task,
+                    task_id=task_id,
+                    mode=learning_mode,
+                )
+                await self._emit(
+                    task_id,
+                    "learning.signal.recorded",
+                    learning_result,
+                )
+                if learning_result["candidate_asset_id"] is not None:
+                    await self._emit(
+                        task_id,
+                        "learning.candidate.proposed",
+                        {
+                            "asset_id": learning_result["candidate_asset_id"],
+                            "occurrence_count": learning_result["occurrence_count"],
+                        },
+                    )
+                await self._emit(
+                    task_id,
+                    "learning.capture.completed",
+                    learning_result,
+                )
+            except Exception as exc:
+                await self._emit(
+                    task_id,
+                    "learning.capture.failed",
+                    {"error": str(exc)},
+                )
+
         with self._database.session_factory() as session:
             task = self._task_service.get_task(session, task_id)
             task.status = TaskStatus.COMPLETED
@@ -288,6 +325,39 @@ class TaskExecutor:
                 event_session.commit()
 
     async def _fail_task(self, task_id: str, error: str) -> None:
+        with self._database.session_factory() as session:
+            task = self._task_service.get_task(session, task_id)
+            learning_mode = task.learning_mode
+        if learning_mode != "off" and self._learning_service is not None:
+            await self._emit(task_id, "learning.capture.started", {})
+            try:
+                learning_result = await asyncio.to_thread(
+                    self._learning_service.capture_task,
+                    task_id=task_id,
+                    mode=learning_mode,
+                )
+                await self._emit(
+                    task_id,
+                    "learning.signal.recorded",
+                    learning_result,
+                )
+                if learning_result["candidate_asset_id"] is not None:
+                    await self._emit(
+                        task_id,
+                        "learning.candidate.proposed",
+                        {"asset_id": learning_result["candidate_asset_id"]},
+                    )
+                await self._emit(
+                    task_id,
+                    "learning.capture.completed",
+                    learning_result,
+                )
+            except Exception as exc:
+                await self._emit(
+                    task_id,
+                    "learning.capture.failed",
+                    {"error": str(exc)},
+                )
         with self._database.session_factory() as session:
             task = self._task_service.get_task(session, task_id)
             task.status = TaskStatus.FAILED

@@ -15,6 +15,11 @@ Version 0.6.0 adds an orchestration plane around the locally authenticated Codex
 
 The configured concurrency ceiling is three. Each investigator receives an independent Git clone and a read-only Codex sandbox. Executor receives the task workspace with write permission. Reviews start after Executor completes and use read-only access.
 
+Investigator and reviewer runs have a bounded five minute budget and explicit
+command and output limits. Executor keeps the configured task budget. This
+prevents broad repository dumps and repeated searches from consuming the full
+implementation window.
+
 ## Structured exchange
 
 Each AgentRun has a physical UUID and emits a structured report. The report is persisted as an AgentArtifact with a schema version and SHA 256 content hash. Synthesizer context contains report summaries and evidence requirements. Hidden reasoning is outside the interchange contract.
@@ -36,9 +41,13 @@ The frontend may filter these events. The backend retains every persisted event 
 
 ## Command policy and approval
 
-Command Policy Engine classifies requests as `allow`, `approval_required` or `deny`. Read and verification commands are mechanically allowed. Destructive patterns are denied. Commands outside the allowlist create a persistent ApprovalRequest and place the Task in `waiting_approval` until a user decision or timeout.
+Command Policy Engine classifies requests as `allow`, `approval_required` or `deny`. Read and verification commands are mechanically allowed. Destructive patterns are denied. An unknown command in a read-only Harness sandbox is recorded and allowed by the permission intersection. An unknown Executor command creates a persistent ApprovalRequest and places the Task in `waiting_approval` until a user decision or timeout.
 
 The app-server approval callback receives the resolved decision. File edits are assigned only to Executor. Effective permission is the intersection of app-server sandbox, Harness role and command policy.
+
+CAG emits `approval.pending` immediately after persistence. The frontend lists
+the command, risk level and approval ID and allows an operator to approve or
+deny it while the Agent remains suspended.
 
 ## Evidence and limits
 

@@ -109,6 +109,15 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
 | `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
+
+The self improvement root also contains `installation-receipts`. The Promotion
+Service writes one JSON receipt for each Gateway activation and rollback.
+Operators should back up this directory with the database audit records.
+
+The startup path detects legacy local databases that were created before
+Alembic version tracking. A complete recognized schema is stamped at its exact
+historical revision and then upgraded. A partial or ambiguous core schema fails
+closed and requires operator review.
 | `AGENT_GATEWAY_KNOWLEDGE_ENABLED` | Enable the enterprise knowledge plane |
 | `AGENT_GATEWAY_OLLAMA_BASE_URL` | Private local Ollama endpoint |
 | `AGENT_GATEWAY_OLLAMA_EMBEDDING_MODEL` | Embedding model name |

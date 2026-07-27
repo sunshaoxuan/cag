@@ -90,6 +90,42 @@ export type MemoryCandidate = {
   status: string;
 };
 
+export type CapabilityAsset = {
+  id: string;
+  kind: string;
+  code: string;
+  version: string;
+  status: string;
+  content_hash: string;
+  shadow_runs: number;
+  canary_runs: number;
+  rolling_quality_delta: number;
+  active: boolean;
+};
+
+export type StandardControl = {
+  id: string;
+  code: string;
+  framework: string;
+  title: string;
+  implementation_status: string;
+  evidence_paths: string[];
+  certification_claimed: boolean;
+};
+
+export type ApprovalRequest = {
+  id: string;
+  task_id: string;
+  agent_run_id: string | null;
+  request_type: string;
+  subject: string;
+  risk_level: string;
+  status: string;
+  policy_decision: string;
+  requested_at: string;
+  resolution_note: string | null;
+};
+
 export type TaskEvent = {
   event_id: string;
   task_id: string;
@@ -201,6 +237,48 @@ export function transitionMemoryCandidate(
 ): Promise<{ id: string; scope: string; status: string }> {
   return request(`/api/v1/memory-candidates/${candidateId}/${action}`, {
     method: "POST",
+  });
+}
+
+export function listCapabilities(
+  kind: "skills" | "tools" | "validators" | "harness-profiles",
+): Promise<CapabilityAsset[]> {
+  return request<CapabilityAsset[]>(`/api/v1/capabilities/${kind}`);
+}
+
+export function listStandardControls(): Promise<StandardControl[]> {
+  return request<StandardControl[]>("/api/v1/standards/controls");
+}
+
+export function listPromotions(): Promise<
+  Array<{
+    id: string;
+    asset_id: string;
+    from_status: string;
+    to_status: string;
+    decision: string;
+    created_at: string;
+  }>
+> {
+  return request("/api/v1/promotions");
+}
+
+export function listTaskApprovals(taskId: string): Promise<ApprovalRequest[]> {
+  return request<ApprovalRequest[]>(`/api/v1/tasks/${taskId}/approvals`);
+}
+
+export function resolveApproval(
+  approvalId: string,
+  decision: "approve" | "deny",
+): Promise<ApprovalRequest> {
+  return request<ApprovalRequest>(`/api/v1/approvals/${approvalId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      decision,
+      resolved_by: "gateway-frontend",
+      note: "Resolved by an authenticated Gateway operator",
+    }),
   });
 }
 

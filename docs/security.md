@@ -107,3 +107,19 @@ Runtime Profile names are validated against each Project YAML allowlist. Formal 
 ## 10. Current limitations
 
 The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG SSE, restricted candidate path and knowledge ingestion Secret Scanner are implemented. Identity authentication, authorization, complete command policy enforcement, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.
+
+## 11. Capability promotion security
+
+Capability definitions pass schema, dependency, permission, supply chain,
+Secret Scanner and sensitive identifier checks before benchmark promotion.
+Security and architecture test pass rates must both equal 100 percent.
+
+Agents can propose assets and record evidence. Only the Promotion Service can
+advance state or activate a capability. Effective permissions remain the
+intersection of project policy, Harness Profile, capability declaration and
+Command Policy Engine.
+
+Two consecutive rollout failures or a rolling quality decrease beyond five
+percent returns the asset to benchmarked status. Active state and canary
+counters are cleared. Installation and rollback receipts are stored outside
+the project repository when the self improvement root is configured.

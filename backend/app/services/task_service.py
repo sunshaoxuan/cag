@@ -2,7 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
+    AgentRun,
     Conversation,
+    HarnessRun,
     Product,
     ProductVersion,
     Project,
@@ -11,6 +13,7 @@ from app.models import (
     TaskStatus,
     Tenant,
 )
+from app.models.base import utc_now
 from app.projects.registry import ProjectConfig, ProjectRegistry
 
 
@@ -290,3 +293,37 @@ class TaskService:
                 .order_by(TaskEvent.sequence)
             )
         )
+
+    def recover_interrupted_tasks(self, session: Session) -> int:
+        tasks = list(
+            session.scalars(
+                select(Task).where(~Task.status.in_(TaskStatus.TERMINAL))
+            )
+        )
+        for task in tasks:
+            task.status = TaskStatus.FAILED
+            task.error = "Gateway restarted before task completion"
+            task.completed_at = utc_now()
+            self.append_event(
+                session,
+                task=task,
+                event_type="task.failed",
+                data={"error": task.error, "reason": "gateway_restart"},
+            )
+            harness = session.scalar(
+                select(HarnessRun).where(HarnessRun.task_id == task.id)
+            )
+            if harness is not None and harness.status == "running":
+                harness.status = "interrupted"
+                harness.completed_at = utc_now()
+            for agent in session.scalars(
+                select(AgentRun).where(
+                    AgentRun.task_id == task.id,
+                    AgentRun.status.in_(("queued", "running")),
+                )
+            ):
+                agent.status = "interrupted"
+                agent.error = "Gateway restarted"
+                agent.completed_at = utc_now()
+        session.commit()
+        return len(tasks)

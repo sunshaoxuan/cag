@@ -77,6 +77,10 @@ Write-Host "Gateway: http://127.0.0.1:$Port"
 
 Push-Location $backendRoot
 try {
+    & $pythonExecutable -m app.migrations.legacy_baseline
+    if ($LASTEXITCODE -ne 0) {
+        throw "Agent Gateway legacy database baseline failed."
+    }
     & $pythonExecutable -m alembic upgrade head
     if ($LASTEXITCODE -ne 0) {
         throw "Agent Gateway database migration failed."

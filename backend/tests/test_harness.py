@@ -119,6 +119,35 @@ def test_approval_service_persists_policy_decisions_and_resolution(app_factory) 
             },
         ).json()
         approval_service = app.state.approval_service
+        pending_events = []
+
+        async def approve_pending(data):
+            pending_events.append(data)
+            approval_service.resolve(
+                data["approval_id"],
+                decision="approve",
+                resolved_by="test-callback",
+                note="read-only test",
+            )
+
+        callback_decision, callback_id = asyncio.run(
+            approval_service.request(
+                task_id=task["id"],
+                agent_run_id=None,
+                request_type="command",
+                subject="git tag --list",
+                on_pending=approve_pending,
+            )
+        )
+        constrained_decision, constrained_id = asyncio.run(
+            approval_service.request(
+                task_id=task["id"],
+                agent_run_id=None,
+                request_type="command",
+                subject="git tag --list",
+                access_mode="read_only",
+            )
+        )
         decision, safe_id = asyncio.run(
             approval_service.request(
                 task_id=task["id"],
@@ -168,7 +197,11 @@ def test_approval_service_persists_policy_decisions_and_resolution(app_factory) 
 
     assert decision == "accept"
     assert denied == "decline"
+    assert callback_decision == "accept"
+    assert pending_events[0]["approval_id"] == callback_id
+    assert constrained_decision == "accept"
+    assert constrained_id != callback_id
     assert safe_id != denied_id
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "approved"
-    assert len(approvals) == 3
+    assert len(approvals) == 5

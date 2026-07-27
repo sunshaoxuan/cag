@@ -1,5 +1,13 @@
 from app.models.base import Base
 from app.models.conversation import Conversation
+from app.models.capability import (
+    CapabilityAsset,
+    CapabilityEvaluation,
+    CapabilityPromotion,
+    CapabilityRollback,
+    GardenerRun,
+    StandardControl,
+)
 from app.models.knowledge import (
     DataQualityMetric,
     KnowledgeChunk,
@@ -37,6 +45,10 @@ from app.models.task_event import TaskEvent
 __all__ = [
     "Base",
     "Conversation",
+    "CapabilityAsset",
+    "CapabilityEvaluation",
+    "CapabilityPromotion",
+    "CapabilityRollback",
     "AgentArtifact",
     "AgentRun",
     "ApprovalRequest",
@@ -52,6 +64,7 @@ __all__ = [
     "KnowledgeUsage",
     "HarnessRun",
     "HarnessProfile",
+    "GardenerRun",
     "LearningSignal",
     "MemoryCandidate",
     "MemoryStatus",
@@ -66,5 +79,6 @@ __all__ = [
     "TaskStatus",
     "TaskGraphNode",
     "Tenant",
+    "StandardControl",
     "VerificationRun",
 ]

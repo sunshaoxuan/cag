@@ -198,18 +198,24 @@ def test_tasks_reuse_persisted_codex_thread(app_factory) -> None:
     assert runtime.received_thread_ids == [None, "codex-thread-persisted"]
     assert [task["prompt"] for task in tasks] == ["第一轮", "第二轮"]
     assert events_response.status_code == 200
-    assert [event["sequence"] for event in events] == list(range(1, 11))
+    assert [event["sequence"] for event in events] == list(range(1, 17))
     assert [event["task_sequence"] for event in events] == [
         1,
         2,
         3,
         4,
         5,
+        6,
+        7,
+        8,
         1,
         2,
         3,
         4,
         5,
+        6,
+        7,
+        8,
     ]
     assert all(event["conversation_id"] == conversation["id"] for event in events)
 
@@ -290,7 +296,7 @@ def test_conversation_event_stream_resumes_from_header(app_factory) -> None:
         )
 
     events = parse_sse(response.text)
-    assert [event["sequence"] for event in events] == [4, 5]
+    assert [event["sequence"] for event in events] == [4, 5, 6, 7, 8]
 
 
 def test_conversation_rejects_a_second_active_task(app_factory) -> None:

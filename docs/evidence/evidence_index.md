@@ -1,5 +1,12 @@
 # Evidence index
 
+## Version 0.7.0
+
+* `docs/evidence/SELF_LEARNING_FINAL_RECEIPT.md`
+* `docs/adr/0009-governed-self-learning.md`
+* `backend/tests/test_capabilities.py`
+* `docs/evidence/screenshots/self-learning-0.7.0.png`
+
 Version: 0.4.0
 
 | Evidence | Purpose | Result |

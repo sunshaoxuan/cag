@@ -11,6 +11,9 @@ import {
   ingestKnowledgeSource,
   KnowledgeSource,
   KnowledgeStatus,
+  CapabilityAsset,
+  ApprovalRequest,
+  StandardControl,
   listKnowledgeSources,
   listMemoryCandidates,
   MemoryCandidate,
@@ -19,6 +22,11 @@ import {
   Task,
   TaskEvent,
   transitionMemoryCandidate,
+  listCapabilities,
+  listPromotions,
+  listStandardControls,
+  listTaskApprovals,
+  resolveApproval,
 } from "./api";
 import "./styles.css";
 
@@ -43,6 +51,17 @@ const EVENT_TYPES = [
   "memory.candidate.created",
   "memory.extraction.completed",
   "memory.extraction.failed",
+  "learning.capture.started",
+  "learning.signal.recorded",
+  "learning.candidate.proposed",
+  "learning.capture.completed",
+  "learning.capture.failed",
+  "evaluation.started",
+  "evaluation.completed",
+  "promotion.shadow",
+  "promotion.canary",
+  "promotion.active",
+  "promotion.rollback",
   "runtime.connected",
   "runtime.thread",
   "agent.message.started",
@@ -64,6 +83,7 @@ const EVENT_TYPES = [
   "test.started",
   "test.completed",
   "approval.requested",
+  "approval.pending",
   "approval.resolved",
   "task.completed",
   "task.failed",
@@ -93,6 +113,18 @@ const EVENT_LABELS: Record<string, string> = {
   "memory.candidate.created": "已生成记忆候选",
   "memory.extraction.completed": "记忆候选提取完成",
   "memory.extraction.failed": "记忆候选提取失败",
+  "learning.capture.started": "正在分析本轮学习信号",
+  "learning.signal.recorded": "学习信号已记录",
+  "learning.candidate.proposed": "可复用能力候选已创建",
+  "learning.capture.completed": "本轮学习分析完成",
+  "learning.capture.failed": "本轮学习分析失败",
+  "evaluation.started": "能力评测已启动",
+  "evaluation.completed": "能力评测已完成",
+  "promotion.shadow": "能力进入影子运行",
+  "promotion.canary": "能力进入金丝雀运行",
+  "promotion.active": "能力已在 Gateway 启用",
+  "promotion.rollback": "能力已自动回滚",
+  "approval.pending": "等待命令审批",
   "agent.plan": "Agent 已生成计划",
   "agent.plan.delta": "Agent 计划增量",
   "agent.message.started": "Agent 开始回复",
@@ -148,6 +180,7 @@ const ESSENTIAL_EVENT_TYPES = new Set([
   "file.changed",
   "test.completed",
   "approval.requested",
+  "approval.pending",
   "approval.resolved",
   "task.completed",
   "task.failed",
@@ -238,6 +271,10 @@ export default function App() {
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
   const [learningMode, setLearningMode] = useState("capture");
+  const [capabilities, setCapabilities] = useState<CapabilityAsset[]>([]);
+  const [standardControls, setStandardControls] = useState<StandardControl[]>([]);
+  const [promotionCount, setPromotionCount] = useState(0);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -276,6 +313,27 @@ export default function App() {
 
   useEffect(() => {
     refreshKnowledge();
+  }, []);
+
+  function refreshGovernance() {
+    Promise.all([
+      listCapabilities("skills"),
+      listCapabilities("tools"),
+      listCapabilities("validators"),
+      listCapabilities("harness-profiles"),
+      listStandardControls(),
+      listPromotions(),
+    ])
+      .then(([skills, tools, validators, profiles, controls, promotions]) => {
+        setCapabilities([...skills, ...tools, ...validators, ...profiles]);
+        setStandardControls(controls);
+        setPromotionCount(promotions.length);
+      })
+      .catch((reason: Error) => setError(reason.message));
+  }
+
+  useEffect(() => {
+    refreshGovernance();
   }, []);
 
   const selectedProject = useMemo(
@@ -320,7 +378,10 @@ export default function App() {
       event.type === "workspace.preparing"
     ) {
       nextStatus = "preparing";
-    } else if (event.type === "approval.requested") {
+    } else if (
+      event.type === "approval.requested" ||
+      event.type === "approval.pending"
+    ) {
       nextStatus = "waiting_approval";
     } else if (event.type === "task.completed") {
       nextStatus = "completed";
@@ -361,6 +422,15 @@ export default function App() {
           : turn,
       ),
     );
+    if (
+      event.type === "approval.pending" ||
+      event.type === "approval.requested" ||
+      event.type === "approval.resolved"
+    ) {
+      listTaskApprovals(event.task_id)
+        .then(setApprovals)
+        .catch((reason: Error) => setError(reason.message));
+    }
   }
 
   function connectConversationEvents(activeConversation: Conversation) {
@@ -405,6 +475,7 @@ export default function App() {
     setTask(null);
     setTurns([]);
     setEvents([]);
+    setApprovals([]);
     setError(null);
   }
 
@@ -478,6 +549,20 @@ export default function App() {
       refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "记忆操作失败");
+    }
+  }
+
+  async function handleApprovalAction(
+    approvalId: string,
+    decision: "approve" | "deny",
+  ) {
+    try {
+      await resolveApproval(approvalId, decision);
+      if (task) {
+        setApprovals(await listTaskApprovals(task.id));
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "审批操作失败");
     }
   }
 
@@ -565,6 +650,54 @@ export default function App() {
                     提升为产品知识
                   </button>
                 )}
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="capability-console panel" aria-label="自学习能力治理">
+        <div className="section-heading">
+          <div>
+            <p className="section-index">CAPABILITY</p>
+            <h2>自学习与能力治理</h2>
+          </div>
+          <span className="status status-completed">
+            Gateway 注册表
+          </span>
+        </div>
+        <div className="knowledge-summary">
+          <p>
+            已登记 {capabilities.length} 项能力
+            <span aria-hidden="true"> · </span>
+            已启用 {capabilities.filter((item) => item.active).length} 项
+          </p>
+          <p>
+            提升记录 {promotionCount} 条
+            <span aria-hidden="true"> · </span>
+            控制映射 {standardControls.length} 项
+          </p>
+        </div>
+        <div className="capability-grid">
+          <div>
+            <h3>Skill 与 Tool 注册表</h3>
+            {capabilities.slice(0, 10).map((asset) => (
+              <article className="knowledge-item" key={asset.id}>
+                <strong>{asset.code}</strong>
+                <span>{asset.kind} · {asset.status} · v{asset.version}</span>
+                <small>
+                  影子 {asset.shadow_runs} 次 · 金丝雀 {asset.canary_runs} 次
+                </small>
+              </article>
+            ))}
+          </div>
+          <div>
+            <h3>标准控制矩阵</h3>
+            {standardControls.map((control) => (
+              <article className="knowledge-item" key={control.id}>
+                <strong>{control.framework}</strong>
+                <span>{control.code} · {control.implementation_status}</span>
+                <small>{control.title}</small>
               </article>
             ))}
           </div>
@@ -757,6 +890,34 @@ export default function App() {
               当前显示 {visibleEvents.length.toLocaleString()} 条
             </p>
           </div>
+
+          {approvals.some((item) => item.status === "pending") && (
+            <div className="approval-panel" aria-label="待处理审批">
+              <h3>待处理审批</h3>
+              {approvals
+                .filter((item) => item.status === "pending")
+                .map((approval) => (
+                  <article key={approval.id}>
+                    <strong>{approval.request_type} · {approval.risk_level}</strong>
+                    <p>{approval.subject}</p>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(approval.id, "approve")}
+                      >
+                        批准
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(approval.id, "deny")}
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  </article>
+                ))}
+            </div>
+          )}
 
           {events.length === 0 && (
             <div className="empty-state">

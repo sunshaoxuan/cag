@@ -108,10 +108,12 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 describe("Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
+  let pendingApprovals: Array<Record<string, unknown>>;
 
   beforeEach(() => {
     MockEventSource.instances = [];
     submittedTasks = [];
+    pendingApprovals = [];
     vi.stubGlobal("EventSource", MockEventSource);
     vi.stubGlobal(
       "fetch",
@@ -134,6 +136,40 @@ describe("Agent Gateway conversation page", () => {
         }
         if (url.endsWith("/api/v1/memory-candidates")) {
           return jsonResponse([]);
+        }
+        if (url.includes("/api/v1/capabilities/")) {
+          return jsonResponse([]);
+        }
+        if (url.endsWith("/api/v1/standards/controls")) {
+          return jsonResponse([
+            {
+              id: "control-1",
+              code: "RAG-01",
+              framework: "NeurIPS RAG",
+              title: "Non-parametric evidence retrieval",
+              implementation_status: "mapped",
+              evidence_paths: ["docs/standards-control-matrix.md"],
+              certification_claimed: false,
+            },
+          ]);
+        }
+        if (url.endsWith("/api/v1/promotions")) {
+          return jsonResponse([]);
+        }
+        if (url.includes("/api/v1/tasks/") && url.endsWith("/approvals")) {
+          return jsonResponse(pendingApprovals);
+        }
+        if (
+          url.includes("/api/v1/approvals/") &&
+          url.endsWith("/resolve") &&
+          init?.method === "POST"
+        ) {
+          const resolved = {
+            ...pendingApprovals[0],
+            status: "approved",
+          };
+          pendingApprovals = [resolved];
+          return jsonResponse(resolved);
         }
         if (
           url.endsWith("/api/v1/conversations") &&
@@ -177,6 +213,8 @@ describe("Agent Gateway conversation page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("CAG 持续会话")).toBeInTheDocument();
     expect(await screen.findByText("Ollama 就绪")).toBeInTheDocument();
+    expect(await screen.findByText("Gateway 注册表")).toBeInTheDocument();
+    expect(screen.getByText("NeurIPS RAG")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
@@ -407,5 +445,50 @@ describe("Agent Gateway conversation page", () => {
         ),
       ).toHaveLength(25);
     });
+  });
+
+  it("shows and resolves a pending command approval", async () => {
+    pendingApprovals = [
+      {
+        id: "approval-1",
+        task_id: "task-1",
+        agent_run_id: "agent-1",
+        request_type: "command",
+        subject: "git log --oneline",
+        risk_level: "medium",
+        status: "pending",
+        policy_decision: "approval_required",
+        requested_at: "2026-07-27T00:00:01Z",
+        resolution_note: null,
+      },
+    ];
+    render(<App />);
+    await screen.findByRole("option", {
+      name: "Codex/ChatGPT Agent Gateway · cag",
+    });
+    fireEvent.change(screen.getByLabelText("发送消息"), {
+      target: { value: "审批测试" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("审批测试");
+
+    act(() => {
+      MockEventSource.instances[0].emit("approval.pending", {
+        event_id: "approval-event",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 9,
+        task_sequence: 9,
+        type: "approval.pending",
+        timestamp: "2026-07-27T00:00:01Z",
+        data: { approval_id: "approval-1" },
+      });
+    });
+
+    expect(await screen.findByText("git log --oneline")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("待处理审批")).not.toBeInTheDocument(),
+    );
   });
 });

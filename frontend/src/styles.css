@@ -139,6 +139,20 @@ h1 {
   margin-top: 20px;
 }
 
+.capability-console {
+  margin-bottom: 24px;
+}
+
+.capability-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.capability-grid > div {
+  min-width: 0;
+}
+
 .knowledge-item {
   display: grid;
   gap: 5px;
@@ -420,6 +434,33 @@ button:disabled {
   background: rgba(244, 247, 244, 0.82);
 }
 
+.approval-panel {
+  margin: 14px 0 18px;
+  padding: 14px;
+  border: 1px solid rgba(148, 82, 41, 0.32);
+  border-radius: 16px;
+  background: rgba(255, 246, 232, 0.84);
+}
+
+.approval-panel article + article {
+  margin-top: 12px;
+}
+
+.approval-panel p {
+  max-height: 7rem;
+  margin: 6px 0 10px;
+  overflow: auto;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.approval-panel button + button {
+  margin-left: 8px;
+}
+
 .feedback-controls label {
   margin: 0;
 }
@@ -679,6 +720,10 @@ button:disabled {
 
 @media (max-width: 900px) {
   .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-grid {
     grid-template-columns: 1fr;
   }
 

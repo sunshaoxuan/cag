@@ -182,6 +182,11 @@ keep Conversation SSE open for the next Task
 
 Terminal states are `completed`, `failed`, and `cancelled`.
 
+At startup, CAG closes tasks left in a nonterminal state by a prior process.
+The task receives a durable `task.failed` event with reason `gateway_restart`.
+Related Harness and Agent runs are marked `interrupted`. This keeps
+Conversation submission and SSE history consistent after a local restart.
+
 ## 7. Runtime isolation
 
 The Gateway allocates one writable Git clone per task:
@@ -220,3 +225,33 @@ Noncritical defaults are controlled by settings and recorded in ADR 0002:
 * Project configuration directory: `projects`.
 * Workspace root: `workspaces`.
 * Workspace type: `git_clone`.
+
+## 11. Self learning and capability governance
+
+Task outcomes produce durable LearningSignal records. Three matching successful
+patterns or two matching failure patterns create a content-addressed candidate.
+The candidate is stored in the Gateway capability registry with declared
+schemas, permissions, dependencies, evidence, acceptance and rollback.
+
+The Promotion Service is the only component allowed to change registry state:
+
+```text
+proposed
+  |
+validated
+  |
+benchmarked
+  |
+shadow
+  |
+canary
+  |
+active
+```
+
+The service records every evaluation and transition. Activation changes only
+the current Gateway registry. Formal Codex Skills, AGENTS.md files and other
+Gateway deployments remain outside this authority.
+
+The four Gardeners inspect documentation, Skill, Tool and Memory assets for
+drift and low value. Their findings and actions are persistent records.

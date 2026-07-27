@@ -106,7 +106,7 @@ def test_task_events_are_ordered_sse(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = parse_sse(response.text)
-    assert [event["sequence"] for event in events] == list(range(1, 9))
+    assert [event["sequence"] for event in events] == list(range(1, 12))
     assert [event["type"] for event in events] == [
         "task.created",
         "task.started",
@@ -115,6 +115,9 @@ def test_task_events_are_ordered_sse(client: TestClient) -> None:
         "agent.plan",
         "agent.message",
         "test.completed",
+        "learning.capture.started",
+        "learning.signal.recorded",
+        "learning.capture.completed",
         "task.completed",
     ]
     assert all(event["task_id"] == task["id"] for event in events)
@@ -129,7 +132,7 @@ def test_task_events_can_resume_after_sequence(client: TestClient) -> None:
     )
 
     events = parse_sse(response.text)
-    assert [event["sequence"] for event in events] == [7, 8]
+    assert [event["sequence"] for event in events] == [7, 8, 9, 10, 11]
 
 
 def test_missing_task_returns_404(client: TestClient) -> None:
@@ -204,6 +207,9 @@ def test_runtime_failure_is_persisted(app_factory) -> None:
         "task.started",
         "workspace.preparing",
         "workspace.ready",
+        "learning.capture.started",
+        "learning.signal.recorded",
+        "learning.capture.completed",
         "task.failed",
     ]
 
@@ -223,6 +229,28 @@ def test_disallowed_runtime_profile_returns_422(client: TestClient) -> None:
         response.json()["detail"]
         == "Runtime profile is not allowed for this project"
     )
+
+
+def test_gateway_restart_marks_interrupted_task_failed(app_factory) -> None:
+    app = app_factory()
+    with TestClient(app) as client:
+        task = create_task(client)
+        with app.state.database.session_factory() as session:
+            stored = app.state.task_service.get_task(session, task["id"])
+            stored.status = "running"
+            stored.error = None
+            stored.completed_at = None
+            session.commit()
+
+    with TestClient(app_factory()) as restarted:
+        recovered = restarted.get(f"/api/v1/tasks/{task['id']}").json()
+        events = parse_sse(
+            restarted.get(f"/api/v1/tasks/{task['id']}/events").text
+        )
+
+    assert recovered["status"] == "failed"
+    assert recovered["error"] == "Gateway restarted before task completion"
+    assert events[-1]["data"]["reason"] == "gateway_restart"
 
 
 def test_self_improvement_profile_gets_task_scoped_candidate_root(

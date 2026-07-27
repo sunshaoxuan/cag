@@ -257,6 +257,7 @@ command.completed
 agent.reasoning.summary.delta
 file.changed
 approval.requested
+approval.pending
 approval.resolved
 ```
 
@@ -278,6 +279,34 @@ Delta payloads preserve the app-server item and turn identity:
 
 `runtime.thread` records `started` for the first Conversation turn and `resumed` for later turns. The frontend receives this event through CAG SSE.
 
-## Planned endpoints
+## Capability governance
 
-The source specification also requires cancellation, approvals, changes, artifacts and durable Skill proposal records. Their status is tracked in [requirements-matrix.md](requirements-matrix.md).
+The Gateway exposes:
+
+```text
+GET  /api/v1/capabilities/skills
+POST /api/v1/capabilities/skills
+GET  /api/v1/capabilities/tools
+POST /api/v1/capabilities/tools
+GET  /api/v1/capabilities/validators
+GET  /api/v1/capabilities/harness-profiles
+GET  /api/v1/evaluations
+POST /api/v1/evaluations/{asset_id}
+GET  /api/v1/promotions
+POST /api/v1/promotions/{asset_id}/shadow
+POST /api/v1/promotions/{asset_id}/canary
+GET  /api/v1/rollbacks
+POST /api/v1/rollbacks/{asset_id}
+POST /api/v1/gardeners/run
+GET  /api/v1/standards/controls
+```
+
+Capability proposals declare a trigger, input and output schemas, permissions,
+dependencies, timeout, evidence requirements, acceptance and rollback. A
+proposal remains inactive until the complete evaluation, shadow and canary
+state machine succeeds.
+
+Task SSE includes `learning.capture.started`, `learning.signal.recorded`,
+`learning.candidate.proposed`, `learning.capture.completed` and
+`learning.capture.failed`. CAG persists every event before projecting it to the
+frontend.

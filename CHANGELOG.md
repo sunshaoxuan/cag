@@ -2,6 +2,28 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.7.0
+
+发布日期：2026-07-27
+
+### Added
+
+* Skill、Tool、Validator、Harness Profile 和 Memory 统一能力注册表。
+* 学习信号的成功三次、失败两次候选触发规则。
+* `proposed → validated → benchmarked → shadow → canary → active` 提升状态机。
+* 20 个隔离回放、两个项目覆盖、质量收益、成功率、延迟、安全和架构固定质量门。
+* 连续十次影子运行、连续五次金丝雀运行及 Gateway 范围自动启用。
+* 连续失败、质量下降和手工触发回滚，以及外部 installation receipt。
+* Doc、Skill、Tool 和 Memory Gardener 执行记录。
+* NeurIPS RAG、ISO、NIST AI RMF 和 OWASP 控制映射 API。
+* 自学习状态、能力注册表和标准控制矩阵前端。
+
+### Validated
+
+* 57 个后端测试通过，覆盖率 88.30%。
+* 20 案例回放、影子、金丝雀、安装回执、敏感内容拒绝和自动回滚通过。
+* 6 个前端测试及生产构建通过。
+
 ## 0.6.0
 
 发布日期：2026-07-27

@@ -158,6 +158,7 @@ class AgentHarness:
                 additional_workspace_roots=(),
                 semaphore=semaphore,
                 emit=emit,
+                budget_seconds=min(self._agent_timeout_seconds, 300),
             )
 
         investigator_results = await asyncio.gather(
@@ -206,6 +207,7 @@ class AgentHarness:
             additional_workspace_roots=additional_workspace_roots,
             semaphore=asyncio.Semaphore(1),
             emit=emit,
+            budget_seconds=self._agent_timeout_seconds,
         )
 
         async def review(role: str) -> RuntimeResult:
@@ -225,6 +227,7 @@ class AgentHarness:
                 additional_workspace_roots=(),
                 semaphore=semaphore,
                 emit=emit,
+                budget_seconds=min(self._agent_timeout_seconds, 300),
             )
 
         review_results = await asyncio.gather(
@@ -308,6 +311,7 @@ class AgentHarness:
         additional_workspace_roots: tuple[Path, ...],
         semaphore: asyncio.Semaphore,
         emit: RuntimeEventCallback,
+        budget_seconds: int,
     ) -> RuntimeResult:
         async with self._db_lock:
             with self._database.session_factory() as session:
@@ -318,7 +322,7 @@ class AgentHarness:
                     role=role,
                     phase=phase,
                     access_mode=access_mode,
-                    budget_seconds=self._agent_timeout_seconds,
+                    budget_seconds=budget_seconds,
                 )
                 session.add(agent_run)
                 session.commit()
@@ -337,11 +341,16 @@ class AgentHarness:
         async def request_approval(
             request_type: str, subject: str
         ) -> tuple[str, str | None]:
+            async def emit_pending(data: dict[str, str]) -> None:
+                await child_emit("approval.pending", data)
+
             return await self._approval_service.request(
                 task_id=task_id,
                 agent_run_id=agent_run_id,
                 request_type=request_type,
                 subject=subject,
+                on_pending=emit_pending,
+                access_mode=access_mode,
             )
 
         async with semaphore:
@@ -383,7 +392,7 @@ class AgentHarness:
                     kwargs["request_approval"] = request_approval
                 result = await asyncio.wait_for(
                     self._runtime.execute(**kwargs),
-                    timeout=self._agent_timeout_seconds,
+                    timeout=budget_seconds,
                 )
             except Exception as exc:
                 async with self._db_lock:
@@ -429,16 +438,35 @@ class AgentHarness:
 
     @staticmethod
     def _role_prompt(role: str, goal: str) -> str:
+        focus = {
+            "repository-mapper": (
+                "Map version, entrypoints, modules and migrations. "
+                "Use at most four bounded read commands."
+            ),
+            "evidence-investigator": (
+                "Trace the implementation to tests and exact evidence paths. "
+                "Use at most six bounded read commands."
+            ),
+            "alternative-investigator": (
+                "Challenge the expected conclusion through an independent path "
+                "using tests, history or design records. Use at most five bounded "
+                "read commands."
+            ),
+        }.get(role, "Use at most five bounded read commands.")
         return (
             f"Role: {role}. Investigate the following goal using read-only access. "
-            "Return a concise structured artifact with findings, evidence paths, "
-            f"uncertainties, and recommended validation. Goal: {goal}"
+            f"{focus} Avoid broad file dumps and repeated searches. Stop after "
+            "sufficient evidence is found. Return no more than 800 words in a "
+            "structured artifact with findings, evidence paths, uncertainties, "
+            f"and recommended validation. Goal: {goal}"
         )
 
     @staticmethod
     def _review_prompt(role: str, goal: str, summary: str) -> str:
         return (
             f"Role: {role}. Independently inspect the workspace after execution. "
-            "Return findings with severity, evidence and validation status. "
+            "Use at most five bounded read or validation commands. Avoid broad "
+            "file dumps. Return no more than 600 words with severity, evidence "
+            "and validation status. Stop when the acceptance decision is supported. "
             f"Original goal: {goal}\nExecutor summary: {summary}"
         )
