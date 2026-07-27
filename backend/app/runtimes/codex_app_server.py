@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from app.config import APP_VERSION
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
 
 
@@ -34,7 +35,11 @@ class CodexAppServerRuntime:
         project_code: str,
         prompt: str,
         runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
         workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
         emit: RuntimeEventCallback,
     ) -> RuntimeResult:
         process = await asyncio.create_subprocess_exec(
@@ -216,7 +221,7 @@ class CodexAppServerRuntime:
                     "clientInfo": {
                         "name": "agent-gateway",
                         "title": "Codex/ChatGPT Agent Gateway",
-                        "version": "0.3.0",
+                        "version": APP_VERSION,
                     },
                     "capabilities": {"experimentalApi": True},
                 },
@@ -248,26 +253,55 @@ class CodexAppServerRuntime:
                 if runtime_profile == "read-only-analysis"
                 else "workspace-write"
             )
-            thread_result = await request(
-                "thread/start",
-                {
+            runtime_workspace_roots = [
+                str(workspace_path),
+                *(str(path) for path in additional_workspace_roots),
+            ]
+            if conversation_thread_id is None:
+                thread_method = "thread/start"
+                thread_params = {
                     "cwd": str(workspace_path),
-                    "runtimeWorkspaceRoots": [str(workspace_path)],
+                    "runtimeWorkspaceRoots": runtime_workspace_roots,
                     "sandbox": sandbox,
                     "approvalPolicy": "never",
-                    "ephemeral": True,
+                    "ephemeral": not persistent_conversation,
                     "serviceName": f"agent-gateway:{project_code}",
-                },
+                    "developerInstructions": developer_instructions,
+                }
+            else:
+                thread_method = "thread/resume"
+                thread_params = {
+                    "threadId": conversation_thread_id,
+                    "cwd": str(workspace_path),
+                    "runtimeWorkspaceRoots": runtime_workspace_roots,
+                    "sandbox": sandbox,
+                    "approvalPolicy": "never",
+                    "developerInstructions": developer_instructions,
+                }
+            thread_result = await request(
+                thread_method,
+                thread_params,
                 timeout=self._startup_timeout_seconds,
             )
             thread_id = thread_result["thread"]["id"]
+            await emit(
+                "runtime.thread",
+                {
+                    "thread_id": thread_id,
+                    "action": (
+                        "started"
+                        if conversation_thread_id is None
+                        else "resumed"
+                    ),
+                },
+            )
             turn_result = await request(
                 "turn/start",
                 {
                     "threadId": thread_id,
                     "input": [{"type": "text", "text": prompt}],
                     "cwd": str(workspace_path),
-                    "runtimeWorkspaceRoots": [str(workspace_path)],
+                    "runtimeWorkspaceRoots": runtime_workspace_roots,
                     "approvalPolicy": "never",
                 },
                 timeout=self._startup_timeout_seconds,
@@ -297,6 +331,7 @@ class CodexAppServerRuntime:
                 approvals=approvals,
                 warnings=warnings,
                 next_actions=[],
+                runtime_thread_id=thread_id,
             )
         finally:
             if process.returncode is None:

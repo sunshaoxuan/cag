@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.3.0`
+Current version: `0.4.0`
 
 ## Conventions
 
@@ -24,7 +24,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.3.0"
+    "version": "0.4.0"
 }
 ```
 
@@ -45,7 +45,13 @@ Returns every valid YAML-configured project:
     "code": "cag",
     "name": "Codex/ChatGPT Agent Gateway",
     "default_branch": "master",
-    "default_runtime_profile": "general-engineering"
+    "default_runtime_profile": "general-engineering",
+    "allowed_runtime_profiles": [
+      "general-engineering",
+      "read-only-analysis",
+      "ci-repair",
+      "self-improvement-candidate"
+    ]
   }
 ]
 ```
@@ -53,6 +59,72 @@ Returns every valid YAML-configured project:
 ### `GET /api/v1/projects/{project_reference}`
 
 Accepts a Project physical UUID or business Code. Unknown references return HTTP 404.
+
+## Create task
+
+## Conversations
+
+### `POST /api/v1/conversations`
+
+Creates the durable CAG conversation that owns frontend continuity, event ordering and the internal Codex thread mapping.
+
+```json
+{
+  "project_id": "cag",
+  "title": "持续工程会话"
+}
+```
+
+Response:
+
+```json
+{
+  "id": "UUID",
+  "project_id": "UUID",
+  "project_code": "cag",
+  "title": "持续工程会话",
+  "codex_thread_id": null,
+  "created_at": "ISO-8601"
+}
+```
+
+`codex_thread_id` is null until the first successful Task. It is an opaque internal runtime identity and contains no credential material.
+
+### `GET /api/v1/conversations/{conversation_id}`
+
+Returns the Conversation and its current Codex thread identity.
+
+### `GET /api/v1/conversations/{conversation_id}/tasks`
+
+Returns all turns in creation order. Each turn is represented by a Task.
+
+### `GET /api/v1/conversations/{conversation_id}/events`
+
+Keeps one CAG-owned SSE stream open across multiple Tasks in the same Conversation.
+
+Query parameters:
+
+* `after_sequence`: last received Conversation event sequence, default `0`.
+* `follow`: keep the stream open, default `true`.
+
+CAG emits a heartbeat comment every 15 seconds while the Conversation is idle. The SSE `id` is the Conversation event sequence. Reconnecting clients may send `Last-Event-ID`; CAG resumes after the greater value from that header and `after_sequence`.
+
+Payload:
+
+```json
+{
+  "event_id": "UUID",
+  "conversation_id": "UUID",
+  "task_id": "UUID",
+  "sequence": 9,
+  "task_sequence": 1,
+  "type": "task.created",
+  "timestamp": "ISO-8601",
+  "data": {}
+}
+```
+
+`sequence` is continuous across the whole Conversation. `task_sequence` restarts at 1 for each Task.
 
 ## Create task
 
@@ -74,6 +146,8 @@ Optional fields:
 * `conversation_id`
 * `runtime_profile`
 
+For continuous dialogue, `conversation_id` is required by the caller contract. A Task without it remains a one-turn execution and its Codex thread is ephemeral.
+
 Response:
 
 ```json
@@ -94,6 +168,15 @@ Response:
   "completed_at": null
 }
 ```
+
+The supported CAG runtime profiles currently include:
+
+* `general-engineering`
+* `read-only-analysis`
+* `ci-repair`
+* `self-improvement-candidate`
+
+The selected profile must appear in the Project YAML `allowed_profiles`. `self-improvement-candidate` adds one task-specific candidate output directory and injects candidate receipt requirements. It does not install a Skill.
 
 ## Get task
 
@@ -143,6 +226,7 @@ The local Codex runtime additionally emits event types derived from app-server n
 
 ```text
 runtime.connected
+runtime.thread
 agent.plan
 agent.message
 command.started
@@ -154,6 +238,8 @@ approval.resolved
 
 `runtime.connected` contains the runtime provider and authentication type. It never contains tokens, credential paths or account email.
 
+`runtime.thread` records `started` for the first Conversation turn and `resumed` for later turns. The frontend receives this event through CAG SSE.
+
 ## Planned endpoints
 
-The source specification also requires conversations, cancellation, approvals, changes, artifacts and Skill proposals. Their status is tracked in [requirements-matrix.md](requirements-matrix.md).
+The source specification also requires cancellation, approvals, changes, artifacts and durable Skill proposal records. Their status is tracked in [requirements-matrix.md](requirements-matrix.md).

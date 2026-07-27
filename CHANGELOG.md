@@ -2,6 +2,28 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.4.0
+
+发布日期：2026-07-27
+
+### Added
+
+* Conversation 创建、查询、历史 Task 查询和会话级 SSE 接口。
+* CAG Conversation 到持久 Codex thread 的一对一映射。
+* 首轮 `thread/start` 和后续轮次 `thread/resume`。
+* 会话级连续事件序号、SSE 心跳和 `Last-Event-ID` 断线续传。
+* 复用单一 Conversation SSE 连接的连续对话页面。
+* `self-improvement-candidate` 受控运行配置及任务专属候选目录。
+* Project 允许的 Runtime Profile 服务端校验。
+
+### Validated
+
+* 真实本机 ChatGPT 订阅登录态完成连续两轮对话。
+* 第二轮在新的独立 Git 工作区中恢复同一个 Codex thread。
+* 第二轮准确返回第一轮保存的随机标记。
+* CAG 会话 SSE 的事件序号从 1 连续到 16，第二轮记录 `resumed`。
+* 自增强配置只授予任务专属候选目录写入能力，正式安装仍需人工批准。
+
 ## 0.3.0
 
 发布日期：2026-07-27

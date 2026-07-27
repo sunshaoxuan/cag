@@ -4,7 +4,7 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Phase 2 is a development foundation. Its public Project and Task APIs have no production authentication and must only bind to trusted local or isolated networks. Authentication and project authorization are required before any shared deployment.
+Version 0.4.0 is a development foundation. Its public Project, Conversation and Task APIs have no production authentication and must only bind to trusted local or isolated networks. Authentication and project authorization are required before any shared deployment.
 
 ## 2. Codex subscription credentials
 
@@ -94,6 +94,12 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 * Loopback WebSocket mode is reserved for controlled local integration.
 * Non-loopback app-server WebSocket mode is excluded until its experimental support and authentication constraints are explicitly accepted.
 
-## 9. Phase 2 limitations
+## 9. Self-improvement boundary
 
-Phase 3 adds a ChatGPT-authenticated local Codex runtime and conservative approval rejection. Identity authentication, authorization, rate limiting, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.
+The `self-improvement-candidate` profile grants write access to one task-specific candidate directory. It does not grant write access to installed user Skills, project rules or validators.
+
+Runtime Profile names are validated against each Project YAML allowlist. Formal installation requires a future approval service, evaluation evidence, an installation receipt and rollback instructions.
+
+## 10. Current limitations
+
+The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG SSE and restricted candidate path are implemented. Identity authentication, authorization, rate limiting, complete concurrency controls, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.

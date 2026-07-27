@@ -1,6 +1,6 @@
 # Evidence index
 
-Version: 0.3.0
+Version: 0.4.0
 
 | Evidence | Purpose | Result |
 |---|---|---|
@@ -34,3 +34,13 @@ Version: 0.3.0
 | Live Gateway local Codex task | HTTP through workspace and app-server | Completed |
 | `docs/adr/0004-app-server-chatgpt-runtime.md` | Phase 3 runtime decision | Accepted |
 | `docs/evidence/phase3_test_results.md` | Phase 3 acceptance record | Passed |
+| `docs/adr/0005-cag-conversation-sse-and-self-improvement.md` | Conversation, SSE and candidate boundary | Accepted |
+| `backend/tests/test_conversations_api.py` | Persistent Conversation and SSE behavior | Passed |
+| `frontend/src/App.test.tsx` | Continuous Conversation UI and EventSource reuse | Passed |
+| Live two-turn local subscription smoke | Stored and recalled a random marker | Passed |
+| CAG Conversation SSE resume | IDs 9 through 16 after cursor 8 | Passed |
+| `docs/self-improvement.md` | Candidate, evaluation, approval and rollback design | Reviewed |
+| `docs/evidence/phase4_test_results.md` | 0.4.0 acceptance record | Passed |
+| `docs/evidence/screenshots/phase4-continuous-conversation.png` | Two-turn Conversation UI | Visually verified |
+| Browser console | Frontend runtime diagnostics | Zero warnings and errors |
+| PostgreSQL `alembic_version` | 0.4.0 schema | `20260727_0004` |

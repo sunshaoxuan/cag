@@ -1,13 +1,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  Conversation,
+  conversationEventsUrl,
+  createConversation,
   createTask,
   getTask,
   listProjects,
   Project,
   Task,
   TaskEvent,
-  taskEventsUrl,
 } from "./api";
 import "./styles.css";
 
@@ -16,6 +18,8 @@ const EVENT_TYPES = [
   "task.started",
   "workspace.preparing",
   "workspace.ready",
+  "runtime.connected",
+  "runtime.thread",
   "agent.message",
   "agent.plan",
   "skill.selected",
@@ -37,16 +41,18 @@ const EVENT_TYPES = [
 ] as const;
 
 const EVENT_LABELS: Record<string, string> = {
-  "task.created": "任务已创建",
-  "task.started": "任务已启动",
+  "task.created": "新一轮已创建",
+  "task.started": "本轮已启动",
   "workspace.preparing": "正在准备独立工作区",
   "workspace.ready": "工作区已就绪",
+  "runtime.connected": "本机 Codex 已连接",
+  "runtime.thread": "Codex 会话已连接",
   "agent.plan": "Agent 已生成计划",
   "agent.message": "Agent 消息",
   "test.completed": "验证已完成",
-  "task.completed": "任务已完成",
-  "task.failed": "任务执行失败",
-  "task.cancelled": "任务已取消",
+  "task.completed": "本轮已完成",
+  "task.failed": "本轮执行失败",
+  "task.cancelled": "本轮已取消",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -57,6 +63,14 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "已完成",
   failed: "失败",
   cancelled: "已取消",
+};
+
+type ChatTurn = {
+  taskId: string;
+  prompt: string;
+  status: string;
+  answer: string | null;
+  error: string | null;
 };
 
 function formatTime(value: string): string {
@@ -76,6 +90,9 @@ function summarizeEvent(event: TaskEvent): string {
       event.data.commit_sha ?? "",
     ).slice(0, 8)}`;
   }
+  if (event.type === "runtime.thread") {
+    return event.data.action === "resumed" ? "恢复持续上下文" : "建立持续上下文";
+  }
   if (event.type === "test.completed") {
     return `${String(event.data.command ?? "验证")}：${String(
       event.data.status ?? "",
@@ -84,11 +101,17 @@ function summarizeEvent(event: TaskEvent): string {
   return EVENT_LABELS[event.type] ?? event.type;
 }
 
+function isTerminal(status: string): boolean {
+  return ["completed", "failed", "cancelled"].includes(status);
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [conversation, setConversation] = useState<Conversation | null>(null);
   const [prompt, setPrompt] = useState("");
   const [task, setTask] = useState<Task | null>(null);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -119,16 +142,39 @@ export default function App() {
     () => projects.find((project) => project.id === projectId),
     [projectId, projects],
   );
+  const busy = task !== null && !isTerminal(task.status);
 
-  function connectEvents(createdTask: Task) {
+  function completeTurn(taskId: string) {
+    getTask(taskId)
+      .then((completedTask) => {
+        setTask(completedTask);
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.taskId === taskId
+              ? {
+                  ...turn,
+                  status: completedTask.status,
+                  answer: completedTask.final_report?.summary ?? null,
+                  error: completedTask.error,
+                }
+              : turn,
+          ),
+        );
+      })
+      .catch((reason: Error) => setError(reason.message));
+  }
+
+  function connectConversationEvents(activeConversation: Conversation) {
     sourceRef.current?.close();
-    const source = new EventSource(taskEventsUrl(createdTask.id));
+    const source = new EventSource(
+      conversationEventsUrl(activeConversation.id),
+    );
     sourceRef.current = source;
 
     const handleEvent = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as TaskEvent;
       setEvents((current) => {
-        if (current.some((item) => item.sequence === event.sequence)) {
+        if (current.some((item) => item.event_id === event.event_id)) {
           return current;
         }
         return [...current, event].sort((a, b) => a.sequence - b.sequence);
@@ -139,10 +185,7 @@ export default function App() {
         event.type === "task.failed" ||
         event.type === "task.cancelled"
       ) {
-        source.close();
-        getTask(createdTask.id)
-          .then(setTask)
-          .catch((reason: Error) => setError(reason.message));
+        completeTurn(event.task_id);
       }
     };
 
@@ -150,68 +193,94 @@ export default function App() {
       source.addEventListener(eventType, handleEvent as EventListener);
     });
     source.onerror = () => {
-      source.close();
-      getTask(createdTask.id)
-        .then(setTask)
-        .catch((reason: Error) => setError(reason.message));
+      setError("会话事件流正在重连");
     };
+  }
+
+  function resetConversation(nextProjectId: string) {
+    sourceRef.current?.close();
+    sourceRef.current = null;
+    setProjectId(nextProjectId);
+    setConversation(null);
+    setTask(null);
+    setTurns([]);
+    setEvents([]);
+    setError(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!projectId || !prompt.trim() || submitting) return;
+    const trimmedPrompt = prompt.trim();
+    if (!projectId || !trimmedPrompt || submitting || busy) return;
 
     setSubmitting(true);
     setError(null);
-    setEvents([]);
-    setTask(null);
     try {
-      const createdTask = await createTask(projectId, prompt.trim());
+      let activeConversation = conversation;
+      if (activeConversation === null) {
+        activeConversation = await createConversation(
+          projectId,
+          trimmedPrompt.slice(0, 80),
+        );
+        setConversation(activeConversation);
+        connectConversationEvents(activeConversation);
+      }
+      const createdTask = await createTask(
+        projectId,
+        trimmedPrompt,
+        activeConversation.id,
+      );
       setTask(createdTask);
-      connectEvents(createdTask);
+      setTurns((current) => [
+        ...current,
+        {
+          taskId: createdTask.id,
+          prompt: trimmedPrompt,
+          status: createdTask.status,
+          answer: null,
+          error: null,
+        },
+      ]);
+      setPrompt("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "任务提交失败");
+      setError(reason instanceof Error ? reason.message : "消息提交失败");
     } finally {
       setSubmitting(false);
     }
   }
 
-  const isTerminal = task
-    ? ["completed", "failed", "cancelled"].includes(task.status)
-    : false;
-
   return (
     <main className="app-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">CODEX TASK CONTROL</p>
+          <p className="eyebrow">CODEX CONVERSATION CONTROL</p>
           <h1>Agent Gateway</h1>
           <p className="hero-copy">
-            选择项目，描述目标。Gateway 将准备独立工作区并持续呈现执行事件。
+            CAG 维护对话、SSE 事件和断线续传，本机 Codex 在独立工作区中完成每一轮。
           </p>
         </div>
         <div className="runtime-chip">
           <span className="runtime-dot" aria-hidden="true" />
-          本地 Codex 订阅架构
+          CAG 持续会话
         </div>
       </header>
 
-      <section className="workspace-grid">
-        <form className="task-composer panel" onSubmit={handleSubmit}>
+      <section className="workspace-grid conversation-grid">
+        <section className="conversation-panel panel">
           <div className="section-heading">
             <div>
               <p className="section-index">01</p>
-              <h2>创建任务</h2>
+              <h2>连续对话</h2>
             </div>
-            <span>Phase 2</span>
+            <span>{conversation ? `会话 ${conversation.id.slice(0, 8)}` : "新会话"}</span>
           </div>
 
           <label htmlFor="project">项目</label>
           <select
             id="project"
             value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-            disabled={loadingProjects || submitting}
+            onChange={(event) => resetConversation(event.target.value)}
+            disabled={loadingProjects || submitting || busy}
           >
             {loadingProjects && <option>正在加载项目</option>}
             {projects.map((project) => (
@@ -229,32 +298,66 @@ export default function App() {
             </p>
           )}
 
-          <label htmlFor="prompt">任务 Prompt</label>
-          <textarea
-            id="prompt"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="例如：检查当前构建失败的原因，修复能够确认的问题并运行测试。"
-            rows={8}
-            disabled={submitting}
-          />
-          <div className="composer-footer">
-            <span>{prompt.trim().length.toLocaleString()} 字</span>
-            <button
-              type="submit"
-              disabled={!projectId || !prompt.trim() || submitting}
-            >
-              {submitting ? "正在提交" : "开始执行"}
-            </button>
+          <div className="chat-history" aria-live="polite">
+            {turns.length === 0 && (
+              <div className="empty-state chat-empty">
+                <div className="empty-mark" aria-hidden="true">
+                  AG
+                </div>
+                <h3>开始一段持续对话</h3>
+                <p>后续消息会复用同一个 CAG Conversation 和 Codex thread。</p>
+              </div>
+            )}
+            {turns.map((turn) => (
+              <article className="chat-turn" key={turn.taskId}>
+                <div className="message message-user">
+                  <span>你</span>
+                  <p>{turn.prompt}</p>
+                </div>
+                <div className="message message-agent">
+                  <span>Codex</span>
+                  {turn.answer && <p>{turn.answer}</p>}
+                  {turn.error && <p className="message-error">{turn.error}</p>}
+                  {!turn.answer && !turn.error && (
+                    <p className="message-pending">
+                      {STATUS_LABELS[turn.status] ?? "处理中"}
+                    </p>
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
+
+          <form className="chat-composer" onSubmit={handleSubmit}>
+            <label htmlFor="prompt">发送消息</label>
+            <textarea
+              id="prompt"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="描述目标，下一轮会继续使用当前上下文。"
+              rows={4}
+              disabled={submitting || busy}
+            />
+            <div className="composer-footer">
+              <span>{prompt.trim().length.toLocaleString()} 字</span>
+              <button
+                type="submit"
+                disabled={
+                  !projectId || !prompt.trim() || submitting || busy
+                }
+              >
+                {submitting ? "正在发送" : busy ? "本轮执行中" : "发送"}
+              </button>
+            </div>
+          </form>
           {error && <p className="error-banner">{error}</p>}
-        </form>
+        </section>
 
         <section className="execution-panel panel" aria-live="polite">
           <div className="section-heading">
             <div>
               <p className="section-index">02</p>
-              <h2>执行过程</h2>
+              <h2>CAG 事件流</h2>
             </div>
             {task && (
               <span className={`status status-${task.status}`}>
@@ -263,95 +366,46 @@ export default function App() {
             )}
           </div>
 
-          {!task && (
+          {events.length === 0 && (
             <div className="empty-state">
               <div className="empty-mark" aria-hidden="true">
-                AG
+                SSE
               </div>
-              <h3>等待新任务</h3>
-              <p>提交后将在这里显示工作区、Agent、命令和测试事件。</p>
+              <h3>等待会话事件</h3>
+              <p>CAG 将在这里持续显示各轮工作区、Agent、命令和测试事件。</p>
             </div>
           )}
 
-          {task && (
-            <>
-              <div className="task-summary">
-                <div>
-                  <span>任务</span>
-                  <strong>{task.id.slice(0, 8)}</strong>
-                </div>
-                <div>
-                  <span>项目</span>
-                  <strong>{task.project_code}</strong>
-                </div>
-                <div>
-                  <span>工作区</span>
-                  <strong>{task.workspace_id ? "独立" : "准备中"}</strong>
-                </div>
-              </div>
-
-              <ol className="event-list">
-                {events.map((event) => (
-                  <li key={event.event_id}>
-                    <span className="event-sequence">
-                      {String(event.sequence).padStart(2, "0")}
-                    </span>
-                    <div>
-                      <div className="event-title">
-                        <strong>{EVENT_LABELS[event.type] ?? event.type}</strong>
-                        <time dateTime={event.timestamp}>
-                          {formatTime(event.timestamp)}
-                        </time>
-                      </div>
-                      <p>{summarizeEvent(event)}</p>
+          {events.length > 0 && (
+            <ol className="event-list">
+              {events.map((event) => (
+                <li key={event.event_id}>
+                  <span className="event-sequence">
+                    {String(event.sequence).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <div className="event-title">
+                      <strong>{EVENT_LABELS[event.type] ?? event.type}</strong>
+                      <time dateTime={event.timestamp}>
+                        {formatTime(event.timestamp)}
+                      </time>
                     </div>
-                  </li>
-                ))}
-                {!isTerminal && (
-                  <li className="event-pending">
-                    <span className="event-sequence pulse" />
-                    <div>
-                      <strong>正在等待下一事件</strong>
-                    </div>
-                  </li>
-                )}
-              </ol>
-            </>
+                    <p>{summarizeEvent(event)}</p>
+                  </div>
+                </li>
+              ))}
+              {busy && (
+                <li className="event-pending">
+                  <span className="event-sequence pulse" />
+                  <div>
+                    <strong>正在等待下一事件</strong>
+                  </div>
+                </li>
+              )}
+            </ol>
           )}
         </section>
       </section>
-
-      {task?.final_report && (
-        <section className="result-panel panel">
-          <div className="section-heading">
-            <div>
-              <p className="section-index">03</p>
-              <h2>最终报告</h2>
-            </div>
-            <span className="status status-completed">验证完成</span>
-          </div>
-          <p className="result-summary">{task.final_report.summary}</p>
-          <div className="result-grid">
-            <div>
-              <h3>验证</h3>
-              {task.final_report.validation.map((validation) => (
-                <p key={validation.command} className="validation-row">
-                  <span>{validation.command}</span>
-                  <strong>{validation.status}</strong>
-                </p>
-              ))}
-            </div>
-            <div>
-              <h3>提醒</h3>
-              <ul>
-                {task.final_report.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-      )}
     </main>
   );
 }

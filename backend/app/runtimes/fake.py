@@ -19,7 +19,11 @@ class FakeAgentRuntime:
         project_code: str,
         prompt: str,
         runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
         workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
         emit: RuntimeEventCallback,
     ) -> RuntimeResult:
         await emit(
@@ -72,4 +76,5 @@ class FakeAgentRuntime:
             next_actions=[
                 "Run with the local Codex runtime after Phase 3 is enabled."
             ],
+            runtime_thread_id=conversation_thread_id,
         )

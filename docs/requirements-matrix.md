@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.3.0 | Evidence |
+| Requirement | Status for 0.4.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -27,14 +27,18 @@ Legend:
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
+| Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
+| Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
+| CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
+| Continuous conversation frontend | Implemented | Component, build and browser evidence |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
-| Runtime Profiles | Planned for Phase 4 | Permission intersection tests required |
+| Runtime Profiles | Partial | Project allowlist and restricted candidate profile implemented; complete permission intersection remains |
 | Command Policy Engine | Planned for Phase 4 | Safe, approval and forbidden tests required |
 | Approval workflow | Planned for Phase 5 | Pause and resume tests required |
 | Git diff and artifacts | Planned for Phase 5 | Artifact integrity tests required |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
-| Skill proposals and evaluation | Planned for Phase 7 | Human approval gate tests required |
-| Complete required data model | Partial | Project, Conversation, Task and TaskEvent exist |
+| Skill proposals and evaluation | Partial | Restricted candidate output path implemented; durable proposal and evaluation records remain |
+| Complete required data model | Partial | Project, Conversation, Task and TaskEvent exist; later phase models remain |
 | Authentication and project authorization | Planned | Production blocker |
 | Rate and concurrency limits | Planned | Production blocker |
 | Secret scanning | Planned | Production blocker |

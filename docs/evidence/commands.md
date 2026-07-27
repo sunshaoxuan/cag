@@ -123,3 +123,31 @@ GET  http://127.0.0.1:8001/api/v1/tasks/{task_id}/events?follow=false
 ```
 
 The live Prompt requested one fixed response line under the read-only profile. The result was `GATEWAY_LOCAL_CODEX_SUBSCRIPTION_OK`.
+
+## 0.4.0 persistent Conversation validation
+
+```text
+POST /api/v1/conversations
+GET  /api/v1/conversations/{conversation_id}
+POST /api/v1/tasks with conversation_id
+GET  /api/v1/conversations/{conversation_id}/events?follow=false
+POST /api/v1/tasks with the same conversation_id
+GET  /api/v1/conversations/{conversation_id}/events?after_sequence=8&follow=false
+```
+
+The first Task returned `CAG-PERSIST-7F3A91`. The second Task used a different workspace, emitted `runtime.thread` action `resumed`, and returned the same marker.
+
+## 0.4.0 deterministic validation
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest -q
+
+cd ..\frontend
+pnpm test
+pnpm build
+
+cd ..
+docker compose config --quiet
+docker compose build gateway frontend
+```

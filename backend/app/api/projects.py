@@ -14,6 +14,7 @@ class ProjectResponse(BaseModel):
     name: str
     default_branch: str
     default_runtime_profile: str
+    allowed_runtime_profiles: list[str]
 
 
 def to_response(project: ProjectConfig) -> ProjectResponse:
@@ -23,6 +24,7 @@ def to_response(project: ProjectConfig) -> ProjectResponse:
         name=project.name,
         default_branch=project.repository.default_branch,
         default_runtime_profile=project.runtime.default_profile,
+        allowed_runtime_profiles=project.runtime.allowed_profiles,
     )
 
 

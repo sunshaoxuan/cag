@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     codex_startup_timeout_seconds: int = Field(default=30, ge=5, le=300)
     codex_turn_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
     codex_require_chatgpt_auth: bool = True
+    self_improvement_root: Path | None = None
     projects_dir: Path = DEFAULT_REPOSITORY_ROOT / "projects"
     workspace_root: Path = DEFAULT_REPOSITORY_ROOT / "workspaces"
     git_executable: str = "git"

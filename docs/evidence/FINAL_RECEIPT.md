@@ -1,6 +1,6 @@
-# Phase 1 final receipt
+# Current release receipt
 
-Version: 0.1.0
+Version: 0.4.0
 
 Date: 2026-07-27
 
@@ -8,43 +8,29 @@ Branch: `master`
 
 ## Delivered
 
-* Source specification retained under `docs`.
-* Architecture, API, security, deployment, versioning and ADR documents.
-* FastAPI and SQLAlchemy Phase 1 backend.
-* Physical UUID data model for Project, Conversation, Task and TaskEvent.
-* Alembic migration `20260727_0001`.
-* Fake Agent Runtime.
-* Create task, query task and SSE event APIs.
-* Docker Compose with private PostgreSQL and Redis services.
-* Automated and container integration validation.
+* Local ChatGPT-authenticated Codex app-server execution.
+* CAG Conversation API and persistent internal Codex thread mapping.
+* CAG-owned multi-turn SSE with continuous event IDs and reconnection.
+* Continuous Conversation frontend.
+* Isolated Git workspace per Task.
+* Runtime Profile allowlist.
+* Restricted self-improvement candidate path.
+* Tests, migrations, architecture, API, security, deployment and evidence.
 
-## Runtime boundary
+## Verified
 
-The target real runtime is local Codex authenticated with the existing ChatGPT subscription. The local CLI and login status were verified. API Key provisioning is excluded.
+* 36 backend tests passed with 91.06 percent coverage.
+* 3 frontend tests and production build passed.
+* Real two-turn Codex context resume passed.
+* Real self-improvement candidate writing passed.
+* Four Compose services are healthy.
+* PostgreSQL migration head is `20260727_0004`.
+* Browser two-turn flow passed with zero console warnings or errors.
 
-## Acceptance result
+## Open production gates
 
-Phase 1 first-round scope: Passed.
-
-Complete Gateway objective: In progress.
-
-## Verification
-
-* 14 automated tests passed.
-* Coverage is 96.75 percent.
-* Static checks passed.
-* Three Compose services are healthy.
-* PostgreSQL migration and table creation passed.
-* Live Task API and six-event SSE lifecycle passed.
-
-## Known limitations
-
-* Fake Runtime is active.
-* Background execution is process-local.
-* Authentication and authorization are pending.
-* Workspace isolation, policy, approvals, artifacts, MCP and Skill lifecycle remain pending.
-* DOCX visual render QA was unavailable because the source omits page-size properties and LibreOffice is unavailable.
+Authentication, project authorization, rate limiting, durable queueing, cancellation, complete concurrency control, command policy, approval persistence, Secret Scanner, immutable audit and formal Skill installation remain planned.
 
 ## Rollback
 
-Stop the Compose project with `docker compose down`. Retain named volumes when task history must be preserved. Revert the release commit when source rollback is required.
+Stop the 0.4.0 services, deploy the prior release commit and retain named volumes. Downgrade Alembic only when the 0.4.0 Conversation event schema must be removed. Candidate directories and Codex thread history stay retained until an operator approves deletion.

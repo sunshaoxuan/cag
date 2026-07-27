@@ -147,10 +147,46 @@ class FailingRuntime:
         project_code: str,
         prompt: str,
         runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
         workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
         emit: RuntimeEventCallback,
     ) -> RuntimeResult:
         raise RuntimeError("deterministic runtime failure")
+
+
+class CapturingRuntime:
+    def __init__(self) -> None:
+        self.additional_workspace_roots: tuple[Path, ...] = ()
+        self.developer_instructions: str | None = None
+
+    async def execute(
+        self,
+        *,
+        task_id: str,
+        project_code: str,
+        prompt: str,
+        runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
+        workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
+        emit: RuntimeEventCallback,
+    ) -> RuntimeResult:
+        self.additional_workspace_roots = additional_workspace_roots
+        self.developer_instructions = developer_instructions
+        return RuntimeResult(
+            summary="captured",
+            root_cause=None,
+            changes=[],
+            validation=[],
+            approvals=[],
+            warnings=[],
+            next_actions=[],
+        )
 
 
 def test_runtime_failure_is_persisted(app_factory) -> None:
@@ -170,6 +206,53 @@ def test_runtime_failure_is_persisted(app_factory) -> None:
         "workspace.ready",
         "task.failed",
     ]
+
+
+def test_disallowed_runtime_profile_returns_422(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": "test-project",
+            "runtime_profile": "unrestricted",
+            "prompt": "inspect",
+        },
+    )
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]
+        == "Runtime profile is not allowed for this project"
+    )
+
+
+def test_self_improvement_profile_gets_task_scoped_candidate_root(
+    app_factory,
+    settings,
+    tmp_path: Path,
+) -> None:
+    runtime = CapturingRuntime()
+    settings.self_improvement_root = tmp_path / "codex-selfimp"
+
+    with TestClient(app_factory(runtime)) as client:
+        created = client.post(
+            "/api/v1/tasks",
+            json={
+                "project_id": "test-project",
+                "runtime_profile": "self-improvement-candidate",
+                "prompt": "沉淀可复用流程",
+            },
+        )
+        assert created.status_code == 202
+        task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+
+    assert task["status"] == "completed"
+    assert len(runtime.additional_workspace_roots) == 1
+    candidate_root = runtime.additional_workspace_roots[0]
+    assert candidate_root.is_dir()
+    assert candidate_root.name == f"cag-{created.json()['id']}"
+    assert runtime.developer_instructions is not None
+    assert "TASK_LEARNING_RECEIPT.md" in runtime.developer_instructions
+    assert "Do not install" in runtime.developer_instructions
 
 
 def test_each_task_receives_a_distinct_workspace(app_factory) -> None:

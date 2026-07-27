@@ -84,6 +84,7 @@ def create_app(
         runtime=active_runtime,
         task_service=task_service,
         workspace_manager=workspace_manager,
+        self_improvement_root=active_settings.self_improvement_root,
     )
     application.add_middleware(
         CORSMiddleware,

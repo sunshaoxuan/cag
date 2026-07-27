@@ -14,6 +14,10 @@ def test_list_projects_returns_physical_id_and_business_code(
             "name": "Test Project",
             "default_branch": "master",
             "default_runtime_profile": "general-engineering",
+            "allowed_runtime_profiles": [
+                "general-engineering",
+                "self-improvement-candidate",
+            ],
         }
     ]
 

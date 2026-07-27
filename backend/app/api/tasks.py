@@ -18,8 +18,10 @@ from app.database import Database
 from app.events.sse import stream_task_events
 from app.models import Task
 from app.services.task_service import (
+    ConversationBusyError,
     ConversationNotFoundError,
     ProjectNotFoundError,
+    RuntimeProfileNotAllowedError,
     TaskNotFoundError,
     TaskService,
 )
@@ -112,8 +114,18 @@ async def create_task(
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
+    except RuntimeProfileNotAllowedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Runtime profile is not allowed for this project",
+        ) from exc
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Conversation not found") from exc
+    except ConversationBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation already has an active task",
+        ) from exc
 
     response = to_response(task)
     background_tasks.add_task(task_executor.execute, task.id)

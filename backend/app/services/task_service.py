@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Conversation, Project, Task, TaskEvent
+from app.models import Conversation, Project, Task, TaskEvent, TaskStatus
 from app.projects.registry import ProjectConfig, ProjectRegistry
 
 
@@ -9,7 +9,15 @@ class ProjectNotFoundError(Exception):
     pass
 
 
+class RuntimeProfileNotAllowedError(Exception):
+    pass
+
+
 class ConversationNotFoundError(Exception):
+    pass
+
+
+class ConversationBusyError(Exception):
     pass
 
 
@@ -65,11 +73,25 @@ class TaskService:
         runtime_profile: str,
     ) -> Task:
         project = self.resolve_project(session, project_reference)
+        project_config = self.project_registry.resolve(project_reference)
+        if (
+            project_config is None
+            or runtime_profile not in project_config.runtime.allowed_profiles
+        ):
+            raise RuntimeProfileNotAllowedError(runtime_profile)
 
         if conversation_id is not None:
             conversation = session.get(Conversation, conversation_id)
             if conversation is None or conversation.project_id != project.id:
                 raise ConversationNotFoundError(conversation_id)
+            active_task_id = session.scalar(
+                select(Task.id).where(
+                    Task.conversation_id == conversation_id,
+                    ~Task.status.in_(TaskStatus.TERMINAL),
+                )
+            )
+            if active_task_id is not None:
+                raise ConversationBusyError(conversation_id)
 
         task = Task(
             project_id=project.id,
@@ -92,6 +114,33 @@ class TaskService:
         session.commit()
         return self.get_task(session, task.id)
 
+    def create_conversation(
+        self,
+        session: Session,
+        *,
+        project_reference: str,
+        title: str | None,
+    ) -> Conversation:
+        project = self.resolve_project(session, project_reference)
+        conversation = Conversation(project_id=project.id, title=title)
+        session.add(conversation)
+        session.commit()
+        return self.get_conversation(session, conversation.id)
+
+    def get_conversation(
+        self,
+        session: Session,
+        conversation_id: str,
+    ) -> Conversation:
+        conversation = session.scalar(
+            select(Conversation)
+            .options(selectinload(Conversation.project))
+            .where(Conversation.id == conversation_id)
+        )
+        if conversation is None:
+            raise ConversationNotFoundError(conversation_id)
+        return conversation
+
     def get_task(self, session: Session, task_id: str) -> Task:
         task = session.scalar(
             select(Task)
@@ -110,9 +159,22 @@ class TaskService:
         event_type: str,
         data: dict[str, object] | None = None,
     ) -> TaskEvent:
+        conversation_sequence = None
+        if task.conversation_id is not None:
+            conversation = session.scalar(
+                select(Conversation)
+                .where(Conversation.id == task.conversation_id)
+                .with_for_update()
+            )
+            if conversation is not None:
+                conversation_sequence = conversation.next_event_sequence
+                conversation.next_event_sequence += 1
+
         event = TaskEvent(
             task_id=task.id,
+            conversation_id=task.conversation_id,
             sequence=task.next_event_sequence,
+            conversation_sequence=conversation_sequence,
             type=event_type,
             data=data or {},
         )
@@ -120,6 +182,43 @@ class TaskService:
         session.add(event)
         session.flush()
         return event
+
+    def list_conversation_events(
+        self,
+        session: Session,
+        *,
+        conversation_id: str,
+        after_sequence: int = 0,
+    ) -> list[TaskEvent]:
+        if session.get(Conversation, conversation_id) is None:
+            raise ConversationNotFoundError(conversation_id)
+        return list(
+            session.scalars(
+                select(TaskEvent)
+                .where(
+                    TaskEvent.conversation_id == conversation_id,
+                    TaskEvent.conversation_sequence > after_sequence,
+                )
+                .order_by(TaskEvent.conversation_sequence)
+            )
+        )
+
+    def list_conversation_tasks(
+        self,
+        session: Session,
+        *,
+        conversation_id: str,
+    ) -> list[Task]:
+        if session.get(Conversation, conversation_id) is None:
+            raise ConversationNotFoundError(conversation_id)
+        return list(
+            session.scalars(
+                select(Task)
+                .options(selectinload(Task.project))
+                .where(Task.conversation_id == conversation_id)
+                .order_by(Task.created_at)
+            )
+        )
 
     def list_events(
         self,

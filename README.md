@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.3.0`，对应规格中的 Phase 3。
+当前版本为 `0.4.0`。Phase 3 本机订阅运行时已经完成，Phase 4 首个功能组提供持久会话和受控自增强候选。
 
 已实现：
 
@@ -16,12 +16,17 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 * 本机 Codex app-server 适配器。
 * ChatGPT 账户类型强制校验。
 * app-server 通知到 Gateway 事件与最终报告的转换。
+* Conversation 创建、查询和历史 Task API。
+* CAG 持有的会话级 SSE、连续序号、心跳和断线续传。
+* Conversation 到 Codex thread 的持久映射和多轮恢复。
+* 复用同一 CAG Conversation 的连续对话页面。
+* `self-improvement-candidate` 任务专属候选输出目录。
 * Docker Compose 中的前端、Gateway、PostgreSQL 和 Redis。
 * 不消耗 Codex 或 OpenAI 配额的自动化与浏览器测试。
 
 规划中：
 
-* Phase 4 Skill、Runtime Profile 和工具策略。
+* Phase 4 Skill 发现、完整 Runtime Profile 和工具策略。
 * Phase 5 审批、Git diff 和 Artifact。
 * Phase 6 MCP 与外部系统工具。
 * Phase 7 Skill 改进提案和评测闭环。
@@ -49,6 +54,34 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 ```
 
 该脚本检查 `codex login status`，设置 `codex-app-server` 运行时并启动 Gateway。它不会读取 Codex 凭据文件，也不会要求 API Key。
+
+## 调用端接入
+
+调用端先创建一个 Conversation，随后所有消息复用其物理 ID：
+
+```powershell
+$conversation = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/conversations `
+  -ContentType "application/json" `
+  -Body '{"project_id":"cag","title":"持续工程会话"}'
+```
+
+前端或调用端保持一条由 CAG 提供的 SSE 连接：
+
+```text
+GET /api/v1/conversations/{conversation_id}/events
+```
+
+每轮消息创建一个 Task，并传入同一个 `conversation_id`。CAG 在内部首次启动 Codex thread，后续恢复该 thread。调用端不直接连接 Codex app-server。
+
+完整请求和续传规则见 [API 文档](docs/api.md)。
+
+## 受控自增强
+
+调用端可显式选择 `self-improvement-candidate`。CAG 会为该任务创建独立候选目录，只把该目录加入本轮 Codex 文件系统能力范围。Agent 可写入候选 Skill、Validator 和 `TASK_LEARNING_RECEIPT.md`。候选保持 `proposed` 状态，正式安装需要独立评测和人工批准。
+
+自增强闭环和回滚规则见 [自增强设计](docs/self-improvement.md)。
 
 ## 本地启动
 

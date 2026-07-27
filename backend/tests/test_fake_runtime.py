@@ -16,7 +16,11 @@ def test_fake_runtime_emits_deterministic_events(tmp_path: Path) -> None:
             project_code="project-code",
             prompt="run tests",
             runtime_profile="general-engineering",
+            persistent_conversation=False,
+            conversation_thread_id=None,
             workspace_path=tmp_path,
+            additional_workspace_roots=(),
+            developer_instructions=None,
             emit=emit,
         )
     )

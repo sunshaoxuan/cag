@@ -34,11 +34,21 @@ for raw_line in sys.stdin:
                 },
             }
         )
-    elif method == "thread/start":
+    elif method in {"thread/start", "thread/resume"}:
+        if (
+            mode == "expect-ephemeral"
+            and message.get("params", {}).get("ephemeral") is not True
+        ):
+            raise RuntimeError("thread was not ephemeral")
+        thread_id = (
+            message.get("params", {}).get("threadId")
+            if method == "thread/resume"
+            else "thread-1"
+        )
         send(
             {
                 "id": request_id,
-                "result": {"thread": {"id": "thread-1"}},
+                "result": {"thread": {"id": thread_id}},
             }
         )
     elif method == "turn/start":

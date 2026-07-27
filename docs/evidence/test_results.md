@@ -1,85 +1,37 @@
-# Phase 1 test results
+# Current release test results
 
 Date: 2026-07-27
 
-Version: 0.1.0
+Version: 0.4.0
 
-## Automated tests
-
-Command:
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-Result:
-
-```text
-14 passed
-Total coverage: 96.75 percent
-Warnings: 0
-```
-
-Covered behavior:
-
-* Liveness and readiness.
-* Task creation and query.
-* Stable Project physical ID resolution.
-* Missing physical Project handling.
-* Conversation reference validation.
-* Prompt validation.
-* Ordered SSE events.
-* SSE resume after sequence.
-* Missing task handling.
-* Runtime failure persistence.
-* Fake Runtime deterministic output.
-* Alembic Phase 1 schema upgrade.
-* Release version consistency.
-
-## Static checks
+## Automated
 
 | Check | Result |
 |---|---|
-| Python bytecode compile | Passed |
-| `git diff --check` | Passed |
-| Compose config parse | Passed |
+| Backend Pytest | 36 passed |
+| Backend coverage | 91.06 percent |
+| Frontend Vitest | 3 passed |
+| Frontend production build | Passed |
+| Compose configuration | Passed |
+| Gateway image build | Passed |
+| Frontend image build | Passed |
 
-## Container integration
+## Live local subscription
 
-| Service | Result |
-|---|---|
-| Gateway | Healthy |
-| PostgreSQL | Healthy |
-| Redis | Healthy |
+One CAG Conversation completed two local ChatGPT-authenticated Codex Tasks in distinct Git workspaces. The first turn stored marker `CAG-PERSIST-7F3A91`; the second turn resumed the same internal Codex thread and returned the exact marker.
 
-Applied migration:
+Conversation SSE IDs were continuous from 1 through 16. Resume after cursor 8 returned IDs 9 through 16.
 
-```text
-20260727_0001
-```
+## Self-improvement
 
-Tables:
+The scoped candidate Task wrote `CANDIDATE.md` and `TASK_LEARNING_RECEIPT.md` only under its assigned `D:\workspace\codex-selfimp\outputs\cag-{task_id}` directory. The project workspace remained clean and the receipt status is `proposed`.
 
-```text
-alembic_version
-conversations
-projects
-task_events
-tasks
-```
+## Container and browser
 
-## Live HTTP smoke
+All four Compose services are healthy. PostgreSQL is at Alembic revision `20260727_0004`. The browser completed two turns through one Conversation and rendered event IDs 1 through 16. Console warnings and errors were zero.
 
-Task creation returned HTTP 202 with status `queued`. The task progressed through `running` to `completed`. SSE returned six ordered events:
+Screenshot:
 
 ```text
-task.created
-task.started
-agent.plan
-agent.message
-test.completed
-task.completed
+docs/evidence/screenshots/phase4-continuous-conversation.png
 ```
-
-The final report contains a passed Fake Runtime validation. No OpenAI API or Codex subscription call occurred.

@@ -118,9 +118,93 @@ h1 {
 }
 
 .task-composer,
+.conversation-panel,
 .execution-panel,
 .result-panel {
   padding: 28px;
+}
+
+.conversation-grid {
+  grid-template-columns: minmax(480px, 1.08fr) minmax(420px, 0.92fr);
+}
+
+.chat-history {
+  display: grid;
+  gap: 20px;
+  min-height: 330px;
+  max-height: 560px;
+  margin: 8px 0 24px;
+  padding: 18px;
+  overflow-y: auto;
+  border: 1px solid #e0e4e1;
+  border-radius: 16px;
+  background: rgba(247, 249, 246, 0.76);
+}
+
+.chat-empty {
+  min-height: 290px;
+}
+
+.chat-turn {
+  display: grid;
+  gap: 12px;
+}
+
+.message {
+  max-width: 88%;
+  padding: 13px 15px;
+  border-radius: 15px;
+}
+
+.message > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.message p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.message-user {
+  justify-self: end;
+  border-bottom-right-radius: 5px;
+  background: #1f704e;
+  color: #fff;
+}
+
+.message-user > span {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.message-agent {
+  justify-self: start;
+  border: 1px solid #d7dfda;
+  border-bottom-left-radius: 5px;
+  background: #fff;
+  color: #34413c;
+}
+
+.message-agent > span {
+  color: #347457;
+}
+
+.message-pending {
+  color: #7c8581;
+}
+
+.message-error {
+  color: #9b3528;
+}
+
+.chat-composer textarea {
+  min-height: 112px;
 }
 
 .section-heading {
@@ -482,6 +566,7 @@ button:disabled {
   }
 
   .task-composer,
+  .conversation-panel,
   .execution-panel,
   .result-panel {
     padding: 20px;

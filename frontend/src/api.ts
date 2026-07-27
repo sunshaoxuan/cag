@@ -4,6 +4,16 @@ export type Project = {
   name: string;
   default_branch: string;
   default_runtime_profile: string;
+  allowed_runtime_profiles: string[];
+};
+
+export type Conversation = {
+  id: string;
+  project_id: string;
+  project_code: string;
+  title: string | null;
+  codex_thread_id: string | null;
+  created_at: string;
 };
 
 export type ValidationResult = {
@@ -43,6 +53,8 @@ export type TaskEvent = {
   event_id: string;
   task_id: string;
   sequence: number;
+  task_sequence?: number;
+  conversation_id?: string;
   type: string;
   timestamp: string;
   data: Record<string, unknown>;
@@ -66,13 +78,32 @@ export function listProjects(): Promise<Project[]> {
   return request<Project[]>("/api/v1/projects");
 }
 
-export function createTask(projectId: string, prompt: string): Promise<Task> {
+export function createConversation(
+  projectId: string,
+  title?: string,
+): Promise<Conversation> {
+  return request<Conversation>("/api/v1/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      title,
+    }),
+  });
+}
+
+export function createTask(
+  projectId: string,
+  prompt: string,
+  conversationId?: string,
+): Promise<Task> {
   return request<Task>("/api/v1/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       project_id: projectId,
       prompt,
+      conversation_id: conversationId,
     }),
   });
 }
@@ -87,4 +118,15 @@ export function taskEventsUrl(taskId: string, afterSequence = 0): string {
     follow: "true",
   });
   return `${API_BASE_URL}/api/v1/tasks/${taskId}/events?${query}`;
+}
+
+export function conversationEventsUrl(
+  conversationId: string,
+  afterSequence = 0,
+): string {
+  const query = new URLSearchParams({
+    after_sequence: String(afterSequence),
+    follow: "true",
+  });
+  return `${API_BASE_URL}/api/v1/conversations/${conversationId}/events?${query}`;
 }

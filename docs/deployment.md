@@ -1,6 +1,6 @@
 # Deployment
 
-## Phase 3 development deployment
+## 0.4.0 development deployment
 
 Requirements:
 
@@ -26,6 +26,8 @@ The Compose deployment contains:
 PostgreSQL and Redis are reachable only through the Compose network.
 
 The task console is available at `http://127.0.0.1:5173`. It calls the Gateway at `http://127.0.0.1:8000`.
+
+The console creates a CAG Conversation and keeps one Conversation SSE connection open across turns.
 
 ## Database migration
 
@@ -79,7 +81,9 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`.
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. It handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
+
+When sibling directory `D:\workspace\codex-selfimp` exists, the script configures it as the self-improvement root. An explicit `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` value takes precedence.
 
 The default Compose Gateway explicitly uses Fake Runtime. A future container deployment requires a dedicated authenticated host-side runtime bridge because ChatGPT credentials are not copied into containers.
 
@@ -92,6 +96,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_CODEX_STARTUP_TIMEOUT_SECONDS` | Protocol initialization timeout |
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
 | `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
+| `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
 
 ## Production gate
 

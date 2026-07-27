@@ -72,7 +72,10 @@ def projects_dir(tmp_path: Path, project_repository: Path) -> Path:
         "instructions": {"files": ["README.md"]},
         "runtime": {
             "default_profile": "general-engineering",
-            "allowed_profiles": ["general-engineering"],
+            "allowed_profiles": [
+                "general-engineering",
+                "self-improvement-candidate",
+            ],
         },
     }
     (directory / "test-project.yaml").write_text(

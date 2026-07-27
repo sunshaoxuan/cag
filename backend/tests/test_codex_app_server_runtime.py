@@ -18,6 +18,8 @@ def execute_runtime(
     *,
     account_type: str = "chatgpt",
     mode: str = "normal",
+    persistent_conversation: bool = True,
+    conversation_thread_id: str | None = None,
 ) -> tuple[object, list[tuple[str, dict[str, object]]]]:
     command = [sys.executable, str(FIXTURE_SERVER), account_type]
     command.append(mode)
@@ -37,7 +39,11 @@ def execute_runtime(
             project_code="cag",
             prompt="inspect",
             runtime_profile="read-only-analysis",
+            persistent_conversation=persistent_conversation,
+            conversation_thread_id=conversation_thread_id,
             workspace_path=tmp_path,
+            additional_workspace_roots=(),
+            developer_instructions=None,
             emit=emit,
         )
     )
@@ -69,6 +75,7 @@ def test_codex_app_server_maps_protocol_to_gateway_events(
     ]
     assert [event_type for event_type, _ in events] == [
         "runtime.connected",
+        "runtime.thread",
         "agent.plan",
         "command.started",
         "command.completed",
@@ -77,6 +84,35 @@ def test_codex_app_server_maps_protocol_to_gateway_events(
         "agent.message",
     ]
     assert events[0][1]["authentication"] == "chatgpt"
+    assert events[1][1] == {
+        "thread_id": "thread-1",
+        "action": "started",
+    }
+
+
+def test_codex_app_server_resumes_persisted_thread(tmp_path: Path) -> None:
+    result, events = execute_runtime(
+        tmp_path,
+        conversation_thread_id="thread-existing",
+    )
+
+    assert result.runtime_thread_id == "thread-existing"
+    assert events[1][1] == {
+        "thread_id": "thread-existing",
+        "action": "resumed",
+    }
+
+
+def test_codex_app_server_uses_ephemeral_thread_without_conversation(
+    tmp_path: Path,
+) -> None:
+    result, _ = execute_runtime(
+        tmp_path,
+        mode="expect-ephemeral",
+        persistent_conversation=False,
+    )
+
+    assert result.summary == "LOCAL_CODEX_FIXTURE_OK"
 
 
 def test_codex_app_server_declines_approval_until_phase5(
