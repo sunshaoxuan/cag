@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.7.1 restyles the existing CAG frontend. API requests, Conversation
+Version 0.7.2 restyles and separates the existing CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -32,8 +32,21 @@ copy the One人事 logo, photography, illustrations or product claims.
 | OneDB integrated modules | Knowledge, Agent and Validator task chain |
 | Orange commercial action | Start task, send, approve and index actions |
 | Turquoise data layer | Knowledge vectors, SSE and completed runtime state |
-| Floating product navigation | Conversation, knowledge and governance anchors |
+| Floating product navigation | Overview, conversation, knowledge and governance routes |
 | Product proof chips | Subscription Codex, 1024-dimensional vectors and full SSE |
+
+## Routed information architecture
+
+| Route | Responsibility |
+|---|---|
+| `/` | Product overview, runtime proof and links to the three operational domains |
+| `/conversation` | Continuous conversation, Harness configuration, approvals and the complete CAG SSE event stream |
+| `/knowledge` | Knowledge source ingestion, idempotent vector indexing and governed memory candidates |
+| `/capabilities` | Skill, Tool, Validator, promotion and standards control governance |
+
+Route transitions use browser history and reset document scroll position. Direct
+loads and reloads are served by the frontend fallback. Conversation state stays
+mounted during in-app navigation so an active task remains observable.
 
 ## Responsive and accessibility rules
 
@@ -45,11 +58,16 @@ animations.
 
 ## Verification
 
-Required acceptance includes component tests, TypeScript and production build,
-the running page at `http://127.0.0.1:5173`, anchor navigation, console
-warnings and errors, and a screenshot under `docs/evidence/screenshots`.
+Required acceptance includes component and route tests, TypeScript and
+production build, direct loading of all four routes at
+`http://127.0.0.1:5173`, browser history navigation, console warnings and
+errors, and screenshots under `docs/evidence/screenshots`.
 
 Validated screenshots:
 
 * `docs/evidence/screenshots/onehr-design-0.7.1.png`
 * `docs/evidence/screenshots/onehr-design-console-0.7.1.png`
+* `docs/evidence/screenshots/paged-overview-0.7.2.png`
+* `docs/evidence/screenshots/paged-conversation-0.7.2.png`
+* `docs/evidence/screenshots/paged-knowledge-0.7.2.png`
+* `docs/evidence/screenshots/paged-capabilities-0.7.2.png`

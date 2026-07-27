@@ -106,11 +106,19 @@ function jsonResponse(payload: unknown, status = 200): Response {
   } as Response;
 }
 
+async function openConversationPage() {
+  fireEvent.click(
+    screen.getByRole("link", { name: "对话工作台" }),
+  );
+  await screen.findByRole("heading", { name: "连续对话" });
+}
+
 describe("Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
   let pendingApprovals: Array<Record<string, unknown>>;
 
   beforeEach(() => {
+    window.history.replaceState({}, "", "/");
     MockEventSource.instances = [];
     submittedTasks = [];
     pendingApprovals = [];
@@ -207,11 +215,6 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("option", {
-        name: "Codex/ChatGPT Agent Gateway · cag",
-      }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole("heading", {
         name: "一个入口， 让企业知识与 Agent 协同工作。",
       }),
@@ -221,17 +224,55 @@ describe("Agent Gateway conversation page", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "立即开始" })).toHaveAttribute(
       "href",
-      "#conversation",
+      "/conversation",
     );
+    expect(
+      screen.queryByRole("heading", { name: "连续对话" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("CAG 持续会话")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "立即开始" }));
+    expect(window.location.pathname).toBe("/conversation");
+    expect(
+      await screen.findByRole("option", {
+        name: "Codex/ChatGPT Agent Gateway · cag",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  });
+
+  it("routes each feature domain to an independent page", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "企业知识" }),
+    );
+    expect(window.location.pathname).toBe("/knowledge");
+    expect(
+      await screen.findByRole("heading", { name: "企业知识", level: 1 }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Ollama 就绪")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "连续对话" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "能力治理" }),
+    );
+    expect(window.location.pathname).toBe("/capabilities");
+    expect(
+      await screen.findByRole("heading", { name: "能力治理", level: 1 }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Gateway 注册表")).toBeInTheDocument();
     expect(screen.getByText("NeurIPS RAG")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(
+      screen.queryByRole("heading", { name: "企业知识与记忆" }),
+    ).not.toBeInTheDocument();
   });
 
   it("creates a CAG conversation and opens one persistent SSE stream", async () => {
     render(<App />);
+    await openConversationPage();
     await screen.findByRole("option", {
       name: "Codex/ChatGPT Agent Gateway · cag",
     });
@@ -261,6 +302,7 @@ describe("Agent Gateway conversation page", () => {
 
   it("keeps the SSE stream and reuses the conversation for another turn", async () => {
     render(<App />);
+    await openConversationPage();
     await screen.findByRole("option", {
       name: "Codex/ChatGPT Agent Gateway · cag",
     });
@@ -329,6 +371,7 @@ describe("Agent Gateway conversation page", () => {
 
   it("projects live Agent deltas into the conversation independently of the event filter", async () => {
     render(<App />);
+    await openConversationPage();
     await screen.findByRole("option", {
       name: "Codex/ChatGPT Agent Gateway · cag",
     });
@@ -407,6 +450,7 @@ describe("Agent Gateway conversation page", () => {
 
   it("limits visible feedback rows without dropping received events", async () => {
     render(<App />);
+    await openConversationPage();
     await screen.findByRole("option", {
       name: "Codex/ChatGPT Agent Gateway · cag",
     });
@@ -475,6 +519,7 @@ describe("Agent Gateway conversation page", () => {
       },
     ];
     render(<App />);
+    await openConversationPage();
     await screen.findByRole("option", {
       name: "Codex/ChatGPT Agent Gateway · cag",
     });

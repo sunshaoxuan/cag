@@ -1,5 +1,13 @@
 # Evidence index
 
+## Version 0.7.2
+
+* `docs/evidence/PAGED_FRONTEND_FINAL_RECEIPT.md`
+* `docs/evidence/screenshots/paged-overview-0.7.2.png`
+* `docs/evidence/screenshots/paged-conversation-0.7.2.png`
+* `docs/evidence/screenshots/paged-knowledge-0.7.2.png`
+* `docs/evidence/screenshots/paged-capabilities-0.7.2.png`
+
 ## Version 0.7.1
 
 * `docs/evidence/FRONTEND_DESIGN_FINAL_RECEIPT.md`

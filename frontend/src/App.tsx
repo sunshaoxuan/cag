@@ -1,4 +1,11 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  MouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Conversation,
@@ -158,6 +165,21 @@ type ChatTurn = {
 
 type FeedbackLevel = "essential" | "standard" | "full";
 type FeedbackLimit = 20 | 50 | 100 | "all";
+type AppPage = "overview" | "conversation" | "knowledge" | "capabilities";
+
+const PAGE_PATHS: Record<AppPage, string> = {
+  overview: "/",
+  conversation: "/conversation",
+  knowledge: "/knowledge",
+  capabilities: "/capabilities",
+};
+
+function pageFromPath(pathname: string): AppPage {
+  if (pathname.startsWith("/conversation")) return "conversation";
+  if (pathname.startsWith("/knowledge")) return "knowledge";
+  if (pathname.startsWith("/capabilities")) return "capabilities";
+  return "overview";
+}
 
 const DELTA_EVENT_TYPES = new Set([
   "agent.message.delta",
@@ -250,6 +272,9 @@ function includeFeedbackEvent(
 }
 
 export default function App() {
+  const [page, setPage] = useState<AppPage>(() =>
+    pageFromPath(window.location.pathname),
+  );
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -295,6 +320,16 @@ export default function App() {
       active = false;
       sourceRef.current?.close();
     };
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setPage(pageFromPath(window.location.pathname));
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   function refreshKnowledge() {
@@ -566,78 +601,196 @@ export default function App() {
     }
   }
 
+  function navigateTo(
+    nextPage: AppPage,
+    event: MouseEvent<HTMLAnchorElement>,
+  ) {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    window.history.pushState({}, "", PAGE_PATHS[nextPage]);
+    setPage(nextPage);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+
   return (
     <main className="app-shell">
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="Agent Gateway 首页">
+        <a
+          className="brand"
+          href="/"
+          aria-label="Agent Gateway 首页"
+          onClick={(event) => navigateTo("overview", event)}
+        >
           <span className="brand-mark" aria-hidden="true">AG</span>
           <span>Agent Gateway</span>
         </a>
         <nav className="site-nav" aria-label="主要导航">
-          <a href="#conversation">连续对话</a>
-          <a href="#knowledge">企业知识</a>
-          <a href="#capabilities">能力治理</a>
+          <a
+            href="/"
+            aria-current={page === "overview" ? "page" : undefined}
+            onClick={(event) => navigateTo("overview", event)}
+          >
+            总览
+          </a>
+          <a
+            href="/conversation"
+            aria-current={page === "conversation" ? "page" : undefined}
+            onClick={(event) => navigateTo("conversation", event)}
+          >
+            对话工作台
+          </a>
+          <a
+            href="/knowledge"
+            aria-current={page === "knowledge" ? "page" : undefined}
+            onClick={(event) => navigateTo("knowledge", event)}
+          >
+            企业知识
+          </a>
+          <a
+            href="/capabilities"
+            aria-current={page === "capabilities" ? "page" : undefined}
+            onClick={(event) => navigateTo("capabilities", event)}
+          >
+            能力治理
+          </a>
         </nav>
         <div className="site-actions">
-          <a className="button button-ghost" href="#knowledge">查看知识库</a>
-          <a className="button button-primary" href="#conversation">开始任务</a>
+          <a
+            className="button button-ghost"
+            href="/knowledge"
+            onClick={(event) => navigateTo("knowledge", event)}
+          >
+            查看知识库
+          </a>
+          <a
+            className="button button-primary"
+            href="/conversation"
+            onClick={(event) => navigateTo("conversation", event)}
+          >
+            开始任务
+          </a>
         </div>
       </header>
 
-      <header className="hero">
-        <div className="hero-content" id="top">
-          <p className="eyebrow">LOCAL CODEX · ENTERPRISE KNOWLEDGE · AGENT HARNESS</p>
-          <h1>
-            一个入口，
-            <span>让企业知识与 Agent 协同工作。</span>
-          </h1>
-          <p className="hero-copy">
-            从连续对话、知识检索到并行调查与独立验证，CAG 在同一条任务链中
-            维护完整上下文、审批和事实事件。
-          </p>
-          <div className="hero-actions">
-            <a className="button button-primary button-large" href="#conversation">
-              立即开始
+      {page === "overview" && (
+        <>
+          <header className="hero">
+            <div className="hero-content">
+              <p className="eyebrow">LOCAL CODEX · ENTERPRISE KNOWLEDGE · AGENT HARNESS</p>
+              <h1>
+                一个入口，
+                <span>让企业知识与 Agent 协同工作。</span>
+              </h1>
+              <p className="hero-copy">
+                从连续对话、知识检索到并行调查与独立验证，CAG 在同一条任务链中
+                维护完整上下文、审批和事实事件。
+              </p>
+              <div className="hero-actions">
+                <a
+                  className="button button-primary button-large"
+                  href="/conversation"
+                  onClick={(event) => navigateTo("conversation", event)}
+                >
+                  立即开始
+                </a>
+                <a
+                  className="button button-outline button-large"
+                  href="/capabilities"
+                  onClick={(event) => navigateTo("capabilities", event)}
+                >
+                  查看治理能力
+                </a>
+              </div>
+              <ul className="hero-proof" aria-label="运行能力">
+                <li>订阅 Codex</li>
+                <li>1024 维向量</li>
+                <li>完整 SSE</li>
+              </ul>
+            </div>
+            <div className="hero-visual" aria-label="CAG 一体化任务链">
+              <div className="hero-status">
+                <span className="runtime-dot" aria-hidden="true" />
+                CAG 持续会话
+              </div>
+              <p>从目标到可验证结果</p>
+              <div className="flow-nodes" aria-hidden="true">
+                <span>知识</span>
+                <span>Agent</span>
+                <span>验证</span>
+              </div>
+              <div className="flow-core">
+                <span>CAG</span>
+                <strong>统一任务上下文</strong>
+                <small>Conversation · Harness · Evidence</small>
+              </div>
+              <div className="flow-footer">
+                <span>01 检索</span>
+                <span>02 执行</span>
+                <span>03 复核</span>
+              </div>
+            </div>
+          </header>
+          <section className="module-grid" aria-label="功能入口">
+            <a
+              className="module-card module-card-primary"
+              href="/conversation"
+              onClick={(event) => navigateTo("conversation", event)}
+            >
+              <span>01</span>
+              <strong>对话工作台</strong>
+              <p>连续对话、Harness 配置、审批与完整 SSE 反馈。</p>
+              <small>进入工作台</small>
             </a>
-            <a className="button button-outline button-large" href="#capabilities">
-              查看治理能力
+            <a
+              className="module-card"
+              href="/knowledge"
+              onClick={(event) => navigateTo("knowledge", event)}
+            >
+              <span>02</span>
+              <strong>企业知识</strong>
+              <p>{knowledgeSources.length} 个来源，1024 维向量与记忆候选治理。</p>
+              <small>管理知识</small>
             </a>
-          </div>
-          <ul className="hero-proof" aria-label="运行能力">
-            <li>订阅 Codex</li>
-            <li>1024 维向量</li>
-            <li>完整 SSE</li>
-          </ul>
-        </div>
-        <div className="hero-visual" aria-label="CAG 一体化任务链">
-          <div className="hero-status">
-            <span className="runtime-dot" aria-hidden="true" />
-            CAG 持续会话
-          </div>
-          <p>从目标到可验证结果</p>
-          <div className="flow-nodes" aria-hidden="true">
-            <span>知识</span>
-            <span>Agent</span>
-            <span>验证</span>
-          </div>
-          <div className="flow-core">
-            <span>CAG</span>
-            <strong>统一任务上下文</strong>
-            <small>Conversation · Harness · Evidence</small>
-          </div>
-          <div className="flow-footer">
-            <span>01 检索</span>
-            <span>02 执行</span>
-            <span>03 复核</span>
-          </div>
-        </div>
-      </header>
+            <a
+              className="module-card"
+              href="/capabilities"
+              onClick={(event) => navigateTo("capabilities", event)}
+            >
+              <span>03</span>
+              <strong>能力治理</strong>
+              <p>{capabilities.length} 项 Skill、Tool、Validator 与控制映射。</p>
+              <small>查看能力</small>
+            </a>
+          </section>
+        </>
+      )}
 
-      <section
-        className="knowledge-console panel"
-        id="knowledge"
-        aria-label="企业知识治理"
-      >
+      {page === "knowledge" && (
+        <>
+          <section className="page-intro">
+            <div>
+              <p className="eyebrow">KNOWLEDGE GOVERNANCE</p>
+              <h1>企业知识</h1>
+              <p>管理知识来源、向量索引和可提升的长期记忆。</p>
+            </div>
+            <div className="page-metric">
+              <span>已登记来源</span>
+              <strong>{knowledgeSources.length}</strong>
+            </div>
+          </section>
+          <section
+            className="knowledge-console panel page-panel"
+            aria-label="企业知识治理"
+          >
         <div className="section-heading">
           <div>
             <p className="section-index">KNOWLEDGE</p>
@@ -709,13 +862,27 @@ export default function App() {
             ))}
           </div>
         </div>
-      </section>
+          </section>
+        </>
+      )}
 
-      <section
-        className="capability-console panel"
-        id="capabilities"
-        aria-label="自学习能力治理"
-      >
+      {page === "capabilities" && (
+        <>
+          <section className="page-intro">
+            <div>
+              <p className="eyebrow">CAPABILITY GOVERNANCE</p>
+              <h1>能力治理</h1>
+              <p>查看 Skill、Tool、Validator、评测状态和标准控制映射。</p>
+            </div>
+            <div className="page-metric">
+              <span>已登记能力</span>
+              <strong>{capabilities.length}</strong>
+            </div>
+          </section>
+          <section
+            className="capability-console panel page-panel"
+            aria-label="自学习能力治理"
+          >
         <div className="section-heading">
           <div>
             <p className="section-index">CAPABILITY</p>
@@ -761,12 +928,24 @@ export default function App() {
             ))}
           </div>
         </div>
-      </section>
+          </section>
+        </>
+      )}
 
-      <section
-        className="workspace-grid conversation-grid"
-        id="conversation"
-      >
+      {page === "conversation" && (
+        <>
+          <section className="page-intro page-intro-conversation">
+            <div>
+              <p className="eyebrow">CONVERSATION WORKSPACE</p>
+              <h1>对话工作台</h1>
+              <p>在同一轮上下文中发送目标、选择 Harness 并查看完整事实事件。</p>
+            </div>
+            <div className="hero-status">
+              <span className="runtime-dot" aria-hidden="true" />
+              CAG 持续会话
+            </div>
+          </section>
+          <section className="workspace-grid conversation-grid">
         <section className="conversation-panel panel">
           <div className="section-heading">
             <div>
@@ -1027,6 +1206,8 @@ export default function App() {
           )}
         </section>
       </section>
+        </>
+      )}
     </main>
   );
 }
