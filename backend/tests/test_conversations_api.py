@@ -310,6 +310,8 @@ def test_conversation_rejects_a_second_active_task(app_factory) -> None:
                 prompt="仍在排队",
                 conversation_id=str(conversation["id"]),
                 runtime_profile="general-engineering",
+                client_request_id="busy-conversation-test",
+                request_hash="a" * 64,
             )
 
         response = client.post(

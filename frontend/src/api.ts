@@ -34,9 +34,16 @@ export type FinalReport = {
 
 export type Task = {
   id: string;
+  trace_id: string;
   project_id: string;
   project_code: string;
   conversation_id: string | null;
+  trigger_source: string;
+  client_id: string;
+  client_request_id: string;
+  request_hash: string;
+  events_url: string;
+  audit_url: string;
   prompt: string;
   runtime_profile: string;
   knowledge_mode: string;
@@ -130,10 +137,49 @@ export type TaskEvent = {
   event_id: string;
   task_id: string;
   sequence: number;
+  global_sequence?: number;
   task_sequence?: number;
   conversation_id?: string;
   type: string;
   timestamp: string;
+  data: Record<string, unknown>;
+};
+
+export type AuditTask = {
+  trace_id: string;
+  task_id: string;
+  project_id: string;
+  project_code: string;
+  conversation_id: string | null;
+  trigger_source: string;
+  client_id: string;
+  client_request_id: string;
+  request_hash: string;
+  status: string;
+  event_count: number;
+  last_event_type: string | null;
+  last_global_sequence: number | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  events_url: string;
+  audit_url: string;
+};
+
+export type AuditEvent = {
+  event_id: string;
+  trace_id: string;
+  task_id: string;
+  sequence: number;
+  task_sequence: number;
+  conversation_id?: string;
+  type: string;
+  timestamp: string;
+  trigger_source: string;
+  client_id: string;
+  client_request_id: string;
+  project_id: string;
+  project_code: string;
   data: Record<string, unknown>;
 };
 
@@ -179,7 +225,13 @@ export function createTask(
 ): Promise<Task> {
   return request<Task>("/api/v1/tasks", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-CAG-Source": "test_console",
+      "X-CAG-Client-ID": "cag-web-test",
+      "X-Request-ID": crypto.randomUUID(),
+      "Idempotency-Key": crypto.randomUUID(),
+    },
     body: JSON.stringify({
       project_id: projectId,
       prompt,
@@ -189,6 +241,18 @@ export function createTask(
       learning_mode: learningMode,
     }),
   });
+}
+
+export function listAuditTasks(): Promise<AuditTask[]> {
+  return request<AuditTask[]>("/api/v1/audit/tasks?limit=100");
+}
+
+export function auditEventsUrl(afterSequence = 0): string {
+  const query = new URLSearchParams({
+    after_sequence: String(afterSequence),
+    follow: "true",
+  });
+  return `${API_BASE_URL}/api/v1/audit/events?${query}`;
 }
 
 export function getKnowledgeStatus(): Promise<KnowledgeStatus> {

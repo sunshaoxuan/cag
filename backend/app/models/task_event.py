@@ -20,6 +20,10 @@ class TaskEvent(PhysicalIdMixin, Base):
             "conversation_sequence",
             name="uq_task_events_conversation_id_sequence",
         ),
+        UniqueConstraint(
+            "global_sequence",
+            name="uq_task_events_global_sequence",
+        ),
     )
 
     task_id: Mapped[str] = mapped_column(
@@ -32,6 +36,7 @@ class TaskEvent(PhysicalIdMixin, Base):
         index=True,
     )
     sequence: Mapped[int] = mapped_column(Integer)
+    global_sequence: Mapped[int] = mapped_column(Integer, index=True)
     conversation_sequence: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
@@ -45,3 +50,10 @@ class TaskEvent(PhysicalIdMixin, Base):
 
     task = relationship("Task", back_populates="events")
     conversation = relationship("Conversation", back_populates="events")
+
+
+class AuditCursor(PhysicalIdMixin, Base):
+    __tablename__ = "audit_cursors"
+
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    next_sequence: Mapped[int] = mapped_column(Integer, default=1)

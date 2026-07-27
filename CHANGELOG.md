@@ -2,6 +2,28 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.8.0
+
+发布日期：2026-07-27
+
+### Added
+
+* 外部系统继续使用 `POST /api/v1/tasks` 提交任务，并获得 Trace ID、事件地址和审计地址。
+* 支持 `X-CAG-Client-ID`、`X-Request-ID`、`X-CAG-Source` 和 `Idempotency-Key` 调用头。
+* 相同客户端和幂等键复用原任务，相同幂等键对应不同请求正文时返回 HTTP 409。
+* 为全部 TaskEvent 分配 Gateway 全局审计序号。
+* 新增 `/api/v1/audit/tasks` 调用轨迹查询。
+* 新增 `/api/v1/audit/tasks/{task_id}` 审计详情。
+* 新增 `/api/v1/audit/events` 全局审计 SSE，支持断线续传与来源、客户端、任务过滤。
+* 新增 API 调用监控页面，持续显示外部 API 和网页测试台触发的全部事实动作。
+* 网页任务入口标记为 `test_console`，与默认 `external_api` 来源分别审计。
+
+### Validated
+
+* 62 个后端测试通过，覆盖率 88.69%。
+* 8 个前端测试、TypeScript 和生产构建通过。
+* Alembic 升降级、Docker Compose、外部 API 调用、全局 SSE、浏览器控制台和截图通过验证。
+
 ## 0.7.2
 
 发布日期：2026-07-27

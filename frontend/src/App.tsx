@@ -8,6 +8,9 @@ import {
 } from "react";
 
 import {
+  AuditEvent,
+  AuditTask,
+  auditEventsUrl,
   Conversation,
   conversationEventsUrl,
   createKnowledgeSource,
@@ -33,6 +36,7 @@ import {
   listPromotions,
   listStandardControls,
   listTaskApprovals,
+  listAuditTasks,
   resolveApproval,
 } from "./api";
 import "./styles.css";
@@ -165,17 +169,24 @@ type ChatTurn = {
 
 type FeedbackLevel = "essential" | "standard" | "full";
 type FeedbackLimit = 20 | 50 | 100 | "all";
-type AppPage = "overview" | "conversation" | "knowledge" | "capabilities";
+type AppPage =
+  | "overview"
+  | "conversation"
+  | "audit"
+  | "knowledge"
+  | "capabilities";
 
 const PAGE_PATHS: Record<AppPage, string> = {
   overview: "/",
   conversation: "/conversation",
+  audit: "/audit",
   knowledge: "/knowledge",
   capabilities: "/capabilities",
 };
 
 function pageFromPath(pathname: string): AppPage {
   if (pathname.startsWith("/conversation")) return "conversation";
+  if (pathname.startsWith("/audit")) return "audit";
   if (pathname.startsWith("/knowledge")) return "knowledge";
   if (pathname.startsWith("/capabilities")) return "capabilities";
   return "overview";
@@ -300,7 +311,15 @@ export default function App() {
   const [standardControls, setStandardControls] = useState<StandardControl[]>([]);
   const [promotionCount, setPromotionCount] = useState(0);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [auditTasks, setAuditTasks] = useState<AuditTask[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditReceivedCount, setAuditReceivedCount] = useState(0);
+  const [auditDisplayLimit, setAuditDisplayLimit] = useState<
+    50 | 100 | 200
+  >(100);
   const sourceRef = useRef<EventSource | null>(null);
+  const auditSourceRef = useRef<EventSource | null>(null);
+  const auditEventIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -319,6 +338,7 @@ export default function App() {
     return () => {
       active = false;
       sourceRef.current?.close();
+      auditSourceRef.current?.close();
     };
   }, []);
 
@@ -370,6 +390,80 @@ export default function App() {
   useEffect(() => {
     refreshGovernance();
   }, []);
+
+  function refreshAudit() {
+    listAuditTasks()
+      .then(setAuditTasks)
+      .catch((reason: Error) => setError(reason.message));
+  }
+
+  useEffect(() => {
+    refreshAudit();
+  }, []);
+
+  useEffect(() => {
+    auditSourceRef.current?.close();
+    auditSourceRef.current = null;
+    if (page !== "audit") return;
+
+    const source = new EventSource(auditEventsUrl());
+    auditSourceRef.current = source;
+    const handleAuditEvent = (message: MessageEvent<string>) => {
+      const event = JSON.parse(message.data) as AuditEvent;
+      if (auditEventIdsRef.current.has(event.event_id)) return;
+      auditEventIdsRef.current.add(event.event_id);
+      setAuditReceivedCount((current) => current + 1);
+      setAuditEvents((current) => {
+        return [...current, event]
+          .sort((a, b) => a.sequence - b.sequence)
+          .slice(-200);
+      });
+      setAuditTasks((current) => {
+        const existing = current.find(
+          (item) => item.task_id === event.task_id,
+        );
+        if (!existing) {
+          refreshAudit();
+          return current;
+        }
+        let status = existing.status;
+        if (event.type === "task.completed") status = "completed";
+        if (event.type === "task.failed") status = "failed";
+        if (event.type === "task.cancelled") status = "cancelled";
+        if (
+          event.type === "task.started" ||
+          event.type === "workspace.preparing"
+        ) {
+          status = "running";
+        }
+        return current.map((item) =>
+          item.task_id === event.task_id
+            ? {
+                ...item,
+                status,
+                event_count: Math.max(
+                  item.event_count,
+                  event.task_sequence,
+                ),
+                last_event_type: event.type,
+                last_global_sequence: event.sequence,
+              }
+            : item,
+        );
+      });
+    };
+    source.addEventListener(
+      "audit.event",
+      handleAuditEvent as EventListener,
+    );
+    source.onerror = () => setError("审计事件流正在重连");
+    return () => {
+      source.close();
+      if (auditSourceRef.current === source) {
+        auditSourceRef.current = null;
+      }
+    };
+  }, [page]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === projectId),
@@ -646,7 +740,14 @@ export default function App() {
             aria-current={page === "conversation" ? "page" : undefined}
             onClick={(event) => navigateTo("conversation", event)}
           >
-            对话工作台
+            API 测试台
+          </a>
+          <a
+            href="/audit"
+            aria-current={page === "audit" ? "page" : undefined}
+            onClick={(event) => navigateTo("audit", event)}
+          >
+            API 监控
           </a>
           <a
             href="/knowledge"
@@ -666,17 +767,17 @@ export default function App() {
         <div className="site-actions">
           <a
             className="button button-ghost"
-            href="/knowledge"
-            onClick={(event) => navigateTo("knowledge", event)}
+            href="/audit"
+            onClick={(event) => navigateTo("audit", event)}
           >
-            查看知识库
+            监控 API
           </a>
           <a
             className="button button-primary"
             href="/conversation"
             onClick={(event) => navigateTo("conversation", event)}
           >
-            开始任务
+            打开测试台
           </a>
         </div>
       </header>
@@ -691,8 +792,8 @@ export default function App() {
                 <span>让企业知识与 Agent 协同工作。</span>
               </h1>
               <p className="hero-copy">
-                从连续对话、知识检索到并行调查与独立验证，CAG 在同一条任务链中
-                维护完整上下文、审批和事实事件。
+                外部系统通过 API 提交任务，CAG 统一调度知识、Agent、审批和验证，
+                并将全部动作写入可监听、可恢复的审计事件流。
               </p>
               <div className="hero-actions">
                 <a
@@ -700,14 +801,14 @@ export default function App() {
                   href="/conversation"
                   onClick={(event) => navigateTo("conversation", event)}
                 >
-                  立即开始
+                  打开 API 测试台
                 </a>
                 <a
                   className="button button-outline button-large"
-                  href="/capabilities"
-                  onClick={(event) => navigateTo("capabilities", event)}
+                  href="/audit"
+                  onClick={(event) => navigateTo("audit", event)}
                 >
-                  查看治理能力
+                  查看调用监控
                 </a>
               </div>
               <ul className="hero-proof" aria-label="运行能力">
@@ -746,16 +847,26 @@ export default function App() {
               onClick={(event) => navigateTo("conversation", event)}
             >
               <span>01</span>
-              <strong>对话工作台</strong>
-              <p>连续对话、Harness 配置、审批与完整 SSE 反馈。</p>
-              <small>进入工作台</small>
+              <strong>API 测试台</strong>
+              <p>使用与外部调用相同的任务 API 验证连续对话和 SSE。</p>
+              <small>发起测试调用</small>
+            </a>
+            <a
+              className="module-card"
+              href="/audit"
+              onClick={(event) => navigateTo("audit", event)}
+            >
+              <span>02</span>
+              <strong>API 调用监控</strong>
+              <p>{auditTasks.length} 条调用轨迹，持续接收全局审计事件。</p>
+              <small>查看跟踪审计</small>
             </a>
             <a
               className="module-card"
               href="/knowledge"
               onClick={(event) => navigateTo("knowledge", event)}
             >
-              <span>02</span>
+              <span>03</span>
               <strong>企业知识</strong>
               <p>{knowledgeSources.length} 个来源，1024 维向量与记忆候选治理。</p>
               <small>管理知识</small>
@@ -765,11 +876,160 @@ export default function App() {
               href="/capabilities"
               onClick={(event) => navigateTo("capabilities", event)}
             >
-              <span>03</span>
+              <span>04</span>
               <strong>能力治理</strong>
               <p>{capabilities.length} 项 Skill、Tool、Validator 与控制映射。</p>
               <small>查看能力</small>
             </a>
+          </section>
+        </>
+      )}
+
+      {page === "audit" && (
+        <>
+          <section className="page-intro">
+            <div>
+              <p className="eyebrow">EXTERNAL API OBSERVABILITY</p>
+              <h1>API 调用监控</h1>
+              <p>
+                监听从外部 API 和网页测试台进入的任务，跟踪其触发的全部
+                Gateway、知识、Agent、命令、审批和验证动作。
+              </p>
+            </div>
+            <div className="page-metric">
+              <span>调用轨迹</span>
+              <strong>{auditTasks.length}</strong>
+            </div>
+          </section>
+          <section
+            className="audit-grid page-panel"
+            aria-label="API 跟踪审计"
+          >
+            <section className="audit-calls panel">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">01</p>
+                  <h2>API 调用轨迹</h2>
+                </div>
+                <span className="status status-completed">持久化审计</span>
+              </div>
+              <p className="audit-explainer">
+                每次调用返回 Trace ID。相同客户端与 Idempotency Key
+                只会对应一条任务轨迹。
+              </p>
+              <div className="audit-call-list">
+                {auditTasks.length === 0 && (
+                  <div className="empty-state compact-empty">
+                    <h3>等待 API 调用</h3>
+                    <p>外部调用进入后会自动出现在这里。</p>
+                  </div>
+                )}
+                {auditTasks.slice(0, 40).map((auditTask) => (
+                  <article className="audit-call" key={auditTask.task_id}>
+                    <div>
+                      <strong>{auditTask.project_code}</strong>
+                      <span
+                        className={`status status-${auditTask.status}`}
+                      >
+                        {STATUS_LABELS[auditTask.status] ?? auditTask.status}
+                      </span>
+                    </div>
+                    <p>
+                      {auditTask.trigger_source === "test_console"
+                        ? "网页测试台"
+                        : "外部 API"}
+                      <span aria-hidden="true"> · </span>
+                      {auditTask.client_id}
+                    </p>
+                    <code>{auditTask.trace_id}</code>
+                    <small>
+                      {auditTask.event_count} 个动作
+                      <span aria-hidden="true"> · </span>
+                      最后序号 {auditTask.last_global_sequence ?? "等待中"}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="audit-events panel" aria-live="polite">
+              <div className="section-heading">
+                <div>
+                  <p className="section-index">02</p>
+                  <h2>全局审计事件流</h2>
+                </div>
+                <span className="status status-running">SSE 监听中</span>
+              </div>
+              <div className="feedback-controls audit-feedback">
+                <label>
+                  <span>画面条数</span>
+                  <select
+                    aria-label="审计画面条数"
+                    value={auditDisplayLimit}
+                    onChange={(event) =>
+                      setAuditDisplayLimit(
+                        Number(event.target.value) as 50 | 100 | 200,
+                      )
+                    }
+                  >
+                    <option value="50">50 条</option>
+                    <option value="100">100 条</option>
+                    <option value="200">200 条</option>
+                  </select>
+                </label>
+                <p>
+                  后端已反馈 {auditReceivedCount.toLocaleString()} 条
+                  <span aria-hidden="true"> · </span>
+                  当前显示{" "}
+                  {Math.min(
+                    auditEvents.length,
+                    auditDisplayLimit,
+                  ).toLocaleString()}{" "}
+                  条
+                </p>
+              </div>
+              {auditEvents.length === 0 && (
+                <div className="empty-state">
+                  <div className="empty-mark" aria-hidden="true">
+                    API
+                  </div>
+                  <h3>等待审计事件</h3>
+                  <p>事件会按 Gateway 全局序号持续投影到这里。</p>
+                </div>
+              )}
+              {auditEvents.length > 0 && (
+                <ol className="event-list audit-event-list">
+                  {auditEvents
+                    .slice(-auditDisplayLimit)
+                    .reverse()
+                    .map((event) => (
+                      <li key={event.event_id}>
+                        <span className="event-sequence">
+                          {String(event.sequence).padStart(2, "0")}
+                        </span>
+                        <div>
+                          <div className="event-title">
+                            <strong>
+                              {EVENT_LABELS[event.type] ?? event.type}
+                            </strong>
+                            <time dateTime={event.timestamp}>
+                              {formatTime(event.timestamp)}
+                            </time>
+                          </div>
+                          <p>{summarizeEvent(event)}</p>
+                          <small>
+                            {event.client_id}
+                            <span aria-hidden="true"> · </span>
+                            Trace {event.trace_id.slice(0, 8)}
+                            <span aria-hidden="true"> · </span>
+                            Task #{event.task_sequence}
+                          </small>
+                        </div>
+                      </li>
+                    ))}
+                </ol>
+              )}
+            </section>
           </section>
         </>
       )}
@@ -936,9 +1196,12 @@ export default function App() {
         <>
           <section className="page-intro page-intro-conversation">
             <div>
-              <p className="eyebrow">CONVERSATION WORKSPACE</p>
-              <h1>对话工作台</h1>
-              <p>在同一轮上下文中发送目标、选择 Harness 并查看完整事实事件。</p>
+              <p className="eyebrow">API TEST CONSOLE</p>
+              <h1>API 调用测试台</h1>
+              <p>
+                这里通过正式任务 API 发起测试调用。每轮任务会进入统一审计流，
+                外部系统无需依赖本页面。
+              </p>
             </div>
             <div className="hero-status">
               <span className="runtime-dot" aria-hidden="true" />
@@ -950,7 +1213,7 @@ export default function App() {
           <div className="section-heading">
             <div>
               <p className="section-index">01</p>
-              <h2>连续对话</h2>
+              <h2>连续对话测试</h2>
             </div>
             <span>{conversation ? `会话 ${conversation.id.slice(0, 8)}` : "新会话"}</span>
           </div>

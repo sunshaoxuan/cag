@@ -40,7 +40,7 @@ from app.models.harness import (
     VerificationRun,
 )
 from app.models.task import Task, TaskStatus
-from app.models.task_event import TaskEvent
+from app.models.task_event import AuditCursor, TaskEvent
 
 __all__ = [
     "Base",
@@ -52,6 +52,7 @@ __all__ = [
     "AgentArtifact",
     "AgentRun",
     "ApprovalRequest",
+    "AuditCursor",
     "DataQualityMetric",
     "KnowledgeChunk",
     "KnowledgeConflict",

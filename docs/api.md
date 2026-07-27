@@ -2,13 +2,14 @@
 
 Base path: `/api/v1`
 
-Current version: `0.6.0`
+Current version: `0.8.0`
 
 ## Conventions
 
 * JSON timestamps use UTC ISO 8601.
 * Resource IDs are UUID strings.
 * Task event sequences start at 1 and increase by 1 per task.
+* Every TaskEvent also has a Gateway-wide `global_sequence`.
 * Error responses use FastAPI's standard `detail` field.
 * Task creation returns HTTP 202.
 
@@ -24,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.6.0"
+    "version": "0.8.0"
 }
 ```
 
@@ -149,6 +150,16 @@ Payload:
 
 ### `POST /api/v1/tasks`
 
+The API is the primary task entry point. The React page calls this same
+endpoint as a test console.
+
+Optional request headers:
+
+* `X-CAG-Client-ID`: stable caller identifier.
+* `X-Request-ID`: caller request identifier.
+* `X-CAG-Source`: defaults to `external_api`.
+* `Idempotency-Key`: deduplicates a request for the same client.
+
 Minimal request:
 
 ```json
@@ -172,9 +183,16 @@ Response:
 ```json
 {
   "id": "UUID",
+  "trace_id": "UUID",
   "project_id": "UUID",
   "project_code": "cag",
   "conversation_id": null,
+  "trigger_source": "external_api",
+  "client_id": "erp-integration",
+  "client_request_id": "erp-request-001",
+  "request_hash": "SHA256",
+  "events_url": "/api/v1/tasks/UUID/events",
+  "audit_url": "/api/v1/audit/tasks/UUID",
   "prompt": "检查当前构建失败的原因，修复能够确认的问题并运行测试。",
   "runtime_profile": "general-engineering",
   "status": "queued",
@@ -187,6 +205,11 @@ Response:
   "completed_at": null
 }
 ```
+
+The response headers expose `X-CAG-Trace-ID`,
+`X-CAG-Idempotent-Replay` and `Location`. Replaying the same request with
+the same client and idempotency key returns the existing Task. Reusing the key
+for a different request returns HTTP 409.
 
 The supported CAG runtime profiles currently include:
 
@@ -223,10 +246,40 @@ SSE example:
 ```text
 id: 1
 event: task.created
-data: {"event_id":"...","task_id":"...","sequence":1,"type":"task.created","timestamp":"...","data":{}}
+data: {"event_id":"...","task_id":"...","sequence":1,"global_sequence":42,"type":"task.created","timestamp":"...","data":{}}
 ```
 
 Reconnecting clients pass the last received sequence through `after_sequence`.
+
+## API audit
+
+### `GET /api/v1/audit/tasks`
+
+Returns recent API call traces. Filters are `trigger_source`, `client_id`,
+`status` and `limit`.
+
+### `GET /api/v1/audit/tasks/{task_id}`
+
+Returns the durable request identity, request metadata, event count, last global
+sequence, final report and error for one Trace ID.
+
+### `GET /api/v1/audit/events`
+
+Keeps one Gateway-wide SSE open for every task action. Each SSE event is named
+`audit.event`; the JSON field `type` preserves the original TaskEvent type.
+
+Query parameters:
+
+* `after_sequence`
+* `follow`
+* `trigger_source`
+* `client_id`
+* `task_id`
+
+`Last-Event-ID` and `after_sequence` support standard resumption. The payload
+includes the Trace ID, global sequence, task sequence, source, client identity,
+project and original event data. See
+[external-api-observability.md](external-api-observability.md).
 
 The Phase 2 Fake Runtime happy path emits:
 

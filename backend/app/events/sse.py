@@ -13,6 +13,7 @@ def event_payload(event: object) -> dict[str, object]:
         "event_id": event.id,
         "task_id": event.task_id,
         "sequence": event.sequence,
+        "global_sequence": event.global_sequence,
         "type": event.type,
         "timestamp": event.timestamp.isoformat(),
         "data": event.data,
@@ -35,6 +36,7 @@ def conversation_event_payload(event: object) -> dict[str, object]:
         "task_id": event.task_id,
         "sequence": event.conversation_sequence,
         "task_sequence": event.sequence,
+        "global_sequence": event.global_sequence,
         "type": event.type,
         "timestamp": event.timestamp.isoformat(),
         "data": event.data,
@@ -50,6 +52,39 @@ def format_conversation_sse(event: object) -> str:
     return (
         f"id: {event.conversation_sequence}\n"
         f"event: {event.type}\n"
+        f"data: {data}\n\n"
+    )
+
+
+def audit_event_payload(event: object) -> dict[str, object]:
+    task = event.task
+    return {
+        "event_id": event.id,
+        "trace_id": event.task_id,
+        "task_id": event.task_id,
+        "sequence": event.global_sequence,
+        "task_sequence": event.sequence,
+        "conversation_id": event.conversation_id,
+        "type": event.type,
+        "timestamp": event.timestamp.isoformat(),
+        "trigger_source": task.trigger_source,
+        "client_id": task.client_id,
+        "client_request_id": task.client_request_id,
+        "project_id": task.project_id,
+        "project_code": task.project.code,
+        "data": event.data,
+    }
+
+
+def format_audit_sse(event: object) -> str:
+    data = json.dumps(
+        audit_event_payload(event),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return (
+        f"id: {event.global_sequence}\n"
+        "event: audit.event\n"
         f"data: {data}\n\n"
     )
 
@@ -108,6 +143,48 @@ async def stream_conversation_events(
         for event in events:
             last_sequence = event.conversation_sequence
             yield format_conversation_sse(event)
+            next_heartbeat = monotonic() + heartbeat_seconds
+
+        if not follow:
+            break
+        if monotonic() >= next_heartbeat:
+            yield ": keep-alive\n\n"
+            next_heartbeat = monotonic() + heartbeat_seconds
+        await asyncio.sleep(poll_interval_ms / 1000)
+
+
+async def stream_audit_events(
+    *,
+    database: Database,
+    task_service: TaskService,
+    after_sequence: int,
+    follow: bool,
+    poll_interval_ms: int,
+    trigger_source: str | None = None,
+    client_id: str | None = None,
+    task_id: str | None = None,
+    heartbeat_seconds: int = 15,
+) -> AsyncIterator[str]:
+    last_sequence = after_sequence
+    next_heartbeat = monotonic() + heartbeat_seconds
+
+    while True:
+        with database.session_factory() as session:
+            events = task_service.list_audit_events(
+                session,
+                after_sequence=last_sequence,
+                trigger_source=trigger_source,
+                client_id=client_id,
+                task_id=task_id,
+            )
+            payloads = [
+                (event.global_sequence, format_audit_sse(event))
+                for event in events
+            ]
+
+        for sequence, payload in payloads:
+            last_sequence = sequence
+            yield payload
             next_heartbeat = monotonic() + heartbeat_seconds
 
         if not follow:

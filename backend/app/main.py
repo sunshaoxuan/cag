@@ -107,6 +107,7 @@ def create_app(
         if active_settings.auto_create_schema:
             database.create_schema()
         with database.session_factory() as recovery_session:
+            task_service.ensure_audit_cursor(recovery_session)
             task_service.recover_interrupted_tasks(recovery_session)
         capability_service.seed_defaults()
         yield
@@ -149,7 +150,14 @@ def create_app(
         ],
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=[
+            "Content-Type",
+            "Idempotency-Key",
+            "Last-Event-ID",
+            "X-CAG-Client-ID",
+            "X-CAG-Source",
+            "X-Request-ID",
+        ],
     )
     application.include_router(router)
     return application

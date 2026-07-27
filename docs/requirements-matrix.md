@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.7.2 | Evidence |
+| Requirement | Status for 0.8.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -27,7 +27,10 @@ Legend:
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
 | OneHR design language frontend | Implemented | `docs/frontend-design.md`, responsive CSS, browser screenshot and console evidence |
-| Routed frontend information architecture | Implemented | `/`, `/conversation`, `/knowledge`, `/capabilities`, route isolation tests and browser evidence |
+| Routed frontend information architecture | Implemented | `/`, `/conversation`, `/audit`, `/knowledge`, `/capabilities`, route isolation tests and browser evidence |
+| External task API trace contract | Implemented | Trace ID, client request ID, request hash, source and idempotency tests |
+| Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
+| API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |

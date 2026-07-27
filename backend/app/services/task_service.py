@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     AgentRun,
+    AuditCursor,
     Conversation,
     HarnessRun,
     Product,
@@ -116,6 +117,12 @@ class TaskService:
         prompt: str,
         conversation_id: str | None,
         runtime_profile: str,
+        client_request_id: str,
+        request_hash: str,
+        trigger_source: str = "external_api",
+        client_id: str = "anonymous-external",
+        idempotency_key: str | None = None,
+        request_metadata: dict[str, object] | None = None,
         knowledge_mode: str = "assist",
         harness_profile: str = "single",
         learning_mode: str = "capture",
@@ -144,6 +151,12 @@ class TaskService:
         task = Task(
             project_id=project.id,
             conversation_id=conversation_id,
+            trigger_source=trigger_source,
+            client_id=client_id,
+            client_request_id=client_request_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            request_metadata=request_metadata or {},
             prompt=prompt,
             runtime_profile=runtime_profile,
             knowledge_mode=knowledge_mode,
@@ -159,6 +172,9 @@ class TaskService:
             data={
                 "project_id": project.id,
                 "project_code": project.code,
+                "trigger_source": trigger_source,
+                "client_id": client_id,
+                "client_request_id": client_request_id,
                 "runtime_profile": runtime_profile,
                 "knowledge_mode": knowledge_mode,
                 "harness_profile": harness_profile,
@@ -167,6 +183,34 @@ class TaskService:
         )
         session.commit()
         return self.get_task(session, task.id)
+
+    def ensure_audit_cursor(self, session: Session) -> AuditCursor:
+        cursor = session.scalar(
+            select(AuditCursor)
+            .where(AuditCursor.name == "gateway")
+            .with_for_update()
+        )
+        if cursor is None:
+            cursor = AuditCursor(name="gateway", next_sequence=1)
+            session.add(cursor)
+            session.flush()
+        return cursor
+
+    def get_task_by_idempotency(
+        self,
+        session: Session,
+        *,
+        client_id: str,
+        idempotency_key: str,
+    ) -> Task | None:
+        return session.scalar(
+            select(Task)
+            .options(selectinload(Task.project))
+            .where(
+                Task.client_id == client_id,
+                Task.idempotency_key == idempotency_key,
+            )
+        )
 
     def create_conversation(
         self,
@@ -213,6 +257,9 @@ class TaskService:
         event_type: str,
         data: dict[str, object] | None = None,
     ) -> TaskEvent:
+        audit_cursor = self.ensure_audit_cursor(session)
+        global_sequence = audit_cursor.next_sequence
+        audit_cursor.next_sequence += 1
         conversation_sequence = None
         if task.conversation_id is not None:
             conversation = session.scalar(
@@ -228,6 +275,7 @@ class TaskService:
             task_id=task.id,
             conversation_id=task.conversation_id,
             sequence=task.next_event_sequence,
+            global_sequence=global_sequence,
             conversation_sequence=conversation_sequence,
             type=event_type,
             data=data or {},
@@ -236,6 +284,57 @@ class TaskService:
         session.add(event)
         session.flush()
         return event
+
+    def list_audit_tasks(
+        self,
+        session: Session,
+        *,
+        trigger_source: str | None = None,
+        client_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[Task]:
+        statement = (
+            select(Task)
+            .options(selectinload(Task.project))
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+        )
+        if trigger_source is not None:
+            statement = statement.where(Task.trigger_source == trigger_source)
+        if client_id is not None:
+            statement = statement.where(Task.client_id == client_id)
+        if status is not None:
+            statement = statement.where(Task.status == status)
+        return list(session.scalars(statement))
+
+    def list_audit_events(
+        self,
+        session: Session,
+        *,
+        after_sequence: int = 0,
+        trigger_source: str | None = None,
+        client_id: str | None = None,
+        task_id: str | None = None,
+        limit: int = 500,
+    ) -> list[TaskEvent]:
+        statement = (
+            select(TaskEvent)
+            .join(Task, Task.id == TaskEvent.task_id)
+            .options(
+                selectinload(TaskEvent.task).selectinload(Task.project),
+            )
+            .where(TaskEvent.global_sequence > after_sequence)
+            .order_by(TaskEvent.global_sequence)
+            .limit(limit)
+        )
+        if trigger_source is not None:
+            statement = statement.where(Task.trigger_source == trigger_source)
+        if client_id is not None:
+            statement = statement.where(Task.client_id == client_id)
+        if task_id is not None:
+            statement = statement.where(TaskEvent.task_id == task_id)
+        return list(session.scalars(statement))
 
     def list_conversation_events(
         self,

@@ -4,7 +4,9 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Version 0.6.0 is a local enterprise knowledge and governed Harness foundation. Its public APIs remain limited to trusted loopback or isolated networks until authentication and project authorization are released.
+Version 0.8.0 adds externally callable task and audit APIs. The default local
+runner remains limited to trusted loopback until caller authentication, project
+authorization, HTTPS and distributed rate limiting are released.
 
 ## 2. Codex subscription credentials
 
@@ -97,6 +99,11 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 * Codex app-server uses stdio by default.
 * Loopback WebSocket mode is reserved for controlled local integration.
 * Non-loopback app-server WebSocket mode is excluded until its experimental support and authentication constraints are explicitly accepted.
+* Audit APIs expose task prompts, client identities and action history and
+  therefore require the same future project authorization boundary as Task
+  APIs before non-loopback publication.
+* Request audit metadata uses an allowlist. Authorization headers, cookies and
+  arbitrary request headers are excluded.
 
 ## 9. Self-improvement boundary
 
@@ -106,7 +113,11 @@ Runtime Profile names are validated against each Project YAML allowlist. Formal 
 
 ## 10. Current limitations
 
-The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG SSE, restricted candidate path and knowledge ingestion Secret Scanner are implemented. Identity authentication, authorization, complete command policy enforcement, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.
+The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG
+SSE, command policy, persistent approvals, restricted candidate path, knowledge
+Secret Scanner and durable API action audit are implemented. Caller identity
+authentication, project authorization, durable distributed queueing and
+tamper-evident audit hashing remain open in the requirement matrix.
 
 ## 11. Capability promotion security
 

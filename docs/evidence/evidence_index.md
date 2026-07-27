@@ -1,5 +1,14 @@
 # Evidence index
 
+## Version 0.8.0
+
+* `docs/external-api-observability.md`
+* `docs/evidence/EXTERNAL_API_AUDIT_FINAL_RECEIPT.md`
+* `docs/evidence/external-api-audit-0.8.0/`
+* `backend/tests/test_external_api_audit.py`
+* `docs/evidence/screenshots/external-api-audit-0.8.0.png`
+* `docs/evidence/screenshots/external-api-test-console-0.8.0.png`
+
 ## Version 0.7.2
 
 * `docs/evidence/PAGED_FRONTEND_FINAL_RECEIPT.md`

@@ -34,9 +34,16 @@ const conversation: Conversation = {
 function queuedTask(id: string, prompt: string): Task {
   return {
     id,
+    trace_id: id,
     project_id: project.id,
     project_code: project.code,
     conversation_id: conversation.id,
+    trigger_source: "test_console",
+    client_id: "cag-web-test",
+    client_request_id: `request-${id}`,
+    request_hash: "a".repeat(64),
+    events_url: `/api/v1/tasks/${id}/events`,
+    audit_url: `/api/v1/audit/tasks/${id}`,
     prompt,
     runtime_profile: "general-engineering",
     knowledge_mode: "assist",
@@ -108,9 +115,9 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 async function openConversationPage() {
   fireEvent.click(
-    screen.getByRole("link", { name: "对话工作台" }),
+    screen.getByRole("link", { name: "API 测试台" }),
   );
-  await screen.findByRole("heading", { name: "连续对话" });
+  await screen.findByRole("heading", { name: "连续对话测试" });
 }
 
 describe("Agent Gateway conversation page", () => {
@@ -162,6 +169,9 @@ describe("Agent Gateway conversation page", () => {
           ]);
         }
         if (url.endsWith("/api/v1/promotions")) {
+          return jsonResponse([]);
+        }
+        if (url.endsWith("/api/v1/audit/tasks?limit=100")) {
           return jsonResponse([]);
         }
         if (url.includes("/api/v1/tasks/") && url.endsWith("/approvals")) {
@@ -222,16 +232,17 @@ describe("Agent Gateway conversation page", () => {
     expect(
       screen.getByRole("navigation", { name: "主要导航" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "立即开始" })).toHaveAttribute(
-      "href",
-      "/conversation",
-    );
     expect(
-      screen.queryByRole("heading", { name: "连续对话" }),
+      screen.getByRole("link", { name: "打开 API 测试台" }),
+    ).toHaveAttribute("href", "/conversation");
+    expect(
+      screen.queryByRole("heading", { name: "连续对话测试" }),
     ).not.toBeInTheDocument();
     expect(screen.getByText("CAG 持续会话")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("link", { name: "立即开始" }));
+    fireEvent.click(
+      screen.getByRole("link", { name: "打开 API 测试台" }),
+    );
     expect(window.location.pathname).toBe("/conversation");
     expect(
       await screen.findByRole("option", {
@@ -253,7 +264,7 @@ describe("Agent Gateway conversation page", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Ollama 就绪")).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "连续对话" }),
+      screen.queryByRole("heading", { name: "连续对话测试" }),
     ).not.toBeInTheDocument();
 
     fireEvent.click(
@@ -268,6 +279,59 @@ describe("Agent Gateway conversation page", () => {
     expect(
       screen.queryByRole("heading", { name: "企业知识与记忆" }),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
+    expect(window.location.pathname).toBe("/audit");
+    expect(
+      await screen.findByRole("heading", {
+        name: "API 调用监控",
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "全局审计事件流" }),
+    ).toBeInTheDocument();
+  });
+
+  it("projects the global external API audit SSE into the monitor", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
+    await screen.findByRole("heading", { name: "全局审计事件流" });
+
+    const auditSource = MockEventSource.instances.find((source) =>
+      source.url.includes("/api/v1/audit/events"),
+    );
+    expect(auditSource).toBeDefined();
+    act(() => {
+      auditSource?.emit("audit.event", {
+        event_id: "audit-event-1",
+        trace_id: "22222222-2222-4222-8222-222222222222",
+        task_id: "22222222-2222-4222-8222-222222222222",
+        sequence: 42,
+        task_sequence: 3,
+        conversation_id: null,
+        type: "workspace.preparing",
+        timestamp: "2026-07-27T00:00:03Z",
+        trigger_source: "external_api",
+        client_id: "erp-integration",
+        client_request_id: "erp-request-001",
+        project_id: project.id,
+        project_code: project.code,
+        data: {},
+      });
+    });
+
+    expect(
+      await screen.findAllByText("正在准备独立工作区"),
+    ).toHaveLength(2);
+    expect(screen.getByText(/erp-integration/)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        (_, element) =>
+          element?.textContent ===
+          "后端已反馈 1 条 · 当前显示 1 条",
+      ),
+    ).toHaveLength(1);
   });
 
   it("creates a CAG conversation and opens one persistent SSE stream", async () => {
@@ -298,6 +362,11 @@ describe("Agent Gateway conversation page", () => {
       conversation_id: conversation.id,
       prompt: "运行测试",
     });
+    const requestHeaders = new Headers(taskRequest?.[1]?.headers);
+    expect(requestHeaders.get("X-CAG-Source")).toBe("test_console");
+    expect(requestHeaders.get("X-CAG-Client-ID")).toBe("cag-web-test");
+    expect(requestHeaders.get("X-Request-ID")).toBeTruthy();
+    expect(requestHeaders.get("Idempotency-Key")).toBeTruthy();
   });
 
   it("keeps the SSE stream and reuses the conversation for another turn", async () => {

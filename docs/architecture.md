@@ -2,7 +2,11 @@
 
 ## 1. Purpose
 
-Agent Gateway receives a project reference and natural language Prompt, resolves policy and runtime configuration, runs a local Codex agent in an isolated workspace, streams structured events, pauses for approvals, and stores auditable results.
+Agent Gateway receives a project reference and natural language Prompt through
+an external HTTP API, resolves policy and runtime configuration, runs a local
+Codex agent in an isolated workspace, streams structured events, pauses for
+approvals, and stores auditable results. The web application is an API test,
+monitoring and governance client.
 
 Version 0.6.0 adds the governed parallel Agent Harness around the enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. ChatGPT-authenticated Codex remains the engineering Agent runtime. CAG owns child scheduling, single-writer enforcement, Artifact persistence, approval and unified SSE.
 
@@ -44,11 +48,13 @@ The detailed decision and verified local capability are recorded in [ADR 0001](a
 ## 3. Logical architecture
 
 ```text
-Web UI
-  |
-Gateway API
-  |
+External business clients -----\
+                                > Gateway Task API
+Web API test console ----------/
+                                  |
 Authentication and Authorization
+  |
+Trace and idempotency boundary
   |
 Task Router
   |
@@ -70,17 +76,27 @@ Isolated Workspace
 Approval Service
   |
 Task Store, Audit Log and Artifacts
+  |
+Global audit SSE
+  |
+External listeners and web monitor
 ```
 
 ## 4. Current components
 
 ### API
 
-FastAPI exposes health, Project, Conversation and Task APIs. The React console creates one Conversation, holds one CAG SSE connection and submits each user message as a Task.
+FastAPI exposes health, Project, Conversation, Task and Audit APIs. External
+clients submit Task requests directly. The React test console creates one
+Conversation, holds one CAG SSE connection and submits each user message through
+the same public Task endpoint with source `test_console`.
 
 ### Task service
 
-The service loads `projects/*.yaml`, synchronizes configured Project metadata, creates Task and TaskEvent records, and resolves either a business Code or physical UUID into the stored Project physical ID.
+The service loads `projects/*.yaml`, synchronizes configured Project metadata,
+creates Task and TaskEvent records, and resolves either a business Code or
+physical UUID into the stored Project physical ID. Task admission stores the
+client, caller request ID, source, request hash and optional idempotency key.
 
 ### Task executor
 
@@ -96,11 +112,21 @@ The Task SSE endpoint reads committed TaskEvent rows in Task sequence order and 
 
 The Conversation SSE endpoint remains open across multiple Tasks. `Conversation.next_event_sequence` assigns a continuous sequence, heartbeat comments keep idle connections alive, and `Last-Event-ID` supports standard EventSource reconnection. The frontend never connects to Codex app-server.
 
+Every TaskEvent receives a Gateway-wide sequence from the locked
+`AuditCursor`. `/api/v1/audit/events` projects these committed events as one
+resumable `audit.event` SSE. Source, client and task filters operate on the same
+durable ledger. Runtime, Harness, knowledge, tool, command, approval, validation
+and learning paths all call `TaskService.append_event`, so the global audit
+stream observes the complete fact-event boundary automatically.
+
 The local runtime maps every permitted user-visible app-server delta into a durable event before SSE delivery. This includes Agent message, plan, command output and reasoning-summary deltas. Completed events remain authoritative snapshots. Hidden reasoning text and credential material are outside the feedback contract.
 
 ### Persistence
 
-SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests. Alembic owns schema versioning through revision `20260727_0004`. Local development can create missing tables; container deployment runs Alembic before serving traffic.
+SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests.
+Alembic owns schema versioning through revision `20260727_0008`. Local
+development can create missing tables; container deployment runs Alembic before
+serving traffic.
 
 ### Project registry
 
@@ -112,7 +138,12 @@ The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only th
 
 ### Frontend
 
-The React console loads configured projects, submits a Prompt, subscribes to named SSE events, keeps them ordered by sequence, projects live Agent message deltas into the active conversation bubble and retrieves the final task report on a terminal event.
+The React test console loads configured projects, submits a Prompt through the
+public Task API, subscribes to named SSE events, keeps them ordered by sequence,
+projects live Agent message deltas into the active conversation bubble and
+retrieves the final task report on a terminal event. The audit page subscribes
+to the Gateway-wide audit SSE and displays calls from both external clients and
+the web test console.
 
 Feedback controls are frontend projections over the complete CAG event sequence. Key, standard and full detail levels determine visible categories, while a row limit controls how many matching events are rendered. The controls never ask the backend to drop or rewrite events.
 
@@ -143,7 +174,10 @@ Every business record has an independent UUID physical ID.
 * `Conversation.codex_thread_id` stores one opaque runtime thread identity.
 * `Task.project_id` references `Project.id`.
 * `Task.conversation_id` references `Conversation.id`.
+* `Task.id` is also the external Trace ID.
+* `Task.client_id` and `Task.idempotency_key` form the idempotent request identity.
 * `TaskEvent.task_id` references `Task.id`.
+* `TaskEvent.global_sequence` is unique across the Gateway deployment.
 * Conversation TaskEvents also store `conversation_id` and a Conversation-local sequence.
 
 The request field `project_id` accepts a project UUID or project Code for compatibility with the source specification. Storage always uses the physical UUID. Responses expose `project_id` and `project_code`.

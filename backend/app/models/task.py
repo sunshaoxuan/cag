@@ -1,7 +1,15 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, PhysicalIdMixin, utc_now
@@ -21,6 +29,13 @@ class TaskStatus:
 
 class Task(PhysicalIdMixin, Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id",
+            "idempotency_key",
+            name="uq_tasks_client_id_idempotency_key",
+        ),
+    )
 
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="RESTRICT"),
@@ -31,6 +46,23 @@ class Task(PhysicalIdMixin, Base):
         nullable=True,
         index=True,
     )
+    trigger_source: Mapped[str] = mapped_column(
+        String(32),
+        default="external_api",
+        index=True,
+    )
+    client_id: Mapped[str] = mapped_column(
+        String(128),
+        default="anonymous-external",
+        index=True,
+    )
+    client_request_id: Mapped[str] = mapped_column(String(128), index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    request_hash: Mapped[str] = mapped_column(String(64))
+    request_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     prompt: Mapped[str] = mapped_column(Text)
     runtime_profile: Mapped[str] = mapped_column(
         String(128),

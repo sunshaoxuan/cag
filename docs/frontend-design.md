@@ -41,10 +41,13 @@ copy the One人事 logo, photography, illustrations or product claims.
 |---|---|
 | `/` | Product overview, runtime proof and links to the three operational domains |
 | `/conversation` | Continuous conversation, Harness configuration, approvals and the complete CAG SSE event stream |
+| `/audit` | External API call traces and the resumable Gateway-wide audit SSE |
 | `/knowledge` | Knowledge source ingestion, idempotent vector indexing and governed memory candidates |
 | `/capabilities` | Skill, Tool, Validator, promotion and standards control governance |
 
-Route transitions use browser history and reset document scroll position. Direct
+The conversation route is an API test console. It marks task submissions as
+`test_console`; external callers default to `external_api`. Route transitions
+use browser history and reset document scroll position. Direct
 loads and reloads are served by the frontend fallback. Conversation state stays
 mounted during in-app navigation so an active task remains observable.
 
