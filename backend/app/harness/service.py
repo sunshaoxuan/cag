@@ -395,18 +395,23 @@ class AgentHarness:
                     timeout=budget_seconds,
                 )
             except Exception as exc:
+                error = (
+                    f"Agent run timed out after {budget_seconds} seconds"
+                    if isinstance(exc, TimeoutError)
+                    else str(exc) or type(exc).__name__
+                )
                 async with self._db_lock:
                     with self._database.session_factory() as session:
                         record = session.get(AgentRun, agent_run_id)
                         record.status = "failed"
-                        record.error = str(exc)
+                        record.error = error
                         record.completed_at = utc_now()
                         session.commit()
                 await emit(
                     "agent.run.failed",
-                    {"agent_run_id": agent_run_id, "role": role, "error": str(exc)},
+                    {"agent_run_id": agent_run_id, "role": role, "error": error},
                 )
-                raise
+                raise RuntimeError(error) from exc
         content = {"summary": result.summary, "validation": result.validation}
         content_hash = hashlib.sha256(
             repr(sorted(content.items())).encode("utf-8")

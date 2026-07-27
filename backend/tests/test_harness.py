@@ -1,10 +1,16 @@
 import asyncio
+import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.models import AgentArtifact, AgentRun, ApprovalRequest, HarnessRun, QualityScore
 from app.policies.command_policy import CommandPolicyService
+
+
+class TimeoutRuntime:
+    async def execute(self, **_):
+        await asyncio.sleep(2)
 
 
 def test_command_policy_classifies_safe_approval_and_forbidden() -> None:
@@ -205,3 +211,35 @@ def test_approval_service_persists_policy_decisions_and_resolution(app_factory) 
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "approved"
     assert len(approvals) == 5
+
+
+def test_harness_timeout_records_actionable_error(settings, app_factory) -> None:
+    settings.harness_agent_timeout_seconds = 1
+    app = app_factory(TimeoutRuntime())
+    with TestClient(app) as client:
+        task = client.post(
+            "/api/v1/tasks",
+            json={
+                "project_id": "test-project",
+                "prompt": "Exercise the timeout boundary.",
+                "harness_profile": "fast",
+                "knowledge_mode": "off",
+            },
+        ).json()
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            task = client.get(f"/api/v1/tasks/{task['id']}").json()
+            if task["status"] == "failed":
+                break
+            time.sleep(0.05)
+        run = client.get("/api/v1/harness-runs").json()[0]
+        agents = client.get(
+            f"/api/v1/harness-runs/{run['id']}/agent-runs"
+        ).json()
+
+    assert task["status"] == "failed"
+    assert task["error"] == "Agent run timed out after 1 seconds"
+    assert any(
+        agent["error"] == "Agent run timed out after 1 seconds"
+        for agent in agents
+    )
