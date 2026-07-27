@@ -60,12 +60,27 @@ if (-not $env:AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT) {
         $env:AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT = $selfImprovementRoot
     }
 }
+if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ENABLED) {
+    $env:AGENT_GATEWAY_KNOWLEDGE_ENABLED = "true"
+}
+if (-not $env:AGENT_GATEWAY_OLLAMA_BASE_URL) {
+    $env:AGENT_GATEWAY_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+}
+if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS) {
+    $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS = (
+        Split-Path $repositoryRoot -Parent
+    )
+}
 
 Write-Host "Starting Agent Gateway with the local ChatGPT-authenticated Codex runtime."
 Write-Host "Gateway: http://127.0.0.1:$Port"
 
 Push-Location $backendRoot
 try {
+    & $pythonExecutable -m alembic upgrade head
+    if ($LASTEXITCODE -ne 0) {
+        throw "Agent Gateway database migration failed."
+    }
     & $pythonExecutable -m uvicorn app.main:app --host 127.0.0.1 --port $Port
 }
 finally {

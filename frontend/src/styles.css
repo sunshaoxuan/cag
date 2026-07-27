@@ -109,6 +109,64 @@ h1 {
   align-items: start;
 }
 
+.knowledge-console {
+  margin-bottom: 24px;
+}
+
+.knowledge-summary,
+.knowledge-actions,
+.candidate-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.knowledge-summary {
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.knowledge-actions input {
+  flex: 1;
+  min-width: 280px;
+}
+
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.knowledge-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.knowledge-item span,
+.knowledge-item small {
+  color: var(--muted);
+}
+
+.candidate-actions button {
+  padding: 7px 12px;
+}
+
+.knowledge-mode-control {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 760px) {
+  .knowledge-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .panel {
   border: 1px solid rgba(32, 55, 47, 0.12);
   border-radius: 24px;

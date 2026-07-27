@@ -64,6 +64,17 @@ def projects_dir(tmp_path: Path, project_repository: Path) -> Path:
         "id": "test-project",
         "name": "Test Project",
         "version": "1",
+        "tenant": {"code": "customer-a", "name": "Customer A"},
+        "product": {
+            "code": "test-product",
+            "name": "Test Product",
+            "version": "1.0.0",
+        },
+        "knowledge": {
+            "enabled": True,
+            "default_mode": "assist",
+            "source_scope": "tenant",
+        },
         "repository": {
             "url": str(project_repository),
             "default_branch": "master",

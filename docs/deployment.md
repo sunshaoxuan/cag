@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.4.0 development deployment
+## 0.5.0 development deployment
 
 Requirements:
 
@@ -19,7 +19,7 @@ The Compose deployment contains:
 
 * `gateway`: FastAPI application.
 * `frontend`: React production build served by Nginx.
-* `postgres`: PostgreSQL 16 with a named volume.
+* `postgres`: PostgreSQL 16 with pgvector and a named volume.
 * `redis`: Redis 7 with append-only persistence.
 * `agent_gateway_workspaces`: named volume for task Git clones.
 
@@ -107,6 +107,38 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
 | `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
+| `AGENT_GATEWAY_KNOWLEDGE_ENABLED` | Enable the enterprise knowledge plane |
+| `AGENT_GATEWAY_OLLAMA_BASE_URL` | Private local Ollama endpoint |
+| `AGENT_GATEWAY_OLLAMA_EMBEDDING_MODEL` | Embedding model name |
+| `AGENT_GATEWAY_OLLAMA_MEMORY_MODEL` | Memory extraction and reranking model |
+| `AGENT_GATEWAY_OLLAMA_EMBEDDING_DIMENSIONS` | Stored vector dimensions, fixed at 1024 |
+| `AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS` | Semicolon separated source root allowlist |
+
+## Managed local Ollama
+
+The existing Docker volume named `ollama` remains the model system of record.
+Run the preflight first:
+
+```powershell
+.\scripts\setup-local-knowledge.ps1
+```
+
+Apply the verified migration:
+
+```powershell
+.\scripts\setup-local-knowledge.ps1 -Apply
+```
+
+The managed container uses a pinned image, one loaded model, one parallel model request and `127.0.0.1:11434`. The script records the prior container inspection under `.codex-tmp` and supports `-Rollback`.
+
+Initialize the application encryption key under the current Windows identity:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.knowledge.keyring_cli init
+```
+
+Both local drives are currently unencrypted. The readiness and standards evidence retain this production admission warning because vector and keyword indices require encrypted host storage for complete static protection.
 
 ## Production gate
 

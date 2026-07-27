@@ -8,6 +8,7 @@ from app.database import Database
 from app.projects.registry import ProjectRegistry
 from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
+from app.knowledge.service import KnowledgeService
 
 
 def get_database(request: Request) -> Database:
@@ -33,3 +34,7 @@ def get_task_service(request: Request) -> TaskService:
 
 def get_task_executor(request: Request) -> TaskExecutor:
     return request.app.state.task_executor
+
+
+def get_knowledge_service(request: Request) -> KnowledgeService:
+    return request.app.state.knowledge_service

@@ -36,6 +36,8 @@ class Task(PhysicalIdMixin, Base):
         String(128),
         default="general-engineering",
     )
+    knowledge_mode: Mapped[str] = mapped_column(String(32), default="assist")
+    knowledge_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),
         default=TaskStatus.QUEUED,

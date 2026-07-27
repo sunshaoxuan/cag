@@ -39,6 +39,8 @@ function queuedTask(id: string, prompt: string): Task {
     conversation_id: conversation.id,
     prompt,
     runtime_profile: "general-engineering",
+    knowledge_mode: "assist",
+    knowledge_usage: null,
     status: "queued",
     final_report: null,
     error: null,
@@ -116,6 +118,21 @@ describe("Agent Gateway conversation page", () => {
         if (url.endsWith("/api/v1/projects")) {
           return jsonResponse([project]);
         }
+        if (url.endsWith("/api/v1/knowledge/status")) {
+          return jsonResponse({
+            enabled: true,
+            ready: true,
+            embedding_model: "qwen3-embedding:8b",
+            memory_model: "qwen3:14b",
+            dimensions: 1024,
+          });
+        }
+        if (url.endsWith("/api/v1/knowledge/sources")) {
+          return jsonResponse([]);
+        }
+        if (url.endsWith("/api/v1/memory-candidates")) {
+          return jsonResponse([]);
+        }
         if (
           url.endsWith("/api/v1/conversations") &&
           init?.method === "POST"
@@ -157,6 +174,7 @@ describe("Agent Gateway conversation page", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("CAG 持续会话")).toBeInTheDocument();
+    expect(await screen.findByText("Ollama 就绪")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 

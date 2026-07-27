@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, PhysicalIdMixin, utc_now
@@ -14,6 +14,16 @@ class Project(PhysicalIdMixin, Base):
     repository_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     default_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     config_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    product_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("product_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,
@@ -21,3 +31,5 @@ class Project(PhysicalIdMixin, Base):
 
     conversations = relationship("Conversation", back_populates="project")
     tasks = relationship("Task", back_populates="project")
+    tenant = relationship("Tenant", back_populates="projects")
+    product_version = relationship("ProductVersion", back_populates="projects")

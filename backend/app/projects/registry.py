@@ -33,6 +33,29 @@ class RuntimeConfig(BaseModel):
     )
 
 
+class TenantConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ProductConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    name: str = Field(min_length=1, max_length=255)
+    version: str = Field(min_length=1, max_length=128)
+
+
+class KnowledgeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    default_mode: str = Field(default="assist", pattern=r"^(off|assist|required)$")
+    source_scope: str = Field(default="tenant", pattern=r"^(tenant|product)$")
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -48,6 +71,9 @@ class ProjectConfig(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     instructions: InstructionsConfig = Field(default_factory=InstructionsConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    tenant: TenantConfig | None = None
+    product: ProductConfig | None = None
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
 
     @property
     def physical_id_string(self) -> str:

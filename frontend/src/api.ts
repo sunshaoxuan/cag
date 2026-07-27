@@ -39,6 +39,12 @@ export type Task = {
   conversation_id: string | null;
   prompt: string;
   runtime_profile: string;
+  knowledge_mode: string;
+  knowledge_usage: {
+    status?: string;
+    citation_count?: number;
+    citations?: Array<Record<string, unknown>>;
+  } | null;
   status: string;
   final_report: FinalReport | null;
   error: string | null;
@@ -47,6 +53,39 @@ export type Task = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+};
+
+export type KnowledgeStatus = {
+  enabled: boolean;
+  ready: boolean;
+  reason?: string;
+  version?: string;
+  models?: string[];
+  embedding_model?: string;
+  memory_model?: string;
+  dimensions?: number;
+};
+
+export type KnowledgeSource = {
+  id: string;
+  project_id: string;
+  name: string;
+  root_path: string;
+  scope: "tenant" | "product";
+  status: string;
+  source_commit: string | null;
+  approved_for_codex: boolean;
+  error: string | null;
+};
+
+export type MemoryCandidate = {
+  id: string;
+  scope: "tenant" | "product";
+  kind: string;
+  title: string;
+  content: string;
+  confidence: number;
+  status: string;
 };
 
 export type TaskEvent = {
@@ -96,6 +135,7 @@ export function createTask(
   projectId: string,
   prompt: string,
   conversationId?: string,
+  knowledgeMode = "assist",
 ): Promise<Task> {
   return request<Task>("/api/v1/tasks", {
     method: "POST",
@@ -104,7 +144,57 @@ export function createTask(
       project_id: projectId,
       prompt,
       conversation_id: conversationId,
+      knowledge_mode: knowledgeMode,
     }),
+  });
+}
+
+export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
+  return request<KnowledgeStatus>("/api/v1/knowledge/status");
+}
+
+export function listKnowledgeSources(): Promise<KnowledgeSource[]> {
+  return request<KnowledgeSource[]>("/api/v1/knowledge/sources");
+}
+
+export function createKnowledgeSource(
+  projectId: string,
+  name: string,
+  rootPath: string,
+  scope: "tenant" | "product",
+): Promise<KnowledgeSource> {
+  return request<KnowledgeSource>("/api/v1/knowledge/sources", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      name,
+      root_path: rootPath,
+      scope,
+      approved_for_codex: true,
+    }),
+  });
+}
+
+export function ingestKnowledgeSource(
+  sourceId: string,
+): Promise<{ id: string }> {
+  return request<{ id: string }>(
+    `/api/v1/knowledge/sources/${sourceId}/ingest`,
+    { method: "POST" },
+  );
+}
+
+export function listMemoryCandidates(): Promise<MemoryCandidate[]> {
+  return request<MemoryCandidate[]>("/api/v1/memory-candidates");
+}
+
+export function transitionMemoryCandidate(
+  candidateId: string,
+  action: "approve" | "reject" | "promote" | "deprecate",
+): Promise<{ id: string; scope: string; status: string }> {
+  return request(`/api/v1/memory-candidates/${candidateId}/${action}`, {
+    method: "POST",
   });
 }
 

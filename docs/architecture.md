@@ -4,7 +4,7 @@
 
 Agent Gateway receives a project reference and natural language Prompt, resolves policy and runtime configuration, runs a local Codex agent in an isolated workspace, streams structured events, pauses for approvals, and stores auditable results.
 
-Version 0.4.0 adds persistent CAG Conversations, a CAG-owned multi-turn SSE stream and a restricted self-improvement candidate path on top of the ChatGPT-authenticated local Codex app-server adapter.
+Version 0.5.0 adds the governed enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. ChatGPT-authenticated Codex remains the engineering Agent runtime.
 
 ## 2. Runtime decision
 
@@ -125,6 +125,14 @@ The adapter communicates through stdio JSONL. It declares the experimental API c
 ### Self-improvement candidate profile
 
 `self-improvement-candidate` creates one directory under the configured self-improvement output root for the current Task. Only that directory is added to the app-server runtime workspace roots. Developer instructions require candidate files and a learning receipt and prohibit formal installation. See [self-improvement.md](self-improvement.md).
+
+### Enterprise knowledge plane
+
+Knowledge Sources bind to a Project and either its Tenant or ProductVersion. Ingestion reads approved local text files, scans and redacts secrets, creates encrypted chunks, requests 1024 dimensional embeddings from Ollama and stores them in PostgreSQL with pgvector.
+
+Task retrieval uses tenant and product version filters before reciprocal rank fusion. CAG injects only approved, non-instructional evidence blocks into Codex developer instructions and records citation IDs without logging their plaintext. Completed Tasks can create encrypted MemoryCandidates through the local memory model.
+
+Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect to Ollama or Codex app-server directly.
 
 ## 5. Data identity
 

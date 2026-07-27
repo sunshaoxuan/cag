@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.4.0`。Phase 3 本机订阅运行时已经完成，Phase 4 首个功能组提供持久会话和受控自增强候选。
+当前版本为 `0.5.0`。本机订阅 Codex、持续会话、企业知识平面和受控自增强候选已经形成可运行基础。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -23,17 +23,22 @@ CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划�
 * Conversation 到 Codex thread 的持久映射和多轮恢复。
 * 复用同一 CAG Conversation 的连续对话页面。
 * `self-improvement-candidate` 任务专属候选输出目录。
+* 本机 Ollama、pgvector、混合检索和经过批准的最小知识上下文注入。
+* 客户私有知识、产品共享知识和记忆候选治理。
 * Docker Compose 中的前端、Gateway、PostgreSQL 和 Redis。
 * 不消耗 Codex 或 OpenAI 配额的自动化与浏览器测试。
 
 规划中：
 
-* Phase 4 Skill 发现、完整 Runtime Profile 和工具策略。
+* 0.6.0 并行 Agent Harness、完整 Runtime Profile 和工具策略。
 * Phase 5 审批、Git diff 和 Artifact。
 * Phase 6 MCP 与外部系统工具。
 * Phase 7 Skill 改进提案和评测闭环。
 
 完整状态见 [需求矩阵](docs/requirements-matrix.md)。
+
+企业知识架构、来源治理和本机模型边界见
+[企业知识设计](docs/enterprise-knowledge.md)。
 
 ## 运行时边界
 

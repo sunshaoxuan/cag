@@ -2,6 +2,26 @@
 
 本文档记录 Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.5.0
+
+发布日期：2026-07-27
+
+### Added
+
+* Ollama 企业知识适配器，使用 `qwen3-embedding:8b` 和 `qwen3:14b`。
+* 客户、产品、产品版本、来源、文档、分块、记忆候选、引用和质量记录。
+* AES GCM 知识正文加密及 Windows Credential Manager 密钥入口。
+* 代码和文档增量采集、Secret Scanner、Prompt Injection 标记和 1024 维向量索引。
+* 向量与关键词 Reciprocal Rank Fusion 检索、租户过滤和批准来源上下文注入。
+* 知识来源、索引 SSE、检索及记忆批准、拒绝、提升、废弃 API。
+* 企业知识治理前端及任务知识模式。
+
+### Validated
+
+* Fake Ollama 单元和 API 测试不消耗模型或 Codex 配额。
+* 知识关闭时旧 Task 与 Conversation SSE 契约保持不变。
+* 本机模型、GPU 和 1024 维向量能力已经实测。
+
 ## 0.4.0
 
 发布日期：2026-07-27

@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.4.0`
+Current version: `0.5.0`
 
 ## Conventions
 
@@ -24,7 +24,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.4.0"
+    "version": "0.5.0"
 }
 ```
 
@@ -61,6 +61,25 @@ Returns every valid YAML-configured project:
 Accepts a Project physical UUID or business Code. Unknown references return HTTP 404.
 
 ## Create task
+
+Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
+`assist` records an explicit warning and continues when knowledge is unavailable.
+`required` ends before Codex execution when approved knowledge retrieval cannot run.
+
+## Enterprise knowledge
+
+* `GET /api/v1/knowledge/status`
+* `POST /api/v1/knowledge/sources`
+* `GET /api/v1/knowledge/sources`
+* `POST /api/v1/knowledge/sources/{source_id}/ingest`
+* `GET /api/v1/knowledge/ingestions/{ingestion_id}`
+* `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
+* `POST /api/v1/knowledge/search`
+* `GET /api/v1/memory-candidates`
+* `POST /api/v1/memory-candidates/{candidate_id}/{action}`
+
+Memory actions are `approve`, `reject`, `promote` and `deprecate`.
+Product promotion is accepted only for an approved candidate.
 
 ## Conversations
 

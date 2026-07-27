@@ -4,7 +4,7 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Version 0.4.0 is a development foundation. Its public Project, Conversation and Task APIs have no production authentication and must only bind to trusted local or isolated networks. Authentication and project authorization are required before any shared deployment.
+Version 0.5.0 is a local enterprise knowledge foundation. Its public APIs remain limited to trusted loopback or isolated networks until authentication and project authorization are released.
 
 ## 2. Codex subscription credentials
 
@@ -35,6 +35,10 @@ Forbidden locations:
 * Agent workspaces.
 
 Output and artifacts will pass through a Secret Scanner before persistence or delivery.
+
+Enterprise knowledge text is scanned before persistence and encrypted with AES GCM. The data key is obtained from Windows Credential Manager or an explicitly configured server secret. Search vectors and keyword projections contain derived information and still require encrypted host storage.
+
+Knowledge source text is untrusted input. Prompt Injection markers exclude suspicious chunks from Codex context. Injected blocks carry explicit source IDs, paths, scopes and immutable source commits.
 
 ## 4. Authorization model
 
@@ -102,4 +106,4 @@ Runtime Profile names are validated against each Project YAML allowlist. Formal 
 
 ## 10. Current limitations
 
-The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG SSE and restricted candidate path are implemented. Identity authentication, authorization, rate limiting, complete concurrency controls, command policy enforcement, Secret Scanner, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.
+The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG SSE, restricted candidate path and knowledge ingestion Secret Scanner are implemented. Identity authentication, authorization, complete command policy enforcement, approval persistence, durable queueing and audit immutability remain open in the requirement matrix.

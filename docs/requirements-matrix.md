@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.4.0 | Evidence |
+| Requirement | Status for 0.5.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -32,6 +32,11 @@ Legend:
 | CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
 | Continuous conversation frontend | Implemented | Component, build and browser evidence |
 | Truthful runtime feedback | Implemented | User-visible app-server deltas are durable CAG events; hidden reasoning and credentials remain excluded |
+| Enterprise knowledge plane | Implemented | `docs/enterprise-knowledge.md`, knowledge API tests |
+| Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
+| Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
+| Governed Modular RAG | Implemented | Ingestion, hybrid recall, citations and context isolation |
+| Standards control mapping | Partial | `docs/standards-control-matrix.md` |
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
 | Skill discovery | Planned for Phase 4 | Selection and lazy-load tests required |
 | Runtime Profiles | Partial | Project allowlist and restricted candidate profile implemented; complete permission intersection remains |

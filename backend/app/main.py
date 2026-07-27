@@ -14,6 +14,9 @@ from app.projects.registry import ProjectRegistry
 from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
 from app.workspaces.manager import WorkspaceManager
+from app.knowledge.ollama import OllamaClient
+from app.knowledge.security import load_knowledge_cipher
+from app.knowledge.service import KnowledgeService
 
 
 def create_app(
@@ -24,6 +27,18 @@ def create_app(
     database = Database(active_settings.database_url)
     project_registry = ProjectRegistry(active_settings.projects_dir)
     task_service = TaskService(project_registry)
+    knowledge_service = KnowledgeService(
+        database=database,
+        settings=active_settings,
+        provider=OllamaClient(
+            base_url=active_settings.ollama_base_url,
+            embedding_model=active_settings.ollama_embedding_model,
+            memory_model=active_settings.ollama_memory_model,
+            dimensions=active_settings.ollama_embedding_dimensions,
+            timeout_seconds=active_settings.ollama_timeout_seconds,
+        ),
+        cipher=load_knowledge_cipher(active_settings),
+    )
     workspace_manager = WorkspaceManager(
         root=active_settings.workspace_root,
         git_executable=active_settings.git_executable,
@@ -79,12 +94,14 @@ def create_app(
     application.state.database = database
     application.state.project_registry = project_registry
     application.state.task_service = task_service
+    application.state.knowledge_service = knowledge_service
     application.state.task_executor = TaskExecutor(
         database=database,
         runtime=active_runtime,
         task_service=task_service,
         workspace_manager=workspace_manager,
         self_improvement_root=active_settings.self_improvement_root,
+        knowledge_service=knowledge_service,
     )
     application.add_middleware(
         CORSMiddleware,

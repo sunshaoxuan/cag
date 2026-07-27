@@ -3,13 +3,22 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Conversation,
   conversationEventsUrl,
+  createKnowledgeSource,
   createConversation,
   createTask,
+  getKnowledgeStatus,
   getTask,
+  ingestKnowledgeSource,
+  KnowledgeSource,
+  KnowledgeStatus,
+  listKnowledgeSources,
+  listMemoryCandidates,
+  MemoryCandidate,
   listProjects,
   Project,
   Task,
   TaskEvent,
+  transitionMemoryCandidate,
 } from "./api";
 import "./styles.css";
 
@@ -18,6 +27,14 @@ const EVENT_TYPES = [
   "task.started",
   "workspace.preparing",
   "workspace.ready",
+  "knowledge.retrieval.started",
+  "knowledge.retrieval.completed",
+  "knowledge.context.injected",
+  "knowledge.retrieval.failed",
+  "memory.extraction.started",
+  "memory.candidate.created",
+  "memory.extraction.completed",
+  "memory.extraction.failed",
   "runtime.connected",
   "runtime.thread",
   "agent.message.started",
@@ -52,6 +69,14 @@ const EVENT_LABELS: Record<string, string> = {
   "workspace.ready": "工作区已就绪",
   "runtime.connected": "本机 Codex 已连接",
   "runtime.thread": "Codex 会话已连接",
+  "knowledge.retrieval.started": "正在检索企业知识",
+  "knowledge.retrieval.completed": "企业知识检索完成",
+  "knowledge.context.injected": "已注入批准知识",
+  "knowledge.retrieval.failed": "企业知识检索失败",
+  "memory.extraction.started": "正在提取记忆候选",
+  "memory.candidate.created": "已生成记忆候选",
+  "memory.extraction.completed": "记忆候选提取完成",
+  "memory.extraction.failed": "记忆候选提取失败",
   "agent.plan": "Agent 已生成计划",
   "agent.plan.delta": "Agent 计划增量",
   "agent.message.started": "Agent 开始回复",
@@ -175,6 +200,12 @@ export default function App() {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [knowledgeStatus, setKnowledgeStatus] =
+    useState<KnowledgeStatus | null>(null);
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
+  const [knowledgeRoot, setKnowledgeRoot] = useState("");
+  const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -195,6 +226,24 @@ export default function App() {
       active = false;
       sourceRef.current?.close();
     };
+  }, []);
+
+  function refreshKnowledge() {
+    Promise.all([
+      getKnowledgeStatus(),
+      listKnowledgeSources(),
+      listMemoryCandidates(),
+    ])
+      .then(([statusValue, sourcesValue, candidatesValue]) => {
+        setKnowledgeStatus(statusValue);
+        setKnowledgeSources(sourcesValue);
+        setMemoryCandidates(candidatesValue);
+      })
+      .catch((reason: Error) => setError(reason.message));
+  }
+
+  useEffect(() => {
+    refreshKnowledge();
   }, []);
 
   const selectedProject = useMemo(
@@ -348,6 +397,7 @@ export default function App() {
         projectId,
         trimmedPrompt,
         activeConversation.id,
+        knowledgeMode,
       );
       setTask(createdTask);
       setTurns((current) => [
@@ -368,6 +418,35 @@ export default function App() {
     }
   }
 
+  async function handleKnowledgeSourceCreate() {
+    if (!projectId || !knowledgeRoot.trim()) return;
+    setError(null);
+    try {
+      const source = await createKnowledgeSource(
+        projectId,
+        "项目知识库",
+        knowledgeRoot.trim(),
+        "product",
+      );
+      await ingestKnowledgeSource(source.id);
+      refreshKnowledge();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "知识来源创建失败");
+    }
+  }
+
+  async function handleCandidateAction(
+    candidateId: string,
+    action: "approve" | "reject" | "promote" | "deprecate",
+  ) {
+    try {
+      await transitionMemoryCandidate(candidateId, action);
+      refreshKnowledge();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "记忆操作失败");
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="hero">
@@ -383,6 +462,80 @@ export default function App() {
           CAG 持续会话
         </div>
       </header>
+
+      <section className="knowledge-console panel" aria-label="企业知识治理">
+        <div className="section-heading">
+          <div>
+            <p className="section-index">KNOWLEDGE</p>
+            <h2>企业知识与记忆</h2>
+          </div>
+          <span className={`status status-${knowledgeStatus?.ready ? "completed" : "failed"}`}>
+            {knowledgeStatus?.ready ? "Ollama 就绪" : "知识服务未就绪"}
+          </span>
+        </div>
+        <div className="knowledge-summary">
+          <p>
+            向量模型 {knowledgeStatus?.embedding_model ?? "未配置"}
+            <span aria-hidden="true"> · </span>
+            维数 {knowledgeStatus?.dimensions ?? "未知"}
+          </p>
+          <p>
+            已登记 {knowledgeSources.length} 个来源
+            <span aria-hidden="true"> · </span>
+            待治理 {memoryCandidates.filter((item) => item.status === "proposed").length} 条
+          </p>
+        </div>
+        <div className="knowledge-actions">
+          <input
+            aria-label="知识来源路径"
+            value={knowledgeRoot}
+            onChange={(event) => setKnowledgeRoot(event.target.value)}
+            placeholder="输入已授权的本机仓库路径"
+          />
+          <button type="button" onClick={handleKnowledgeSourceCreate}>
+            登记并索引
+          </button>
+        </div>
+        <div className="knowledge-grid">
+          <div>
+            <h3>知识来源</h3>
+            {knowledgeSources.length === 0 && <p>尚未登记知识来源</p>}
+            {knowledgeSources.map((source) => (
+              <article className="knowledge-item" key={source.id}>
+                <strong>{source.name}</strong>
+                <span>{source.scope} · {source.status}</span>
+                <small>{source.source_commit?.slice(0, 8) ?? source.root_path}</small>
+              </article>
+            ))}
+          </div>
+          <div>
+            <h3>记忆候选</h3>
+            {memoryCandidates.length === 0 && <p>尚无记忆候选</p>}
+            {memoryCandidates.slice(0, 5).map((candidate) => (
+              <article className="knowledge-item" key={candidate.id}>
+                <strong>{candidate.title}</strong>
+                <span>{candidate.kind} · {candidate.scope} · {candidate.status}</span>
+                <small>{candidate.content}</small>
+                {candidate.status === "proposed" && (
+                  <div className="candidate-actions">
+                    <button type="button" onClick={() => handleCandidateAction(candidate.id, "approve")}>
+                      批准
+                    </button>
+                    <button type="button" onClick={() => handleCandidateAction(candidate.id, "reject")}>
+                      拒绝
+                    </button>
+                  </div>
+                )}
+                {candidate.status === "approved" && candidate.scope === "tenant" && (
+                  <button type="button" onClick={() => handleCandidateAction(candidate.id, "promote")}>
+                    提升为产品知识
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section className="workspace-grid conversation-grid">
         <section className="conversation-panel panel">
@@ -452,6 +605,18 @@ export default function App() {
 
           <form className="chat-composer" onSubmit={handleSubmit}>
             <label htmlFor="prompt">发送消息</label>
+            <label className="knowledge-mode-control">
+              <span>企业知识</span>
+              <select
+                value={knowledgeMode}
+                onChange={(event) => setKnowledgeMode(event.target.value)}
+                disabled={submitting || busy}
+              >
+                <option value="assist">辅助模式</option>
+                <option value="required">必需模式</option>
+                <option value="off">关闭</option>
+              </select>
+            </label>
             <textarea
               id="prompt"
               value={prompt}

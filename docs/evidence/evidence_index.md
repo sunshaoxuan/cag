@@ -53,3 +53,10 @@ Version: 0.4.0
 | Browser feedback controls | Full and limited projections | 197 rows and 20 rows |
 | Browser console | Truthful feedback runtime diagnostics | Zero errors |
 | `docs/evidence/truthful_feedback_test_results.md` | Truthful feedback acceptance record | Passed |
+| `docs/adr/0007-governed-enterprise-rag.md` | Enterprise knowledge ownership and scope decision | Accepted |
+| `backend/tests/test_knowledge.py` | Encryption, ingestion, search, injection and governance | Passed |
+| PostgreSQL `pg_extension` | pgvector runtime | 0.8.2 |
+| PostgreSQL HNSW index | 1024 dimensional knowledge vectors | Present |
+| Managed Ollama container | Private listener and pinned image | 0.23.3 |
+| Real local Ollama RAG smoke | Ingestion, search, citation and memory | Passed |
+| `docs/evidence/enterprise_knowledge_test_results.md` | 0.5.0 acceptance record | Passed |

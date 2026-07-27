@@ -1,7 +1,16 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Conversation, Project, Task, TaskEvent, TaskStatus
+from app.models import (
+    Conversation,
+    Product,
+    ProductVersion,
+    Project,
+    Task,
+    TaskEvent,
+    TaskStatus,
+    Tenant,
+)
 from app.projects.registry import ProjectConfig, ProjectRegistry
 
 
@@ -60,6 +69,39 @@ class TaskService:
         project.repository_url = config.repository.url
         project.default_branch = config.repository.default_branch
         project.config_version = config.version
+        if config.tenant is not None:
+            tenant = session.scalar(
+                select(Tenant).where(Tenant.code == config.tenant.code)
+            )
+            if tenant is None:
+                tenant = Tenant(code=config.tenant.code, name=config.tenant.name)
+                session.add(tenant)
+                session.flush()
+            tenant.name = config.tenant.name
+            project.tenant_id = tenant.id
+        if config.product is not None:
+            product = session.scalar(
+                select(Product).where(Product.code == config.product.code)
+            )
+            if product is None:
+                product = Product(code=config.product.code, name=config.product.name)
+                session.add(product)
+                session.flush()
+            product.name = config.product.name
+            product_version = session.scalar(
+                select(ProductVersion).where(
+                    ProductVersion.product_id == product.id,
+                    ProductVersion.version == config.product.version,
+                )
+            )
+            if product_version is None:
+                product_version = ProductVersion(
+                    product_id=product.id,
+                    version=config.product.version,
+                )
+                session.add(product_version)
+                session.flush()
+            project.product_version_id = product_version.id
         session.flush()
         return project
 
@@ -71,6 +113,7 @@ class TaskService:
         prompt: str,
         conversation_id: str | None,
         runtime_profile: str,
+        knowledge_mode: str = "assist",
     ) -> Task:
         project = self.resolve_project(session, project_reference)
         project_config = self.project_registry.resolve(project_reference)
@@ -98,6 +141,7 @@ class TaskService:
             conversation_id=conversation_id,
             prompt=prompt,
             runtime_profile=runtime_profile,
+            knowledge_mode=knowledge_mode,
         )
         session.add(task)
         session.flush()
@@ -109,6 +153,7 @@ class TaskService:
                 "project_id": project.id,
                 "project_code": project.code,
                 "runtime_profile": runtime_profile,
+                "knowledge_mode": knowledge_mode,
             },
         )
         session.commit()

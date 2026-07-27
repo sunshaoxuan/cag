@@ -48,6 +48,10 @@ class TaskCreate(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9._-]+$",
     )
+    knowledge_mode: str = Field(
+        default="assist",
+        pattern=r"^(off|assist|required)$",
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -67,6 +71,8 @@ class TaskResponse(BaseModel):
     conversation_id: str | None
     prompt: str
     runtime_profile: str
+    knowledge_mode: str
+    knowledge_usage: dict[str, Any] | None
     status: str
     final_report: dict[str, Any] | None
     error: str | None
@@ -85,6 +91,8 @@ def to_response(task: Task) -> TaskResponse:
         conversation_id=task.conversation_id,
         prompt=task.prompt,
         runtime_profile=task.runtime_profile,
+        knowledge_mode=task.knowledge_mode,
+        knowledge_usage=task.knowledge_usage,
         status=task.status,
         final_report=task.final_report,
         error=task.error,
@@ -111,6 +119,7 @@ async def create_task(
             prompt=request.prompt,
             conversation_id=request.conversation_id,
             runtime_profile=request.runtime_profile,
+            knowledge_mode=request.knowledge_mode,
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
