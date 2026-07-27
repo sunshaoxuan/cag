@@ -1,5 +1,11 @@
 # Evidence index
 
+## Version 0.7.1
+
+* `docs/evidence/FRONTEND_DESIGN_FINAL_RECEIPT.md`
+* `docs/evidence/screenshots/onehr-design-0.7.1.png`
+* `docs/evidence/screenshots/onehr-design-console-0.7.1.png`
+
 ## Version 0.7.0
 
 * `docs/evidence/SELF_LEARNING_FINAL_RECEIPT.md`

@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.7.0 | Evidence |
+| Requirement | Status for 0.7.1 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -26,6 +26,7 @@ Legend:
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
+| OneHR design language frontend | Implemented | `docs/frontend-design.md`, responsive CSS, browser screenshot and console evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |

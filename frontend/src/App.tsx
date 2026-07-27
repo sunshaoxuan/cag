@@ -568,21 +568,76 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">CODEX CONVERSATION CONTROL</p>
-          <h1>Agent Gateway</h1>
-          <p className="hero-copy">
-            CAG 维护对话、SSE 事件和断线续传，本机 Codex 在独立工作区中完成每一轮。
-          </p>
-        </div>
-        <div className="runtime-chip">
-          <span className="runtime-dot" aria-hidden="true" />
-          CAG 持续会话
+      <header className="site-header">
+        <a className="brand" href="#top" aria-label="Agent Gateway 首页">
+          <span className="brand-mark" aria-hidden="true">AG</span>
+          <span>Agent Gateway</span>
+        </a>
+        <nav className="site-nav" aria-label="主要导航">
+          <a href="#conversation">连续对话</a>
+          <a href="#knowledge">企业知识</a>
+          <a href="#capabilities">能力治理</a>
+        </nav>
+        <div className="site-actions">
+          <a className="button button-ghost" href="#knowledge">查看知识库</a>
+          <a className="button button-primary" href="#conversation">开始任务</a>
         </div>
       </header>
 
-      <section className="knowledge-console panel" aria-label="企业知识治理">
+      <header className="hero">
+        <div className="hero-content" id="top">
+          <p className="eyebrow">LOCAL CODEX · ENTERPRISE KNOWLEDGE · AGENT HARNESS</p>
+          <h1>
+            一个入口，
+            <span>让企业知识与 Agent 协同工作。</span>
+          </h1>
+          <p className="hero-copy">
+            从连续对话、知识检索到并行调查与独立验证，CAG 在同一条任务链中
+            维护完整上下文、审批和事实事件。
+          </p>
+          <div className="hero-actions">
+            <a className="button button-primary button-large" href="#conversation">
+              立即开始
+            </a>
+            <a className="button button-outline button-large" href="#capabilities">
+              查看治理能力
+            </a>
+          </div>
+          <ul className="hero-proof" aria-label="运行能力">
+            <li>订阅 Codex</li>
+            <li>1024 维向量</li>
+            <li>完整 SSE</li>
+          </ul>
+        </div>
+        <div className="hero-visual" aria-label="CAG 一体化任务链">
+          <div className="hero-status">
+            <span className="runtime-dot" aria-hidden="true" />
+            CAG 持续会话
+          </div>
+          <p>从目标到可验证结果</p>
+          <div className="flow-nodes" aria-hidden="true">
+            <span>知识</span>
+            <span>Agent</span>
+            <span>验证</span>
+          </div>
+          <div className="flow-core">
+            <span>CAG</span>
+            <strong>统一任务上下文</strong>
+            <small>Conversation · Harness · Evidence</small>
+          </div>
+          <div className="flow-footer">
+            <span>01 检索</span>
+            <span>02 执行</span>
+            <span>03 复核</span>
+          </div>
+        </div>
+      </header>
+
+      <section
+        className="knowledge-console panel"
+        id="knowledge"
+        aria-label="企业知识治理"
+      >
         <div className="section-heading">
           <div>
             <p className="section-index">KNOWLEDGE</p>
@@ -656,7 +711,11 @@ export default function App() {
         </div>
       </section>
 
-      <section className="capability-console panel" aria-label="自学习能力治理">
+      <section
+        className="capability-console panel"
+        id="capabilities"
+        aria-label="自学习能力治理"
+      >
         <div className="section-heading">
           <div>
             <p className="section-index">CAPABILITY</p>
@@ -704,7 +763,10 @@ export default function App() {
         </div>
       </section>
 
-      <section className="workspace-grid conversation-grid">
+      <section
+        className="workspace-grid conversation-grid"
+        id="conversation"
+      >
         <section className="conversation-panel panel">
           <div className="section-heading">
             <div>

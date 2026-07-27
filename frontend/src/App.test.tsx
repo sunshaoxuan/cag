@@ -211,6 +211,18 @@ describe("Agent Gateway conversation page", () => {
         name: "Codex/ChatGPT Agent Gateway · cag",
       }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "一个入口， 让企业知识与 Agent 协同工作。",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "主要导航" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "立即开始" })).toHaveAttribute(
+      "href",
+      "#conversation",
+    );
     expect(screen.getByText("CAG 持续会话")).toBeInTheDocument();
     expect(await screen.findByText("Ollama 就绪")).toBeInTheDocument();
     expect(await screen.findByText("Gateway 注册表")).toBeInTheDocument();
