@@ -62,12 +62,13 @@ class KnowledgeScheduler:
         if source_id is None:
             return False
         try:
-            ingestion = await asyncio.to_thread(
+            ingestion, created = await asyncio.to_thread(
                 self._service.create_ingestion,
                 source_id,
                 trigger="scheduled",
             )
-            await self._service.ingest(ingestion.id)
+            if created:
+                await self._service.ingest(ingestion.id)
         finally:
             await asyncio.to_thread(
                 self._service.release_sync_lease,

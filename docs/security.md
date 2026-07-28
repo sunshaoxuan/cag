@@ -68,6 +68,13 @@ collection time through the same credential service and command policy used by
 manual ingestion. Failed authentication remains a source error with bounded
 retry and does not expose the supplied secret.
 
+Directory progress events contain paths relative to the approved source root.
+They never contain the UNC server, share root or credential material. Relative
+directory names remain enterprise metadata and follow the same trusted
+administrator, tenant and project authorization boundary as source history.
+The collector does not follow directory symlinks and skips configured
+dependency, cache and version-control directories.
+
 Remote repository hosts require deployment network policy. The current source
 registry validates URL schemes and rejects embedded URL credentials. Production
 deployments must combine an outbound allowlist with caller authentication and

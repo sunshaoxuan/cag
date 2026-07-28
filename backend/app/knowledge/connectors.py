@@ -7,10 +7,11 @@ import shutil
 import stat
 import subprocess
 import zipfile
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Iterator
+from typing import Callable, Iterator
 from urllib.parse import urlsplit
 
 from app.knowledge.credentials import (
@@ -79,6 +80,9 @@ class ValidationResult:
     ok: bool
     revision: str | None
     message: str
+
+
+CollectionProgress = Callable[[dict[str, int | str]], None]
 
 
 class SourceConnectorManager:
@@ -183,18 +187,26 @@ class SourceConnectorManager:
             True, revision, "SVN repository is reachable"
         )
 
-    def collect(self, source: SourceConfig) -> CollectionResult:
+    def collect(
+        self,
+        source: SourceConfig,
+        progress: CollectionProgress | None = None,
+    ) -> CollectionResult:
         credential = self._credentials.get(source.credential_ref)
         if source.source_type == "local_directory":
             root = self._selected_root(
                 self._resolve_allowed_local_root(source.location),
                 source.subpath,
             )
-            return self._read_documents(root, self._git_revision(root))
+            return self._read_documents(
+                root,
+                self._git_revision(root),
+                progress,
+            )
         if source.source_type == "network_share":
             with self._network_connection(source.location, credential):
                 root = self._selected_root(Path(source.location), source.subpath)
-                return self._read_documents(root, None)
+                return self._read_documents(root, None, progress)
         if source.source_type in {"git", "gitlab"}:
             root, revision = self._materialize_git(source, credential)
         else:
@@ -202,6 +214,7 @@ class SourceConnectorManager:
         return self._read_documents(
             self._selected_root(root, source.subpath),
             revision,
+            progress,
         )
 
     def purge(self, source_id: str) -> None:
@@ -228,53 +241,126 @@ class SourceConnectorManager:
         self,
         root: Path,
         revision: str | None,
+        progress: CollectionProgress | None = None,
     ) -> CollectionResult:
         if not root.is_dir():
             raise ValueError("Selected source subpath does not exist")
-        paths = sorted(
-            path
-            for path in root.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in SUPPORTED_EXTENSIONS
-            and not any(part in EXCLUDED_PARTS for part in path.parts)
-            and path.stat().st_size <= self._max_file_bytes
-        )
         documents: list[CollectedDocument] = []
         rejected = 0
         duplicates = 0
+        files_discovered = 0
+        files_processed = 0
+        directories_scanned = 0
         seen_hashes: set[str] = set()
-        for path in paths:
-            try:
-                text = normalize_text(extract_text(path))
-            except (
-                UnicodeDecodeError,
-                OSError,
-                RuntimeError,
-                ValueError,
-                zipfile.BadZipFile,
-            ):
-                rejected += 1
-                continue
-            if not text:
-                rejected += 1
-                continue
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            if content_hash in seen_hashes:
-                duplicates += 1
-                continue
-            seen_hashes.add(content_hash)
-            documents.append(
-                CollectedDocument(
-                    path=path.relative_to(root).as_posix(),
-                    text=text,
-                    content_hash=content_hash,
-                    language=path.suffix.lstrip(".").lower() or "text",
-                )
+        pending_directories = deque([root])
+
+        def report(
+            phase: str,
+            directory: Path,
+            *,
+            current_directory_files: int = 0,
+            error: str = "",
+        ) -> None:
+            if progress is None:
+                return
+            relative = (
+                "."
+                if directory == root
+                else directory.relative_to(root).as_posix()
             )
+            data: dict[str, int | str] = {
+                "phase": phase,
+                "directory": relative,
+                "directories_scanned": directories_scanned,
+                "directories_pending": len(pending_directories),
+                "files_discovered": files_discovered,
+                "files_processed": files_processed,
+                "current_directory_files": current_directory_files,
+                "rejected_files": rejected,
+            }
+            if error:
+                data["error"] = error[:500]
+            progress(data)
+
+        while pending_directories:
+            directory = pending_directories.popleft()
+            report("started", directory)
+            try:
+                with os.scandir(directory) as iterator:
+                    entries = sorted(
+                        iterator,
+                        key=lambda entry: entry.name.casefold(),
+                    )
+            except OSError as exc:
+                rejected += 1
+                directories_scanned += 1
+                report("failed", directory, error=str(exc))
+                continue
+
+            directory_files: list[Path] = []
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in EXCLUDED_PARTS:
+                            pending_directories.append(Path(entry.path))
+                        continue
+                    if (
+                        not entry.is_file(follow_symlinks=False)
+                        or Path(entry.name).suffix.lower()
+                        not in SUPPORTED_EXTENSIONS
+                        or entry.stat(follow_symlinks=False).st_size
+                        > self._max_file_bytes
+                    ):
+                        continue
+                except OSError:
+                    rejected += 1
+                    continue
+                directory_files.append(Path(entry.path))
+                files_discovered += 1
+
+            for path in directory_files:
+                try:
+                    text = normalize_text(extract_text(path))
+                except (
+                    UnicodeDecodeError,
+                    OSError,
+                    RuntimeError,
+                    ValueError,
+                    zipfile.BadZipFile,
+                ):
+                    rejected += 1
+                    files_processed += 1
+                    continue
+                files_processed += 1
+                if not text:
+                    rejected += 1
+                    continue
+                content_hash = hashlib.sha256(
+                    text.encode("utf-8")
+                ).hexdigest()
+                if content_hash in seen_hashes:
+                    duplicates += 1
+                    continue
+                seen_hashes.add(content_hash)
+                documents.append(
+                    CollectedDocument(
+                        path=path.relative_to(root).as_posix(),
+                        text=text,
+                        content_hash=content_hash,
+                        language=path.suffix.lstrip(".").lower() or "text",
+                    )
+                )
+            directories_scanned += 1
+            report(
+                "completed",
+                directory,
+                current_directory_files=len(directory_files),
+            )
+
         return CollectionResult(
             revision=revision,
             documents=documents,
-            files_seen=len(paths),
+            files_seen=files_discovered,
             rejected_files=rejected,
             duplicate_files=duplicates,
         )

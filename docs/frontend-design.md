@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.11.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
+Version 0.12.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -67,6 +67,13 @@ The page refreshes source state every ten seconds while visible. Source Memory
 and task-derived Memory Candidates remain separate concepts and use separate
 routes.
 
+The ingestion panel automatically follows a queued or running scheduled
+ingestion. Directory progress is rendered as human-readable current-directory,
+scanned-directory, pending-directory and file counts. The browser can display
+the latest 50, 100 or 200 events. Its in-memory projection retains at most 200
+events and tracks the complete received count separately, while the Gateway
+persists and serves the complete sequence.
+
 The Memory route uses the same 30 pixel panel gutter as the Knowledge and
 Capability routes. Its empty state stays inside a bordered inner surface so
 headings, governance labels and status text share one alignment grid.
@@ -104,3 +111,4 @@ Validated screenshots:
 * `docs/evidence/screenshots/memory-panel-spacing-0.9.1.jpg`
 * `docs/evidence/screenshots/durable-knowledge-sources-0.10.0.jpg`
 * `docs/evidence/screenshots/credential-reveal-0.11.0.jpg`
+* `docs/evidence/screenshots/directory-progress-0.12.0.jpg`

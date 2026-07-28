@@ -187,6 +187,7 @@ const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.ingestion.queued": "采集任务已排队",
   "knowledge.ingestion.started": "采集任务已启动",
   "knowledge.collection.started": "正在收集资源",
+  "knowledge.collection.progress": "逐目录扫描进度",
   "knowledge.collection.completed": "资源收集完成",
   "knowledge.cleaning.started": "正在清洗内容",
   "knowledge.cleaning.completed": "内容清洗完成",
@@ -315,6 +316,27 @@ function summarizeEvent(event: TaskEvent): string {
   return EVENT_LABELS[event.type] ?? event.type;
 }
 
+function summarizeKnowledgeIngestionEvent(
+  event: KnowledgeIngestionEvent,
+): string {
+  if (event.type !== "knowledge.collection.progress") {
+    return JSON.stringify(event.data);
+  }
+  const directory = String(event.data.directory ?? ".");
+  const scanned = Number(event.data.directories_scanned ?? 0);
+  const pending = Number(event.data.directories_pending ?? 0);
+  const discovered = Number(event.data.files_discovered ?? 0);
+  const processed = Number(event.data.files_processed ?? 0);
+  const phase = String(event.data.phase ?? "");
+  if (phase === "started") {
+    return `开始遍历 ${directory} · 已完成 ${scanned} 个目录，待处理 ${pending} 个目录，已发现 ${discovered} 个文件`;
+  }
+  if (phase === "failed") {
+    return `目录 ${directory} 读取失败 · 已完成 ${scanned} 个目录，待处理 ${pending} 个目录`;
+  }
+  return `完成目录 ${directory} · 已完成 ${scanned} 个目录，待处理 ${pending} 个目录，已处理 ${processed}/${discovered} 个文件`;
+}
+
 function isTerminal(status: string): boolean {
   return ["completed", "failed", "cancelled"].includes(status);
 }
@@ -373,6 +395,10 @@ export default function App() {
   const [knowledgeEvents, setKnowledgeEvents] = useState<
     KnowledgeIngestionEvent[]
   >([]);
+  const [knowledgeReceivedCount, setKnowledgeReceivedCount] = useState(0);
+  const [knowledgeEventLimit, setKnowledgeEventLimit] = useState<
+    50 | 100 | 200
+  >(100);
   const [knowledgeHistories, setKnowledgeHistories] = useState<
     Record<string, KnowledgeIngestion[]>
   >({});
@@ -395,6 +421,8 @@ export default function App() {
   const sourceRef = useRef<EventSource | null>(null);
   const auditSourceRef = useRef<EventSource | null>(null);
   const knowledgeSourceRef = useRef<EventSource | null>(null);
+  const knowledgeIngestionIdRef = useRef<string | null>(null);
+  const knowledgeLastSequenceRef = useRef(0);
   const auditEventIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -416,6 +444,7 @@ export default function App() {
       sourceRef.current?.close();
       auditSourceRef.current?.close();
       knowledgeSourceRef.current?.close();
+      knowledgeIngestionIdRef.current = null;
     };
   }, []);
 
@@ -439,6 +468,19 @@ export default function App() {
         setKnowledgeStatus(statusValue);
         setKnowledgeSources(sourcesValue);
         setMemoryCandidates(candidatesValue);
+        const activeIngestion = sourcesValue
+          .map((source) => source.last_ingestion)
+          .find(
+            (ingestion) =>
+              ingestion?.status === "queued" ||
+              ingestion?.status === "running",
+          );
+        if (
+          activeIngestion &&
+          knowledgeIngestionIdRef.current !== activeIngestion.id
+        ) {
+          connectKnowledgeIngestion(activeIngestion.id);
+        }
       })
       .catch((reason: Error) => setError(reason.message));
   }
@@ -894,8 +936,17 @@ export default function App() {
   }
 
   function connectKnowledgeIngestion(ingestionId: string) {
+    if (
+      knowledgeIngestionIdRef.current === ingestionId &&
+      knowledgeSourceRef.current
+    ) {
+      return;
+    }
     knowledgeSourceRef.current?.close();
+    knowledgeIngestionIdRef.current = ingestionId;
+    knowledgeLastSequenceRef.current = 0;
     setKnowledgeEvents([]);
+    setKnowledgeReceivedCount(0);
     const source = new EventSource(
       knowledgeIngestionEventsUrl(ingestionId),
     );
@@ -904,6 +955,7 @@ export default function App() {
       "knowledge.ingestion.queued",
       "knowledge.ingestion.started",
       "knowledge.collection.started",
+      "knowledge.collection.progress",
       "knowledge.collection.completed",
       "knowledge.cleaning.started",
       "knowledge.cleaning.completed",
@@ -915,13 +967,13 @@ export default function App() {
     ];
     const onEvent = (message: MessageEvent<string>) => {
       const item = JSON.parse(message.data) as KnowledgeIngestionEvent;
+      if (item.sequence <= knowledgeLastSequenceRef.current) return;
+      knowledgeLastSequenceRef.current = item.sequence;
+      setKnowledgeReceivedCount((current) => current + 1);
       setKnowledgeEvents((current) => {
-        if (current.some((event) => event.event_id === item.event_id)) {
-          return current;
-        }
-        return [...current, item].sort(
-          (left, right) => left.sequence - right.sequence,
-        );
+        return [...current, item]
+          .sort((left, right) => left.sequence - right.sequence)
+          .slice(-200);
       });
       if (
         item.type === "knowledge.ingestion.completed" ||
@@ -935,6 +987,7 @@ export default function App() {
         );
         refreshKnowledge();
         source.close();
+        knowledgeIngestionIdRef.current = null;
       }
     };
     eventTypes.forEach((type) =>
@@ -1880,7 +1933,24 @@ export default function App() {
               <section className="collection-events" aria-label="采集过程">
                 <div className="source-section-title">
                   <h3>采集过程</h3>
-                  <span>完整事实事件</span>
+                  <div className="collection-event-controls">
+                    <span>
+                      后端已反馈 {knowledgeReceivedCount.toLocaleString()} 条
+                    </span>
+                    <select
+                      aria-label="采集事件画面条数"
+                      value={knowledgeEventLimit}
+                      onChange={(event) =>
+                        setKnowledgeEventLimit(
+                          Number(event.target.value) as 50 | 100 | 200,
+                        )
+                      }
+                    >
+                      <option value="50">显示 50 条</option>
+                      <option value="100">显示 100 条</option>
+                      <option value="200">显示 200 条</option>
+                    </select>
+                  </div>
                 </div>
                 {knowledgeEvents.length === 0 && (
                   <div className="compact-empty">
@@ -1889,7 +1959,7 @@ export default function App() {
                 )}
                 {knowledgeEvents.length > 0 && (
                   <ol className="event-list">
-                    {knowledgeEvents.map((event) => (
+                    {knowledgeEvents.slice(-knowledgeEventLimit).map((event) => (
                       <li key={event.event_id}>
                         <span className="event-sequence">
                           {String(event.sequence).padStart(2, "0")}
@@ -1904,7 +1974,7 @@ export default function App() {
                               {formatTime(event.timestamp)}
                             </time>
                           </div>
-                          <p>{JSON.stringify(event.data)}</p>
+                          <p>{summarizeKnowledgeIngestionEvent(event)}</p>
                         </div>
                       </li>
                     ))}

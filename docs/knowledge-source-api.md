@@ -103,6 +103,7 @@ Durable stage events:
 knowledge.ingestion.queued
 knowledge.ingestion.started
 knowledge.collection.started
+knowledge.collection.progress
 knowledge.collection.completed
 knowledge.cleaning.started
 knowledge.cleaning.completed
@@ -112,6 +113,42 @@ knowledge.memory.persisted
 knowledge.ingestion.completed
 knowledge.ingestion.failed
 ```
+
+Folder-backed sources emit `knowledge.collection.progress` at the start and
+completion of every directory. The event data contains:
+
+```json
+{
+  "phase": "completed",
+  "directory": "docs/product",
+  "directories_scanned": 4,
+  "directories_pending": 7,
+  "files_discovered": 120,
+  "files_processed": 100,
+  "current_directory_files": 24,
+  "rejected_files": 1
+}
+```
+
+`directory` is relative to the registered source root. The collector lists one
+directory, closes its operating system directory handle, processes that
+directory's supported files and then advances to the next queued directory.
+Directories use breadth-first order, so the first level becomes visible before
+deep descendants. Excluded dependency and version-control directories are not
+queued.
+
+An encrypted or unreadable PDF increments `rejected_files` and collection
+continues. Credentials discovered in adjacent files are never used to decrypt
+documents automatically.
+
+If the ingest action is called while the same source already has a queued or
+running ingestion, the API returns that active ingestion and attaches the
+caller to its SSE. It does not schedule another execution.
+
+The management page retains at most the latest 200 progress events in browser
+memory and counts the complete received stream separately. Selecting 50, 100 or
+200 changes only the rendered projection. The backend event ledger remains
+complete and resumable.
 
 The terminal ingestion record includes `files_seen`, `chunks_written`,
 `rejected_files`, `duplicate_files`, `unchanged_files`, `vectors_reused`,
@@ -127,7 +164,9 @@ next_sync_at becomes due
   |
 database lease claim
   |
-complete source snapshot
+breadth-first directory queue
+  |
+per-directory progress events
   |
 incremental hash comparison
   |

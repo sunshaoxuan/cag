@@ -13,7 +13,7 @@ from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
-from app.knowledge.connectors import SourceConnectorManager
+from app.knowledge.connectors import SourceConfig, SourceConnectorManager
 from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
     KnowledgeCipher,
@@ -301,6 +301,7 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
             params={"follow": "false"},
         ).text
         assert "knowledge.collection.completed" in events
+        assert "knowledge.collection.progress" in events
         assert "knowledge.cleaning.completed" in events
         assert "knowledge.indexing.completed" in events
         assert "knowledge.memory.persisted" in events
@@ -659,6 +660,132 @@ def test_office_document_extraction(tmp_path: Path) -> None:
     from app.knowledge.extractors import extract_text
 
     assert "Enterprise guide" in extract_text(document)
+
+
+def test_encrypted_pdf_is_rejected_without_stopping_collection(
+    tmp_path: Path,
+) -> None:
+    from pypdf import PdfWriter
+
+    root = tmp_path / "pdf-source"
+    root.mkdir()
+    encrypted = root / "encrypted.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.encrypt("synthetic-test-password")
+    with encrypted.open("wb") as stream:
+        writer.write(stream)
+    (root / "README.md").write_text("# Readable", encoding="utf-8")
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+
+    result = manager.collect(
+        SourceConfig(
+            id="encrypted-pdf-source",
+            source_type="local_directory",
+            location=str(root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        )
+    )
+
+    assert result.files_seen == 2
+    assert result.rejected_files == 1
+    assert [document.path for document in result.documents] == ["README.md"]
+
+
+def test_connector_scans_directories_breadth_first_with_progress(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source"
+    (root / "alpha" / "deep").mkdir(parents=True)
+    (root / "beta").mkdir()
+    (root / "ROOT.md").write_text("# Root", encoding="utf-8")
+    (root / "alpha" / "ALPHA.md").write_text("# Alpha", encoding="utf-8")
+    (root / "alpha" / "deep" / "DEEP.md").write_text(
+        "# Deep",
+        encoding="utf-8",
+    )
+    (root / "beta" / "BETA.md").write_text("# Beta", encoding="utf-8")
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+    progress: list[dict[str, int | str]] = []
+
+    result = manager.collect(
+        SourceConfig(
+            id="source-test",
+            source_type="local_directory",
+            location=str(root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        progress.append,
+    )
+
+    completed_directories = [
+        str(item["directory"])
+        for item in progress
+        if item["phase"] == "completed"
+    ]
+    assert completed_directories == [".", "alpha", "beta", "alpha/deep"]
+    assert result.files_seen == 4
+    assert len(result.documents) == 4
+    assert progress[-1]["directories_pending"] == 0
+    assert progress[-1]["files_processed"] == 4
+
+
+def test_active_ingestion_is_reused_without_duplicate_execution(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Single flight source",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+            },
+        ).json()
+        ingestion, created = service.create_ingestion(source["id"])
+        assert created is True
+
+        repeated = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        )
+        assert repeated.status_code == 202
+        assert repeated.json()["id"] == ingestion.id
+        assert repeated.json()["status"] == "queued"
+
+        asyncio.run(service.ingest(ingestion.id))
+        asyncio.run(service.ingest(ingestion.id))
+        events = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion.id}/events",
+            params={"follow": "false"},
+        ).text
+        assert events.count("event: knowledge.ingestion.started") == 1
+        assert events.count("event: knowledge.collection.started") == 1
 
 
 def test_connector_credentials_avoid_command_arguments(

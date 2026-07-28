@@ -879,6 +879,26 @@ h1 span {
   font-size: 0.95rem;
 }
 
+.collection-event-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.collection-event-controls span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.collection-event-controls select {
+  width: auto;
+  min-height: 32px;
+  padding: 0 28px 0 9px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+}
+
 .source-card {
   display: grid;
   gap: 13px;

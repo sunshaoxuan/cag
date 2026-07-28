@@ -8,7 +8,7 @@ def test_live_health_reports_version(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "agent-gateway",
-        "version": "0.11.0",
+        "version": "0.12.0",
     }
 
 

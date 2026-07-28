@@ -167,6 +167,16 @@ The adapter communicates through stdio JSONL. It declares the experimental API c
 
 Knowledge Sources bind to a Project and either its Tenant or ProductVersion. Ingestion reads approved local text files, scans and redacts secrets, creates encrypted chunks, requests 1024 dimensional embeddings from Ollama and stores them in PostgreSQL with pgvector.
 
+Local-directory and network-share connectors use a breadth-first directory
+queue. Only the current directory is open for enumeration. Its child
+directories are queued in stable name order, its supported files are processed,
+and the handle is closed before the next directory starts. Durable
+`knowledge.collection.progress` events expose the relative directory,
+directories scanned, directories pending, files discovered and files
+processed. An ingestion-state gate provides single-flight execution for each
+source, so repeated API calls follow the active ingestion without launching a
+second collector.
+
 Task retrieval uses tenant and product version filters before reciprocal rank fusion. CAG injects only approved, non-instructional evidence blocks into Codex developer instructions and records citation IDs without logging their plaintext. Completed Tasks can create encrypted MemoryCandidates through the local memory model.
 
 Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect to Ollama or Codex app-server directly.

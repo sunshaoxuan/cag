@@ -414,7 +414,7 @@ class KnowledgeService:
         source_id: str,
         *,
         trigger: str = "manual",
-    ) -> KnowledgeIngestion:
+    ) -> tuple[KnowledgeIngestion, bool]:
         if trigger not in {"manual", "scheduled"}:
             raise ValueError("Unsupported knowledge ingestion trigger")
         with self._database.session_factory() as session:
@@ -432,7 +432,7 @@ class KnowledgeService:
                 .order_by(KnowledgeIngestion.created_at.desc())
             )
             if active is not None:
-                return active
+                return active, False
             ingestion = KnowledgeIngestion(
                 source_id=source_id,
                 trigger=trigger,
@@ -449,7 +449,7 @@ class KnowledgeService:
                 {"source_id": source_id, "trigger": trigger},
             )
             session.commit()
-            return ingestion
+            return ingestion, True
 
     async def ingest(self, ingestion_id: str) -> None:
         if self._cipher is None:
@@ -458,6 +458,8 @@ class KnowledgeService:
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
+                return
+            if ingestion.status != "queued":
                 return
             source = session.get(KnowledgeSource, ingestion.source_id)
             if source is None:
@@ -480,8 +482,20 @@ class KnowledgeService:
                 "knowledge.collection.started",
                 {"source_type": source_config.source_type},
             )
+
+            def report_collection_progress(
+                data: dict[str, int | str],
+            ) -> None:
+                self._record_ingestion_event(
+                    ingestion_id,
+                    "knowledge.collection.progress",
+                    data,
+                )
+
             collected = await asyncio.to_thread(
-                self._connectors.collect, source_config
+                self._connectors.collect,
+                source_config,
+                report_collection_progress,
             )
             self._record_ingestion_event(
                 ingestion_id,

@@ -83,12 +83,18 @@ def _extract_zipped_xml(path: Path) -> str:
 def _extract_pdf(path: Path) -> str:
     try:
         from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
     except ImportError as exc:
         raise RuntimeError(
             "PDF indexing requires the pypdf package"
         ) from exc
-    reader = PdfReader(str(path))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    try:
+        reader = PdfReader(str(path))
+        return "\n".join(
+            page.extract_text() or "" for page in reader.pages
+        )
+    except PdfReadError as exc:
+        raise ValueError(f"PDF cannot be read: {exc}") from exc
 
 
 def normalize_text(text: str) -> str:

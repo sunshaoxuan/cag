@@ -529,17 +529,73 @@ describe("Agent Gateway conversation page", () => {
       source.url.includes("/knowledge/ingestions/ingestion-1/events"),
     );
     act(() => {
+      ingestionSource?.emit("knowledge.collection.progress", {
+        event_id: "knowledge-progress-1",
+        ingestion_id: "ingestion-1",
+        sequence: 3,
+        type: "knowledge.collection.progress",
+        timestamp: "2026-07-28T00:00:01Z",
+        data: {
+          phase: "completed",
+          directory: "docs/product",
+          directories_scanned: 4,
+          directories_pending: 7,
+          files_discovered: 120,
+          files_processed: 100,
+        },
+      });
       ingestionSource?.emit("knowledge.collection.completed", {
         event_id: "knowledge-event-1",
         ingestion_id: "ingestion-1",
-        sequence: 3,
+        sequence: 4,
         type: "knowledge.collection.completed",
         timestamp: "2026-07-28T00:00:01Z",
         data: { files_seen: 12 },
       });
     });
+    expect(await screen.findByText("逐目录扫描进度")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "完成目录 docs/product · 已完成 4 个目录，待处理 7 个目录，已处理 100/120 个文件",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "采集事件画面条数" }),
+    ).toHaveValue("100");
+    expect(screen.getByText("后端已反馈 2 条")).toBeInTheDocument();
     expect(await screen.findByText("资源收集完成")).toBeInTheDocument();
     expect(screen.getByText('{"files_seen":12}')).toBeInTheDocument();
+
+    act(() => {
+      for (let index = 0; index < 203; index += 1) {
+        ingestionSource?.emit("knowledge.collection.progress", {
+          event_id: `knowledge-progress-bulk-${index}`,
+          ingestion_id: "ingestion-1",
+          sequence: 5 + index,
+          type: "knowledge.collection.progress",
+          timestamp: "2026-07-28T00:00:02Z",
+          data: {
+            phase: "completed",
+            directory: `folder-${index}`,
+            directories_scanned: index + 5,
+            directories_pending: 500 - index,
+            files_discovered: index,
+            files_processed: index,
+          },
+        });
+      }
+    });
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "采集事件画面条数" }),
+      { target: { value: "200" } },
+    );
+    expect(screen.getByText("后端已反馈 205 条")).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole("region", { name: "采集过程" })
+        .querySelectorAll("li"),
+    ).toHaveLength(200);
+    expect(screen.queryByText("资源收集完成")).not.toBeInTheDocument();
   });
 
   it("projects the global external API audit SSE into the monitor", async () => {

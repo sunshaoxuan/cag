@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.12.0
+
+* `docs/evidence/directory-progress-0.12.0/`
+* `docs/evidence/screenshots/directory-progress-0.12.0.jpg`
+
 ## Version 0.11.0
 
 * `docs/evidence/credential-reveal-0.11.0/`

@@ -311,12 +311,13 @@ def ingest_source(
     service: KnowledgeService = Depends(get_knowledge_service),
 ) -> dict[str, Any]:
     try:
-        ingestion = service.create_ingestion(source_id)
+        ingestion, created = service.create_ingestion(source_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Source not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    background_tasks.add_task(service.ingest, ingestion.id)
+    if created:
+        background_tasks.add_task(service.ingest, ingestion.id)
     return ingestion_response(ingestion)
 
 
