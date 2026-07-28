@@ -79,12 +79,65 @@ export type KnowledgeSource = {
   id: string;
   project_id: string;
   name: string;
+  source_type:
+    | "local_directory"
+    | "network_share"
+    | "git"
+    | "gitlab"
+    | "svn";
+  location: string;
   root_path: string;
+  reference: string | null;
+  subpath: string | null;
+  credential_username: string | null;
+  credential_configured: boolean;
+  enabled: boolean;
   scope: "tenant" | "product";
   status: string;
   source_commit: string | null;
+  index_fingerprint: string | null;
   approved_for_codex: boolean;
   error: string | null;
+  last_validated_at: string | null;
+  last_collected_at: string | null;
+  last_ingestion: KnowledgeIngestion | null;
+};
+
+export type KnowledgeIngestion = {
+  id: string;
+  source_id: string;
+  status: string;
+  files_seen: number;
+  chunks_written: number;
+  rejected_files: number;
+  duplicate_files: number;
+  unchanged_files: number;
+  vectors_reused: number;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type KnowledgeIngestionEvent = {
+  event_id: string;
+  ingestion_id: string;
+  sequence: number;
+  type: string;
+  timestamp: string;
+  data: Record<string, unknown>;
+};
+
+export type KnowledgeSourceCreate = {
+  project_id: string;
+  name: string;
+  source_type: KnowledgeSource["source_type"];
+  location: string;
+  reference?: string;
+  subpath?: string;
+  scope: "tenant" | "product";
+  approved_for_codex: boolean;
+  credential_username?: string;
+  credential_secret?: string;
 };
 
 export type MemoryCandidate = {
@@ -203,6 +256,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } | null;
     throw new Error(payload?.detail ?? `请求失败：HTTP ${response.status}`);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -273,31 +327,58 @@ export function listKnowledgeSources(): Promise<KnowledgeSource[]> {
 }
 
 export function createKnowledgeSource(
-  projectId: string,
-  name: string,
-  rootPath: string,
-  scope: "tenant" | "product",
+  payload: KnowledgeSourceCreate,
 ): Promise<KnowledgeSource> {
   return request<KnowledgeSource>("/api/v1/knowledge/sources", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      project_id: projectId,
-      name,
-      root_path: rootPath,
-      scope,
-      approved_for_codex: true,
-    }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateKnowledgeSource(
+  sourceId: string,
+  payload: Record<string, unknown>,
+): Promise<KnowledgeSource> {
+  return request<KnowledgeSource>(
+    `/api/v1/knowledge/sources/${sourceId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteKnowledgeSource(sourceId: string): Promise<void> {
+  return request<void>(`/api/v1/knowledge/sources/${sourceId}`, {
+    method: "DELETE",
+  });
+}
+
+export function validateKnowledgeSource(
+  sourceId: string,
+): Promise<{ ok: boolean; revision: string | null; message: string }> {
+  return request(`/api/v1/knowledge/sources/${sourceId}/validate`, {
+    method: "POST",
   });
 }
 
 export function ingestKnowledgeSource(
   sourceId: string,
-): Promise<{ id: string }> {
-  return request<{ id: string }>(
+): Promise<KnowledgeIngestion> {
+  return request<KnowledgeIngestion>(
     `/api/v1/knowledge/sources/${sourceId}/ingest`,
     { method: "POST" },
   );
+}
+
+export function knowledgeIngestionEventsUrl(ingestionId: string): string {
+  const query = new URLSearchParams({
+    after_sequence: "0",
+    follow: "true",
+  });
+  return `${API_BASE_URL}/api/v1/knowledge/ingestions/${ingestionId}/events?${query}`;
 }
 
 export function listMemoryCandidates(): Promise<MemoryCandidate[]> {

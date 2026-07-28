@@ -1,5 +1,12 @@
 # Evidence index
 
+## Version 0.9.0
+
+* `docs/evidence/managed-knowledge-sources-0.9.0/`
+* `docs/evidence/screenshots/managed-knowledge-sources-0.9.0.png`
+* `docs/evidence/screenshots/managed-knowledge-ingestion-0.9.0.png`
+* `docs/evidence/screenshots/managed-knowledge-source-edit-0.9.0.jpg`
+
 ## Version 0.8.2
 
 * `frontend/src/api.same-origin.test.ts`

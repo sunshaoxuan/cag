@@ -32,3 +32,31 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "approval_requests",
         "quality_scores",
     } <= tables
+    source_columns = {
+        column["name"]
+        for column in inspector.get_columns("knowledge_sources")
+    }
+    assert {
+        "source_type",
+        "source_key",
+        "reference",
+        "credential_ref",
+        "last_collected_at",
+    } <= source_columns
+    assert "duplicate_files" in {
+        column["name"]
+        for column in inspector.get_columns("knowledge_ingestions")
+    }
+
+    command.downgrade(config, "20260727_0008")
+    downgraded = inspect(create_engine(database_url))
+    assert "source_key" not in {
+        column["name"]
+        for column in downgraded.get_columns("knowledge_sources")
+    }
+    assert "duplicate_files" not in {
+        column["name"]
+        for column in downgraded.get_columns("knowledge_ingestions")
+    }
+
+    command.upgrade(config, "head")

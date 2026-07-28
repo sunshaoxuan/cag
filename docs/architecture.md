@@ -274,6 +274,37 @@ patterns or two matching failure patterns create a content-addressed candidate.
 The candidate is stored in the Gateway capability registry with declared
 schemas, permissions, dependencies, evidence, acceptance and rollback.
 
+## 12. Managed knowledge source connectors
+
+KnowledgeSource is the governed configuration record for local directories,
+Windows UNC shares, Git, GitLab and SVN. Its physical UUID owns ingestion
+history, documents and managed snapshots. A normalized source key prevents one
+Project from registering the same type, location, reference, subpath and scope
+twice.
+
+Git and SVN connectors resolve a revision before copying content into the
+Gateway source cache. The immutable snapshot feeds one extractor and cleaning
+pipeline. Local and network directories use the same downstream pipeline.
+Source content therefore reaches vector storage through a single security,
+deduplication and citation boundary.
+
+The ingestion event sequence is:
+
+```text
+collection
+  |
+cleaning and secret scan
+  |
+incremental comparison
+  |
+embedding and indexing
+  |
+encrypted Source Memory persistence
+```
+
+The frontend follows the durable ingestion SSE. Page display limits never
+truncate backend history.
+
 The Promotion Service is the only component allowed to change registry state:
 
 ```text

@@ -77,6 +77,13 @@ class ProductVersion(PhysicalIdMixin, Base):
 
 class KnowledgeSource(PhysicalIdMixin, Base):
     __tablename__ = "knowledge_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "source_key",
+            name="uq_knowledge_sources_project_source_key",
+        ),
+    )
 
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
@@ -90,7 +97,20 @@ class KnowledgeSource(PhysicalIdMixin, Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255))
+    source_type: Mapped[str] = mapped_column(
+        String(32), default="local_directory", index=True
+    )
+    source_key: Mapped[str] = mapped_column(String(64), index=True)
     root_path: Mapped[str] = mapped_column(Text)
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subpath: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credential_ref: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    credential_username: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     scope: Mapped[str] = mapped_column(String(32), default="tenant", index=True)
     status: Mapped[str] = mapped_column(
         String(32), default=KnowledgeStatus.DRAFT, index=True
@@ -99,6 +119,12 @@ class KnowledgeSource(PhysicalIdMixin, Base):
     index_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approved_for_codex: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_collected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -121,6 +147,7 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     rejected_files: Mapped[int] = mapped_column(Integer, default=0)
     unchanged_files: Mapped[int] = mapped_column(Integer, default=0)
     vectors_reused: Mapped[int] = mapped_column(Integer, default=0)
+    duplicate_files: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(

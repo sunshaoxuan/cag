@@ -19,6 +19,8 @@ import {
   getKnowledgeStatus,
   getTask,
   ingestKnowledgeSource,
+  knowledgeIngestionEventsUrl,
+  KnowledgeIngestionEvent,
   KnowledgeSource,
   KnowledgeStatus,
   CapabilityAsset,
@@ -38,6 +40,9 @@ import {
   listTaskApprovals,
   listAuditTasks,
   resolveApproval,
+  updateKnowledgeSource,
+  deleteKnowledgeSource,
+  validateKnowledgeSource,
 } from "./api";
 import "./styles.css";
 
@@ -159,6 +164,28 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "已取消",
 };
 
+const SOURCE_TYPE_LABELS: Record<KnowledgeSource["source_type"], string> = {
+  local_directory: "本机文件夹",
+  network_share: "网络共享",
+  git: "Git 仓库",
+  gitlab: "GitLab 仓库",
+  svn: "SVN 仓库",
+};
+
+const INGESTION_EVENT_LABELS: Record<string, string> = {
+  "knowledge.ingestion.queued": "采集任务已排队",
+  "knowledge.ingestion.started": "采集任务已启动",
+  "knowledge.collection.started": "正在收集资源",
+  "knowledge.collection.completed": "资源收集完成",
+  "knowledge.cleaning.started": "正在清洗内容",
+  "knowledge.cleaning.completed": "内容清洗完成",
+  "knowledge.indexing.started": "正在向量化并建立索引",
+  "knowledge.indexing.completed": "向量索引完成",
+  "knowledge.memory.persisted": "来源记忆已保存",
+  "knowledge.ingestion.completed": "本轮学习完成",
+  "knowledge.ingestion.failed": "本轮学习失败",
+};
+
 type ChatTurn = {
   taskId: string;
   prompt: string;
@@ -174,6 +201,7 @@ type AppPage =
   | "conversation"
   | "audit"
   | "knowledge"
+  | "memory"
   | "capabilities";
 
 const PAGE_PATHS: Record<AppPage, string> = {
@@ -181,6 +209,7 @@ const PAGE_PATHS: Record<AppPage, string> = {
   conversation: "/conversation",
   audit: "/audit",
   knowledge: "/knowledge",
+  memory: "/memory",
   capabilities: "/capabilities",
 };
 
@@ -188,6 +217,7 @@ function pageFromPath(pathname: string): AppPage {
   if (pathname.startsWith("/conversation")) return "conversation";
   if (pathname.startsWith("/audit")) return "audit";
   if (pathname.startsWith("/knowledge")) return "knowledge";
+  if (pathname.startsWith("/memory")) return "memory";
   if (pathname.startsWith("/capabilities")) return "capabilities";
   return "overview";
 }
@@ -303,7 +333,24 @@ export default function App() {
     useState<KnowledgeStatus | null>(null);
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
-  const [knowledgeRoot, setKnowledgeRoot] = useState("");
+  const [knowledgeForm, setKnowledgeForm] = useState({
+    name: "",
+    sourceType: "local_directory" as KnowledgeSource["source_type"],
+    location: "",
+    reference: "",
+    subpath: "",
+    scope: "product" as "tenant" | "product",
+    credentialUsername: "",
+    credentialSecret: "",
+  });
+  const [knowledgeBusy, setKnowledgeBusy] = useState<string | null>(null);
+  const [editingKnowledgeSourceId, setEditingKnowledgeSourceId] = useState<
+    string | null
+  >(null);
+  const [knowledgeNotice, setKnowledgeNotice] = useState<string | null>(null);
+  const [knowledgeEvents, setKnowledgeEvents] = useState<
+    KnowledgeIngestionEvent[]
+  >([]);
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
   const [learningMode, setLearningMode] = useState("capture");
@@ -319,6 +366,7 @@ export default function App() {
   >(100);
   const sourceRef = useRef<EventSource | null>(null);
   const auditSourceRef = useRef<EventSource | null>(null);
+  const knowledgeSourceRef = useRef<EventSource | null>(null);
   const auditEventIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -339,6 +387,7 @@ export default function App() {
       active = false;
       sourceRef.current?.close();
       auditSourceRef.current?.close();
+      knowledgeSourceRef.current?.close();
     };
   }, []);
 
@@ -606,6 +655,7 @@ export default function App() {
     setEvents([]);
     setApprovals([]);
     setError(null);
+    setKnowledgeNotice(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -652,20 +702,195 @@ export default function App() {
     }
   }
 
-  async function handleKnowledgeSourceCreate() {
-    if (!projectId || !knowledgeRoot.trim()) return;
+  function resetKnowledgeSourceForm() {
+    setEditingKnowledgeSourceId(null);
+    setKnowledgeForm({
+      name: "",
+      sourceType: "local_directory",
+      location: "",
+      reference: "",
+      subpath: "",
+      scope: "product",
+      credentialUsername: "",
+      credentialSecret: "",
+    });
+  }
+
+  function handleKnowledgeSourceEdit(source: KnowledgeSource) {
+    setEditingKnowledgeSourceId(source.id);
+    setKnowledgeForm({
+      name: source.name,
+      sourceType: source.source_type,
+      location: source.location,
+      reference: source.reference ?? "",
+      subpath: source.subpath ?? "",
+      scope: source.scope,
+      credentialUsername: source.credential_username ?? "",
+      credentialSecret: "",
+    });
+    setKnowledgeNotice(
+      source.credential_configured
+        ? "凭据字段留空会保留现有凭据。填写新值会安全轮换凭据。"
+        : "正在编辑知识来源。",
+    );
+    document.querySelector(".source-form")?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  async function handleKnowledgeSourceSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !knowledgeForm.location.trim()) return;
     setError(null);
+    setKnowledgeBusy(editingKnowledgeSourceId ?? "create");
     try {
-      const source = await createKnowledgeSource(
-        projectId,
-        "项目知识库",
-        knowledgeRoot.trim(),
-        "product",
-      );
-      await ingestKnowledgeSource(source.id);
+      const sharedPayload = {
+        name: knowledgeForm.name.trim() || "企业知识来源",
+        source_type: knowledgeForm.sourceType,
+        location: knowledgeForm.location.trim(),
+        reference: knowledgeForm.reference.trim(),
+        subpath: knowledgeForm.subpath.trim(),
+        scope: knowledgeForm.scope,
+        approved_for_codex: true,
+        credential_username:
+          knowledgeForm.credentialUsername.trim() || undefined,
+        credential_secret:
+          knowledgeForm.credentialSecret || undefined,
+      };
+      if (editingKnowledgeSourceId) {
+        await updateKnowledgeSource(editingKnowledgeSourceId, sharedPayload);
+        setKnowledgeNotice(
+          "知识来源已更新。来源定位发生变化时，下一轮会重新建立索引。",
+        );
+      } else {
+        await createKnowledgeSource({
+          project_id: projectId,
+          ...sharedPayload,
+          reference: sharedPayload.reference || undefined,
+          subpath: sharedPayload.subpath || undefined,
+        });
+        setKnowledgeNotice("知识来源已保存，可以先验证连接，再触发采集。");
+      }
+      resetKnowledgeSourceForm();
       refreshKnowledge();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "知识来源创建失败");
+      setError(reason instanceof Error ? reason.message : "知识来源保存失败");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  async function handleKnowledgeSourceValidate(sourceId: string) {
+    setKnowledgeBusy(sourceId);
+    setError(null);
+    setKnowledgeNotice(null);
+    try {
+      const result = await validateKnowledgeSource(sourceId);
+      setKnowledgeNotice(
+        result.revision
+          ? `${result.message}，版本 ${result.revision.slice(0, 12)}`
+          : result.message,
+      );
+      refreshKnowledge();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "连接验证失败");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  function connectKnowledgeIngestion(ingestionId: string) {
+    knowledgeSourceRef.current?.close();
+    setKnowledgeEvents([]);
+    const source = new EventSource(
+      knowledgeIngestionEventsUrl(ingestionId),
+    );
+    knowledgeSourceRef.current = source;
+    const eventTypes = [
+      "knowledge.ingestion.queued",
+      "knowledge.ingestion.started",
+      "knowledge.collection.started",
+      "knowledge.collection.completed",
+      "knowledge.cleaning.started",
+      "knowledge.cleaning.completed",
+      "knowledge.indexing.started",
+      "knowledge.indexing.completed",
+      "knowledge.memory.persisted",
+      "knowledge.ingestion.completed",
+      "knowledge.ingestion.failed",
+    ];
+    const onEvent = (message: MessageEvent<string>) => {
+      const item = JSON.parse(message.data) as KnowledgeIngestionEvent;
+      setKnowledgeEvents((current) => {
+        if (current.some((event) => event.event_id === item.event_id)) {
+          return current;
+        }
+        return [...current, item].sort(
+          (left, right) => left.sequence - right.sequence,
+        );
+      });
+      if (
+        item.type === "knowledge.ingestion.completed" ||
+        item.type === "knowledge.ingestion.failed"
+      ) {
+        setKnowledgeBusy(null);
+        setKnowledgeNotice(
+          item.type === "knowledge.ingestion.completed"
+            ? "采集、清洗、向量索引和来源记忆保存均已完成。"
+            : "本轮知识采集失败，请查看失败事件和来源错误。",
+        );
+        refreshKnowledge();
+        source.close();
+      }
+    };
+    eventTypes.forEach((type) =>
+      source.addEventListener(type, onEvent as EventListener),
+    );
+    source.onerror = () => setError("知识采集事件流正在重连");
+  }
+
+  async function handleKnowledgeSourceIngest(sourceId: string) {
+    setKnowledgeBusy(sourceId);
+    setError(null);
+    setKnowledgeNotice("采集任务已创建，正在接收后端事实事件。");
+    try {
+      const ingestion = await ingestKnowledgeSource(sourceId);
+      connectKnowledgeIngestion(ingestion.id);
+    } catch (reason) {
+      setKnowledgeBusy(null);
+      setError(reason instanceof Error ? reason.message : "知识采集失败");
+    }
+  }
+
+  async function handleKnowledgeSourceToggle(source: KnowledgeSource) {
+    setKnowledgeBusy(source.id);
+    try {
+      await updateKnowledgeSource(source.id, {
+        enabled: !source.enabled,
+      });
+      setKnowledgeNotice(source.enabled ? "知识来源已停用。" : "知识来源已启用。");
+      refreshKnowledge();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "来源状态更新失败");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  async function handleKnowledgeSourceDelete(source: KnowledgeSource) {
+    if (!window.confirm(`确认删除知识来源“${source.name}”及其索引吗？`)) {
+      return;
+    }
+    setKnowledgeBusy(source.id);
+    try {
+      await deleteKnowledgeSource(source.id);
+      setKnowledgeNotice("知识来源、索引、凭据引用和受管快照已删除。");
+      refreshKnowledge();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "知识来源删除失败");
+    } finally {
+      setKnowledgeBusy(null);
     }
   }
 
@@ -755,6 +980,13 @@ export default function App() {
             onClick={(event) => navigateTo("knowledge", event)}
           >
             企业知识
+          </a>
+          <a
+            href="/memory"
+            aria-current={page === "memory" ? "page" : undefined}
+            onClick={(event) => navigateTo("memory", event)}
+          >
+            长期记忆
           </a>
           <a
             href="/capabilities"
@@ -1040,7 +1272,7 @@ export default function App() {
             <div>
               <p className="eyebrow">KNOWLEDGE GOVERNANCE</p>
               <h1>企业知识</h1>
-              <p>管理知识来源、向量索引和可提升的长期记忆。</p>
+              <p>维护知识位置，验证连接，并追踪采集、清洗与索引。</p>
             </div>
             <div className="page-metric">
               <span>已登记来源</span>
@@ -1051,77 +1283,445 @@ export default function App() {
             className="knowledge-console panel page-panel"
             aria-label="企业知识治理"
           >
-        <div className="section-heading">
-          <div>
-            <p className="section-index">KNOWLEDGE</p>
-            <h2>企业知识与记忆</h2>
-          </div>
-          <span className={`status status-${knowledgeStatus?.ready ? "completed" : "failed"}`}>
-            {knowledgeStatus?.ready ? "Ollama 就绪" : "知识服务未就绪"}
-          </span>
-        </div>
-        <div className="knowledge-summary">
-          <p>
-            向量模型 {knowledgeStatus?.embedding_model ?? "未配置"}
-            <span aria-hidden="true"> · </span>
-            维数 {knowledgeStatus?.dimensions ?? "未知"}
-          </p>
-          <p>
-            已登记 {knowledgeSources.length} 个来源
-            <span aria-hidden="true"> · </span>
-            待治理 {memoryCandidates.filter((item) => item.status === "proposed").length} 条
-          </p>
-        </div>
-        <div className="knowledge-actions">
-          <input
-            aria-label="知识来源路径"
-            value={knowledgeRoot}
-            onChange={(event) => setKnowledgeRoot(event.target.value)}
-            placeholder="输入已授权的本机仓库路径"
-          />
-          <button type="button" onClick={handleKnowledgeSourceCreate}>
-            登记并索引
-          </button>
-        </div>
-        <div className="knowledge-grid">
-          <div>
-            <h3>知识来源</h3>
-            {knowledgeSources.length === 0 && <p>尚未登记知识来源</p>}
-            {knowledgeSources.map((source) => (
-              <article className="knowledge-item" key={source.id}>
-                <strong>{source.name}</strong>
-                <span>{source.scope} · {source.status}</span>
-                <small>{source.source_commit?.slice(0, 8) ?? source.root_path}</small>
-              </article>
-            ))}
-          </div>
-          <div>
-            <h3>记忆候选</h3>
-            {memoryCandidates.length === 0 && <p>尚无记忆候选</p>}
-            {memoryCandidates.slice(0, 5).map((candidate) => (
-              <article className="knowledge-item" key={candidate.id}>
-                <strong>{candidate.title}</strong>
-                <span>{candidate.kind} · {candidate.scope} · {candidate.status}</span>
-                <small>{candidate.content}</small>
-                {candidate.status === "proposed" && (
-                  <div className="candidate-actions">
-                    <button type="button" onClick={() => handleCandidateAction(candidate.id, "approve")}>
-                      批准
+            <div className="section-heading">
+              <div>
+                <p className="section-index">SOURCE REGISTRY</p>
+                <h2>知识来源</h2>
+              </div>
+              <span
+                className={`status status-${
+                  knowledgeStatus?.ready ? "completed" : "failed"
+                }`}
+              >
+                {knowledgeStatus?.ready ? "Ollama 就绪" : "知识服务未就绪"}
+              </span>
+            </div>
+            <div className="knowledge-summary">
+              <p>
+                向量模型 {knowledgeStatus?.embedding_model ?? "未配置"}
+                <span aria-hidden="true"> · </span>
+                {knowledgeStatus?.dimensions ?? "未知"} 维
+              </p>
+              <p>重复来源受唯一键约束，重复文件按内容哈希跳过。</p>
+            </div>
+            {knowledgeNotice && (
+              <div className="knowledge-notice" role="status">
+                {knowledgeNotice}
+              </div>
+            )}
+
+            <form
+              className="source-form"
+              onSubmit={handleKnowledgeSourceSubmit}
+            >
+              <div className="source-form-heading">
+                <div>
+                  <span>
+                    {editingKnowledgeSourceId ? "编辑来源" : "新增来源"}
+                  </span>
+                  <strong>
+                    {editingKnowledgeSourceId
+                      ? "更新位置、版本、范围或认证信息"
+                      : "登记一个可持续采集的位置"}
+                  </strong>
+                </div>
+                <div className="source-form-actions">
+                  {editingKnowledgeSourceId && (
+                    <button
+                      type="button"
+                      className="button-quiet"
+                      disabled={knowledgeBusy !== null}
+                      onClick={resetKnowledgeSourceForm}
+                    >
+                      取消编辑
                     </button>
-                    <button type="button" onClick={() => handleCandidateAction(candidate.id, "reject")}>
-                      拒绝
-                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={
+                      knowledgeBusy !== null ||
+                      !projectId ||
+                      !knowledgeForm.location.trim()
+                    }
+                  >
+                    {knowledgeBusy !== null
+                      ? "正在保存"
+                      : editingKnowledgeSourceId
+                        ? "保存修改"
+                        : "保存来源"}
+                  </button>
+                </div>
+              </div>
+              <div className="source-form-grid">
+                <label>
+                  <span>来源名称</span>
+                  <input
+                    value={knowledgeForm.name}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="例如 产品设计文档"
+                  />
+                </label>
+                <label>
+                  <span>来源类型</span>
+                  <select
+                    value={knowledgeForm.sourceType}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        sourceType: event.target
+                          .value as KnowledgeSource["source_type"],
+                      }))
+                    }
+                  >
+                    {Object.entries(SOURCE_TYPE_LABELS).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
+                <label className="source-location-field">
+                  <span>位置或仓库 URL</span>
+                  <input
+                    required
+                    value={knowledgeForm.location}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        location: event.target.value,
+                      }))
+                    }
+                    placeholder={
+                      knowledgeForm.sourceType === "network_share"
+                        ? "\\\\server\\share\\documents"
+                        : knowledgeForm.sourceType === "local_directory"
+                          ? "D:\\knowledge\\product"
+                          : "https://gitlab.example.com/group/project.git"
+                    }
+                  />
+                </label>
+                <label>
+                  <span>分支或版本</span>
+                  <input
+                    value={knowledgeForm.reference}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        reference: event.target.value,
+                      }))
+                    }
+                    placeholder="留空使用默认版本"
+                  />
+                </label>
+                <label>
+                  <span>限定子目录</span>
+                  <input
+                    value={knowledgeForm.subpath}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        subpath: event.target.value,
+                      }))
+                    }
+                    placeholder="例如 docs/architecture"
+                  />
+                </label>
+                <label>
+                  <span>知识范围</span>
+                  <select
+                    value={knowledgeForm.scope}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        scope: event.target.value as "tenant" | "product",
+                      }))
+                    }
+                  >
+                    <option value="product">产品共享</option>
+                    <option value="tenant">当前客户</option>
+                  </select>
+                </label>
+                <label>
+                  <span>认证用户名</span>
+                  <input
+                    autoComplete="username"
+                    value={knowledgeForm.credentialUsername}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        credentialUsername: event.target.value,
+                      }))
+                    }
+                    placeholder="没有认证时留空"
+                  />
+                </label>
+                <label>
+                  <span>密码或访问令牌</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={knowledgeForm.credentialSecret}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        credentialSecret: event.target.value,
+                      }))
+                    }
+                    placeholder="保存到 Windows 凭据库"
+                  />
+                </label>
+              </div>
+              <small>
+                密码和令牌只写入操作系统凭据库，数据库保存凭据引用。
+              </small>
+            </form>
+
+            <div className="source-workspace">
+              <section className="source-registry" aria-label="已登记知识来源">
+                <div className="source-section-title">
+                  <h3>已登记来源</h3>
+                  <span>{knowledgeSources.length} 个</span>
+                </div>
+                {knowledgeSources.length === 0 && (
+                  <div className="compact-empty">
+                    <p>尚未登记知识来源。</p>
                   </div>
                 )}
-                {candidate.status === "approved" && candidate.scope === "tenant" && (
-                  <button type="button" onClick={() => handleCandidateAction(candidate.id, "promote")}>
-                    提升为产品知识
-                  </button>
+                {knowledgeSources.map((source) => (
+                  <article className="source-card" key={source.id}>
+                    <header>
+                      <div>
+                        <span>{SOURCE_TYPE_LABELS[source.source_type]}</span>
+                        <strong>{source.name}</strong>
+                      </div>
+                      <span
+                        className={`status status-${
+                          source.status === "approved"
+                            ? "completed"
+                            : source.status
+                        }`}
+                      >
+                        {source.enabled ? source.status : "已停用"}
+                      </span>
+                    </header>
+                    <p>{source.location}</p>
+                    <small className="source-freshness">
+                      {source.last_validated_at
+                        ? `最近验证 ${formatTime(source.last_validated_at)}`
+                        : "尚未验证连接"}
+                      <span aria-hidden="true"> · </span>
+                      {source.last_collected_at
+                        ? `最近采集 ${formatTime(source.last_collected_at)}`
+                        : "尚未采集"}
+                      {source.source_commit && (
+                        <>
+                          <span aria-hidden="true"> · </span>
+                          版本 {source.source_commit.slice(0, 12)}
+                        </>
+                      )}
+                    </small>
+                    <div className="source-tags">
+                      <span>
+                        {source.scope === "product"
+                          ? "产品共享"
+                          : "当前客户"}
+                      </span>
+                      {source.reference && <span>{source.reference}</span>}
+                      {source.subpath && <span>{source.subpath}</span>}
+                      {source.credential_configured && <span>凭据已配置</span>}
+                    </div>
+                    {source.last_ingestion && (
+                      <dl className="source-metrics">
+                        <div>
+                          <dt>发现文件</dt>
+                          <dd>{source.last_ingestion.files_seen}</dd>
+                        </div>
+                        <div>
+                          <dt>新增分块</dt>
+                          <dd>{source.last_ingestion.chunks_written}</dd>
+                        </div>
+                        <div>
+                          <dt>复用向量</dt>
+                          <dd>{source.last_ingestion.vectors_reused}</dd>
+                        </div>
+                        <div>
+                          <dt>重复跳过</dt>
+                          <dd>{source.last_ingestion.duplicate_files}</dd>
+                        </div>
+                      </dl>
+                    )}
+                    {source.error && (
+                      <p className="source-error">{source.error}</p>
+                    )}
+                    <footer>
+                      <button
+                        type="button"
+                        className="button-quiet"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() => handleKnowledgeSourceEdit(source)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() =>
+                          handleKnowledgeSourceValidate(source.id)
+                        }
+                      >
+                        验证连接
+                      </button>
+                      <button
+                        type="button"
+                        disabled={knowledgeBusy !== null || !source.enabled}
+                        onClick={() =>
+                          handleKnowledgeSourceIngest(source.id)
+                        }
+                      >
+                        {knowledgeBusy === source.id
+                          ? "正在处理"
+                          : "采集并学习"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button-quiet"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() =>
+                          handleKnowledgeSourceToggle(source)
+                        }
+                      >
+                        {source.enabled ? "停用" : "启用"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button-danger"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() =>
+                          handleKnowledgeSourceDelete(source)
+                        }
+                      >
+                        删除
+                      </button>
+                    </footer>
+                  </article>
+                ))}
+              </section>
+              <section className="collection-events" aria-label="采集过程">
+                <div className="source-section-title">
+                  <h3>采集过程</h3>
+                  <span>完整事实事件</span>
+                </div>
+                {knowledgeEvents.length === 0 && (
+                  <div className="compact-empty">
+                    <p>触发“采集并学习”后，这里会持续显示每个阶段。</p>
+                  </div>
                 )}
-              </article>
-            ))}
-          </div>
-        </div>
+                {knowledgeEvents.length > 0 && (
+                  <ol className="event-list">
+                    {knowledgeEvents.map((event) => (
+                      <li key={event.event_id}>
+                        <span className="event-sequence">
+                          {String(event.sequence).padStart(2, "0")}
+                        </span>
+                        <div>
+                          <div className="event-title">
+                            <strong>
+                              {INGESTION_EVENT_LABELS[event.type] ??
+                                event.type}
+                            </strong>
+                            <time dateTime={event.timestamp}>
+                              {formatTime(event.timestamp)}
+                            </time>
+                          </div>
+                          <p>{JSON.stringify(event.data)}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            </div>
+          </section>
+        </>
+      )}
+
+      {page === "memory" && (
+        <>
+          <section className="page-intro">
+            <div>
+              <p className="eyebrow">MEMORY GOVERNANCE</p>
+              <h1>长期记忆</h1>
+              <p>审查由任务产生的记忆候选，并控制客户或产品范围。</p>
+            </div>
+            <div className="page-metric">
+              <span>待治理</span>
+              <strong>
+                {
+                  memoryCandidates.filter(
+                    (item) => item.status === "proposed",
+                  ).length
+                }
+              </strong>
+            </div>
+          </section>
+          <section className="panel page-panel" aria-label="长期记忆治理">
+            <div className="section-heading">
+              <div>
+                <p className="section-index">MEMORY</p>
+                <h2>记忆候选</h2>
+              </div>
+              <span>人工治理边界</span>
+            </div>
+            <div className="memory-list">
+              {memoryCandidates.length === 0 && <p>尚无记忆候选。</p>}
+              {memoryCandidates.map((candidate) => (
+                <article className="knowledge-item" key={candidate.id}>
+                  <strong>{candidate.title}</strong>
+                  <span>
+                    {candidate.kind} · {candidate.scope} · {candidate.status}
+                  </span>
+                  <small>{candidate.content}</small>
+                  {candidate.status === "proposed" && (
+                    <div className="candidate-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCandidateAction(candidate.id, "approve")
+                        }
+                      >
+                        批准
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCandidateAction(candidate.id, "reject")
+                        }
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  )}
+                  {candidate.status === "approved" &&
+                    candidate.scope === "tenant" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCandidateAction(candidate.id, "promote")
+                        }
+                      >
+                        提升为产品知识
+                      </button>
+                    )}
+                </article>
+              ))}
+            </div>
           </section>
         </>
       )}

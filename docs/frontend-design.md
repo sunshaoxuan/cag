@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.7.2 restyles and separates the existing CAG frontend. API requests, Conversation
+Version 0.9.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -55,11 +55,12 @@ use browser history and reset document scroll position. Direct
 loads and reloads are served by the frontend fallback. Conversation state stays
 mounted during in-app navigation so an active task remains observable.
 
-The Knowledge route uses a source registry form followed by source cards and a
-live ingestion event panel. Credential inputs are write only. The UI reports
-files seen, chunks written, vectors reused and duplicate files skipped. Source
-Memory and task-derived Memory Candidates remain separate concepts and use
-separate routes.
+The Knowledge route uses an editable source registry form followed by source
+cards and a live ingestion event panel. Location, type, version, subpath,
+scope and credentials can be maintained from the page. Credential inputs are
+write only. The UI reports files seen, chunks written, vectors reused and
+duplicate files skipped. Source Memory and task-derived Memory Candidates
+remain separate concepts and use separate routes.
 
 The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
@@ -76,7 +77,7 @@ animations.
 ## Verification
 
 Required acceptance includes component and route tests, TypeScript and
-production build, direct loading of all four routes at
+production build, direct loading of all six routes at
 `http://127.0.0.1:5173`, browser history navigation, console warnings and
 errors, and screenshots under `docs/evidence/screenshots`.
 
@@ -88,3 +89,6 @@ Validated screenshots:
 * `docs/evidence/screenshots/paged-conversation-0.7.2.png`
 * `docs/evidence/screenshots/paged-knowledge-0.7.2.png`
 * `docs/evidence/screenshots/paged-capabilities-0.7.2.png`
+* `docs/evidence/screenshots/managed-knowledge-sources-0.9.0.png`
+* `docs/evidence/screenshots/managed-knowledge-ingestion-0.9.0.png`
+* `docs/evidence/screenshots/managed-knowledge-source-edit-0.9.0.jpg`

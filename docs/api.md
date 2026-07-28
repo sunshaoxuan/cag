@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.8.2`
+Current version: `0.9.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.8.2"
+    "version": "0.9.0"
 }
 ```
 
@@ -72,7 +72,11 @@ Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 * `GET /api/v1/knowledge/status`
 * `POST /api/v1/knowledge/sources`
 * `GET /api/v1/knowledge/sources`
+* `PATCH /api/v1/knowledge/sources/{source_id}`
+* `DELETE /api/v1/knowledge/sources/{source_id}`
+* `POST /api/v1/knowledge/sources/{source_id}/validate`
 * `POST /api/v1/knowledge/sources/{source_id}/ingest`
+* `GET /api/v1/knowledge/sources/{source_id}/ingestions`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
 * `POST /api/v1/knowledge/search`
@@ -81,6 +85,11 @@ Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 
 Memory actions are `approve`, `reject`, `promote` and `deprecate`.
 Product promotion is accepted only for an approved candidate.
+
+Source create accepts local directory, Windows network share, Git, GitLab and
+SVN locations. Credential secrets are write only. The complete source schema,
+idempotency rules and ingestion SSE event catalog are documented in
+`docs/knowledge-source-api.md`.
 
 ## Conversations
 

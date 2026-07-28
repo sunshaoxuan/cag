@@ -1,16 +1,24 @@
 import asyncio
 import hashlib
 import math
-import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.database import Database
+from app.knowledge.connectors import (
+    CollectionResult,
+    SourceConfig,
+    SourceConnectorManager,
+    ValidationResult,
+)
+from app.knowledge.credentials import KnowledgeCredentialStore
 from app.knowledge.ollama import OllamaProvider
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
@@ -28,50 +36,8 @@ from app.models import (
     Task,
 )
 from app.models.base import utc_now
+from app.policies.command_policy import CommandPolicyService
 
-
-TEXT_EXTENSIONS = {
-    ".c",
-    ".cpp",
-    ".cs",
-    ".css",
-    ".go",
-    ".h",
-    ".html",
-    ".java",
-    ".js",
-    ".json",
-    ".jsx",
-    ".kt",
-    ".md",
-    ".php",
-    ".ps1",
-    ".py",
-    ".rb",
-    ".rs",
-    ".rst",
-    ".sh",
-    ".sql",
-    ".toml",
-    ".ts",
-    ".tsx",
-    ".txt",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
-EXCLUDED_PARTS = {
-    ".git",
-    ".idea",
-    ".pytest_cache",
-    ".venv",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "target",
-    "vendor",
-}
 
 
 class KnowledgeUnavailableError(RuntimeError):
@@ -98,6 +64,7 @@ class KnowledgeService:
         settings: Settings,
         provider: OllamaProvider,
         cipher: KnowledgeCipher | None,
+        credential_store: KnowledgeCredentialStore | None = None,
     ) -> None:
         self._database = database
         self._settings = settings
@@ -111,6 +78,18 @@ class KnowledgeService:
         self._allowed_roots = configured_roots or [
             settings.projects_dir.resolve().parent
         ]
+        self._credential_store = credential_store or KnowledgeCredentialStore(
+            settings.knowledge_keyring_service
+        )
+        self._connectors = SourceConnectorManager(
+            cache_root=settings.knowledge_sources_dir,
+            allowed_roots=self._allowed_roots,
+            credential_store=self._credential_store,
+            command_policy=CommandPolicyService(),
+            git_executable=settings.git_executable,
+            svn_executable=settings.svn_executable,
+            max_file_bytes=settings.knowledge_max_file_bytes,
+        )
 
     @property
     def configured(self) -> bool:
@@ -140,34 +119,235 @@ class KnowledgeService:
         *,
         project: Project,
         name: str,
-        root_path: str,
+        source_type: str,
+        location: str,
+        reference: str | None,
+        subpath: str | None,
         scope: str,
         approved_for_codex: bool,
+        credential_username: str | None = None,
+        credential_secret: str | None = None,
     ) -> KnowledgeSource:
-        resolved = self._resolve_allowed_root(root_path)
+        self._connectors.validate_definition(
+            source_type=source_type,
+            location=location,
+            subpath=subpath,
+        )
         if scope == "tenant" and project.tenant_id is None:
             raise ValueError("Tenant scoped knowledge requires a tenant binding")
         if scope == "product" and project.product_version_id is None:
             raise ValueError("Product scoped knowledge requires a product version")
+        source_key = self._connectors.normalized_source_key(
+            source_type=source_type,
+            location=location,
+            reference=reference,
+            subpath=subpath,
+            scope=scope,
+        )
+        credential_ref = (
+            f"source:{uuid.uuid4()}" if credential_secret else None
+        )
         with self._database.session_factory() as session:
             source = KnowledgeSource(
                 project_id=project.id,
                 tenant_id=project.tenant_id if scope == "tenant" else None,
                 product_version_id=project.product_version_id,
                 name=name,
-                root_path=str(resolved),
+                source_type=source_type,
+                source_key=source_key,
+                root_path=location.strip(),
+                reference=(reference or "").strip() or None,
+                subpath=(subpath or "").replace("\\", "/").strip("/") or None,
+                credential_ref=credential_ref,
+                credential_username=(
+                    (credential_username or "").strip() or None
+                ),
                 scope=scope,
                 approved_for_codex=approved_for_codex,
             )
-            session.add(source)
+            try:
+                session.add(source)
+                session.flush()
+                if credential_ref:
+                    self._credential_store.set(
+                        credential_ref,
+                        username=(credential_username or "").strip(),
+                        secret=credential_secret or "",
+                    )
+                session.commit()
+                return source
+            except IntegrityError as exc:
+                session.rollback()
+                self._credential_store.delete(credential_ref)
+                raise ValueError(
+                    "This knowledge source is already registered for the project"
+                ) from exc
+            except Exception:
+                session.rollback()
+                self._credential_store.delete(credential_ref)
+                raise
+
+    async def validate_source(self, source_id: str) -> ValidationResult:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                raise KeyError(source_id)
+            config = self._source_config(source)
+        try:
+            result = await asyncio.to_thread(self._connectors.validate, config)
+        except Exception as exc:
+            with self._database.session_factory() as session:
+                source = session.get(KnowledgeSource, source_id)
+                if source is not None:
+                    source.error = str(exc)
+                    session.commit()
+            raise
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                raise KeyError(source_id)
+            source.last_validated_at = utc_now()
+            source.error = None
+            if result.revision:
+                source.source_commit = result.revision
             session.commit()
+        return result
+
+    def update_source(
+        self,
+        source_id: str,
+        *,
+        name: str | None = None,
+        source_type: str | None = None,
+        location: str | None = None,
+        reference: str | None = None,
+        subpath: str | None = None,
+        scope: str | None = None,
+        enabled: bool | None = None,
+        approved_for_codex: bool | None = None,
+        credential_username: str | None = None,
+        credential_secret: str | None = None,
+        clear_credential: bool = False,
+    ) -> KnowledgeSource:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                raise KeyError(source_id)
+            next_source_type = source_type or source.source_type
+            next_location = (location or source.root_path).strip()
+            next_scope = scope or source.scope
+            next_reference = (
+                source.reference if reference is None else reference or None
+            )
+            next_subpath = source.subpath if subpath is None else subpath or None
+            self._connectors.validate_definition(
+                source_type=next_source_type,
+                location=next_location,
+                subpath=next_subpath,
+            )
+            next_source_key = self._connectors.normalized_source_key(
+                source_type=next_source_type,
+                location=next_location,
+                reference=next_reference,
+                subpath=next_subpath,
+                scope=next_scope,
+            )
+            source_changed = next_source_key != source.source_key
+            if source_changed:
+                session.execute(
+                    delete(KnowledgeDocument).where(
+                        KnowledgeDocument.source_id == source.id
+                    )
+                )
+                source.status = KnowledgeStatus.DRAFT
+                source.index_fingerprint = None
+                source.source_commit = None
+                source.last_validated_at = None
+                source.last_collected_at = None
+            source.source_key = next_source_key
+            source.source_type = next_source_type
+            source.root_path = next_location
+            source.reference = next_reference
+            source.subpath = next_subpath
+            source.scope = next_scope
+            project = session.get(Project, source.project_id)
+            if project is None:
+                raise ValueError("Knowledge source project is unavailable")
+            if next_scope == "tenant":
+                if project.tenant_id is None:
+                    raise ValueError(
+                        "Tenant scoped knowledge requires a tenant binding"
+                    )
+                source.tenant_id = project.tenant_id
+            else:
+                source.tenant_id = None
+            source.product_version_id = project.product_version_id
+            if name is not None:
+                source.name = name
+            if enabled is not None:
+                source.enabled = enabled
+                if not enabled:
+                    source.status = KnowledgeStatus.DISABLED
+                elif source.status == KnowledgeStatus.DISABLED:
+                    source.status = KnowledgeStatus.DRAFT
+            if approved_for_codex is not None:
+                source.approved_for_codex = approved_for_codex
+                if source.status in {
+                    KnowledgeStatus.READY,
+                    KnowledgeStatus.APPROVED,
+                }:
+                    source.status = (
+                        KnowledgeStatus.APPROVED
+                        if approved_for_codex
+                        else KnowledgeStatus.READY
+                    )
+            old_credential_ref = source.credential_ref
+            if clear_credential:
+                source.credential_ref = None
+                source.credential_username = None
+            elif credential_secret is not None:
+                source.credential_ref = (
+                    source.credential_ref or f"source:{uuid.uuid4()}"
+                )
+                source.credential_username = (
+                    credential_username or source.credential_username or ""
+                )
+                self._credential_store.set(
+                    source.credential_ref,
+                    username=source.credential_username,
+                    secret=credential_secret,
+                )
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise ValueError(
+                    "This knowledge source is already registered for the project"
+                ) from exc
+            if source_changed:
+                self._connectors.purge(source_id)
+            if clear_credential:
+                self._credential_store.delete(old_credential_ref)
             return source
+
+    def delete_source(self, source_id: str) -> None:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                raise KeyError(source_id)
+            credential_ref = source.credential_ref
+            self._connectors.purge(source_id)
+            session.delete(source)
+            session.commit()
+        self._credential_store.delete(credential_ref)
 
     def create_ingestion(self, source_id: str) -> KnowledgeIngestion:
         with self._database.session_factory() as session:
             source = session.get(KnowledgeSource, source_id)
             if source is None:
                 raise KeyError(source_id)
+            if not source.enabled:
+                raise ValueError("Knowledge source is disabled")
             active = session.scalar(
                 select(KnowledgeIngestion)
                 .where(
@@ -212,38 +392,70 @@ class KnowledgeService:
             )
             session.commit()
             source_id = source.id
-            source_path = Path(source.root_path)
+            source_config = self._source_config(source)
 
         try:
-            files = await asyncio.to_thread(self._list_source_files, source_path)
-            chunks: list[tuple[Path, int, str, bool, str]] = []
-            rejected_files = 0
-            for file_path in files:
-                try:
-                    text = file_path.read_text(encoding="utf-8")
-                except (UnicodeDecodeError, OSError):
-                    rejected_files += 1
-                    continue
-                scan = scan_knowledge_text(text)
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.collection.started",
+                {"source_type": source_config.source_type},
+            )
+            collected = await asyncio.to_thread(
+                self._connectors.collect, source_config
+            )
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.collection.completed",
+                {
+                    "files_seen": collected.files_seen,
+                    "rejected_files": collected.rejected_files,
+                    "duplicate_files": collected.duplicate_files,
+                    "revision": collected.revision,
+                },
+            )
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.cleaning.started",
+                {"documents": len(collected.documents)},
+            )
+            chunks: list[tuple[str, int, str, bool, str, str]] = []
+            cleaned_hashes: set[str] = set()
+            duplicate_files = collected.duplicate_files
+            for document in collected.documents:
+                scan = scan_knowledge_text(document.text)
                 safe_text = scan.safe_text
                 if not safe_text.strip():
                     continue
+                safe_hash = hashlib.sha256(
+                    safe_text.encode("utf-8")
+                ).hexdigest()
+                if safe_hash in cleaned_hashes:
+                    duplicate_files += 1
+                    continue
+                cleaned_hashes.add(safe_hash)
                 for ordinal, chunk_text in enumerate(self._chunk_text(safe_text)):
                     chunks.append(
                         (
-                            file_path,
+                            document.path,
                             ordinal,
                             chunk_text,
                             scan.prompt_injection_detected,
-                            hashlib.sha256(safe_text.encode("utf-8")).hexdigest(),
+                            safe_hash,
+                            document.language,
                         )
                     )
-
-            document_hashes: dict[str, str] = {}
-            for file_path, _, _, _, document_hash in chunks:
-                document_hashes[
-                    file_path.relative_to(source_path).as_posix()
-                ] = document_hash
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.cleaning.completed",
+                {
+                    "chunks_prepared": len(chunks),
+                    "duplicate_files": duplicate_files,
+                },
+            )
+            document_hashes = {
+                path: document_hash
+                for path, _, _, _, document_hash, _ in chunks
+            }
             fingerprint_input = "\n".join(
                 f"{path}:{content_hash}"
                 for path, content_hash in sorted(document_hashes.items())
@@ -280,8 +492,17 @@ class KnowledgeService:
             chunks = [
                 chunk
                 for chunk in chunks
-                if chunk[0].relative_to(source_path).as_posix() in changed_paths
+                if chunk[0] in changed_paths
             ]
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.indexing.started",
+                {
+                    "changed_files": len(changed_paths),
+                    "unchanged_files": len(unchanged_paths),
+                    "removed_files": len(removed_paths),
+                },
+            )
             embeddings: list[list[float]] = []
             for start in range(0, len(chunks), 8):
                 embeddings.extend(
@@ -305,15 +526,21 @@ class KnowledgeService:
                     )
                 document_by_path: dict[str, KnowledgeDocument] = {}
                 for chunk_data, embedding in zip(chunks, embeddings, strict=True):
-                    file_path, ordinal, text, injection, document_hash = chunk_data
-                    relative_path = file_path.relative_to(source_path).as_posix()
+                    (
+                        relative_path,
+                        ordinal,
+                        text,
+                        injection,
+                        document_hash,
+                        language,
+                    ) = chunk_data
                     document = document_by_path.get(relative_path)
                     if document is None:
                         document = KnowledgeDocument(
                             source_id=source.id,
                             canonical_path=relative_path,
                             content_hash=document_hash,
-                            language=file_path.suffix.lstrip(".") or "text",
+                            language=language,
                         )
                         session.add(document)
                         session.flush()
@@ -338,32 +565,57 @@ class KnowledgeService:
                             ),
                             metadata_json={
                                 "path": relative_path,
+                                "source_type": source.source_type,
+                                "source_revision": collected.revision,
                                 "prompt_injection_detected": injection,
                             },
                         )
                     )
-                source.source_commit = self._git_commit(source_path)
+                source.source_commit = collected.revision
                 source.index_fingerprint = index_fingerprint
+                source.last_collected_at = utc_now()
                 source.status = (
                     KnowledgeStatus.APPROVED
                     if source.approved_for_codex
                     else KnowledgeStatus.READY
                 )
                 ingestion.status = "completed"
-                ingestion.files_seen = len(files)
+                ingestion.files_seen = collected.files_seen
                 ingestion.chunks_written = len(chunks)
-                ingestion.rejected_files = rejected_files
+                ingestion.rejected_files = collected.rejected_files
                 ingestion.unchanged_files = len(unchanged_paths)
                 ingestion.vectors_reused = vectors_reused
+                ingestion.duplicate_files = duplicate_files
                 ingestion.completed_at = utc_now()
+                self._append_ingestion_event(
+                    session,
+                    ingestion,
+                    "knowledge.indexing.completed",
+                    {
+                        "chunks_written": len(chunks),
+                        "vectors_reused": vectors_reused,
+                        "index_fingerprint": index_fingerprint,
+                    },
+                )
+                self._append_ingestion_event(
+                    session,
+                    ingestion,
+                    "knowledge.memory.persisted",
+                    {
+                        "documents": len(document_hashes),
+                        "scope": source.scope,
+                        "storage": "source_memory",
+                    },
+                )
                 self._append_ingestion_event(
                     session,
                     ingestion,
                     "knowledge.ingestion.completed",
                     {
-                        "files_seen": len(files),
+                        "files_seen": collected.files_seen,
                         "chunks_written": len(chunks),
-                        "rejected_files": rejected_files,
+                        "rejected_files": collected.rejected_files,
+                        "duplicate_files": duplicate_files,
                         "unchanged_files": len(unchanged_paths),
                         "vectors_reused": vectors_reused,
                         "index_fingerprint": index_fingerprint,
@@ -373,7 +625,12 @@ class KnowledgeService:
                     DataQualityMetric(
                         source_id=source.id,
                         name="accepted_file_ratio",
-                        value=(len(files) - rejected_files) / max(1, len(files)),
+                        value=(
+                            collected.files_seen
+                            - collected.rejected_files
+                            - duplicate_files
+                        )
+                        / max(1, collected.files_seen),
                     )
                 )
                 session.commit()
@@ -627,28 +884,34 @@ class KnowledgeService:
             session.commit()
             return candidate
 
-    def _resolve_allowed_root(self, value: str) -> Path:
-        resolved = Path(value).resolve()
-        if not resolved.is_dir():
-            raise ValueError("Knowledge source path does not exist")
-        if not any(
-            resolved == root or root in resolved.parents for root in self._allowed_roots
-        ):
-            raise ValueError("Knowledge source path is outside configured roots")
-        return resolved
-
     @staticmethod
-    def _list_source_files(root: Path) -> list[Path]:
-        result = []
-        for path in root.rglob("*"):
-            if (
-                path.is_file()
-                and path.suffix.lower() in TEXT_EXTENSIONS
-                and not any(part in EXCLUDED_PARTS for part in path.parts)
-                and path.stat().st_size <= 2_000_000
-            ):
-                result.append(path)
-        return sorted(result)
+    def _source_config(source: KnowledgeSource) -> SourceConfig:
+        return SourceConfig(
+            id=source.id,
+            source_type=source.source_type,
+            location=source.root_path,
+            reference=source.reference,
+            subpath=source.subpath,
+            credential_ref=source.credential_ref,
+        )
+
+    def _record_ingestion_event(
+        self,
+        ingestion_id: str,
+        event_type: str,
+        data: dict[str, Any],
+    ) -> None:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                return
+            self._append_ingestion_event(
+                session,
+                ingestion,
+                event_type,
+                data,
+            )
+            session.commit()
 
     @staticmethod
     def _chunk_text(text: str, size: int = 3200, overlap: int = 480) -> list[str]:
@@ -674,20 +937,6 @@ class KnowledgeService:
         left_norm = math.sqrt(sum(value * value for value in left))
         right_norm = math.sqrt(sum(value * value for value in right))
         return numerator / max(left_norm * right_norm, 1e-12)
-
-    @staticmethod
-    def _git_commit(root: Path) -> str | None:
-        try:
-            completed = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return completed.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            return None
 
     def _fail_ingestion(self, ingestion_id: str, error: str) -> None:
         with self._database.session_factory() as session:

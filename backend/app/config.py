@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.8.2"
+APP_VERSION = "0.9.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     knowledge_keyring_username: str = "enterprise-knowledge"
     knowledge_max_context_chars: int = Field(default=12_000, ge=1_000, le=100_000)
     knowledge_max_chunks: int = Field(default=8, ge=1, le=50)
+    knowledge_sources_dir: Path = (
+        DEFAULT_REPOSITORY_ROOT / ".gateway" / "knowledge-sources"
+    )
+    knowledge_max_file_bytes: int = Field(
+        default=10_000_000, ge=1_024, le=100_000_000
+    )
+    svn_executable: str = "svn"
     projects_dir: Path = DEFAULT_REPOSITORY_ROOT / "projects"
     workspace_root: Path = DEFAULT_REPOSITORY_ROOT / "workspaces"
     git_executable: str = "git"

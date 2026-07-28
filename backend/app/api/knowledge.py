@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -26,9 +26,43 @@ router = APIRouter(prefix="/api/v1", tags=["knowledge"])
 class SourceCreate(BaseModel):
     project_id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=255)
-    root_path: str = Field(min_length=1, max_length=4096)
+    source_type: str = Field(
+        default="local_directory",
+        pattern=r"^(local_directory|network_share|git|gitlab|svn)$",
+    )
+    location: str | None = Field(default=None, min_length=1, max_length=4096)
+    root_path: str | None = Field(default=None, min_length=1, max_length=4096)
+    reference: str | None = Field(default=None, max_length=255)
+    subpath: str | None = Field(default=None, max_length=2048)
     scope: str = Field(default="tenant", pattern=r"^(tenant|product)$")
     approved_for_codex: bool = False
+    credential_username: str | None = Field(default=None, max_length=255)
+    credential_secret: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def require_location(self) -> "SourceCreate":
+        if self.location is None and self.root_path is None:
+            raise ValueError("location is required")
+        return self
+
+
+class SourceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    source_type: str | None = Field(
+        default=None,
+        pattern=r"^(local_directory|network_share|git|gitlab|svn)$",
+    )
+    location: str | None = Field(default=None, min_length=1, max_length=4096)
+    reference: str | None = Field(default=None, max_length=255)
+    subpath: str | None = Field(default=None, max_length=2048)
+    scope: str | None = Field(
+        default=None, pattern=r"^(tenant|product)$"
+    )
+    enabled: bool | None = None
+    approved_for_codex: bool | None = None
+    credential_username: str | None = Field(default=None, max_length=255)
+    credential_secret: SecretStr | None = None
+    clear_credential: bool = False
 
 
 class SearchRequest(BaseModel):
@@ -37,20 +71,37 @@ class SearchRequest(BaseModel):
     limit: int = Field(default=8, ge=1, le=50)
 
 
-def source_response(source: KnowledgeSource) -> dict[str, Any]:
+def source_response(
+    source: KnowledgeSource,
+    latest_ingestion: KnowledgeIngestion | None = None,
+) -> dict[str, Any]:
     return {
         "id": source.id,
         "project_id": source.project_id,
         "tenant_id": source.tenant_id,
         "product_version_id": source.product_version_id,
         "name": source.name,
+        "source_type": source.source_type,
+        "location": source.root_path,
         "root_path": source.root_path,
+        "reference": source.reference,
+        "subpath": source.subpath,
+        "credential_username": source.credential_username,
+        "credential_configured": source.credential_ref is not None,
+        "enabled": source.enabled,
         "scope": source.scope,
         "status": source.status,
         "source_commit": source.source_commit,
         "index_fingerprint": source.index_fingerprint,
         "approved_for_codex": source.approved_for_codex,
         "error": source.error,
+        "last_validated_at": source.last_validated_at,
+        "last_collected_at": source.last_collected_at,
+        "last_ingestion": (
+            ingestion_response(latest_ingestion)
+            if latest_ingestion is not None
+            else None
+        ),
         "created_at": source.created_at,
         "updated_at": source.updated_at,
     }
@@ -66,6 +117,7 @@ def ingestion_response(ingestion: KnowledgeIngestion) -> dict[str, Any]:
         "rejected_files": ingestion.rejected_files,
         "unchanged_files": ingestion.unchanged_files,
         "vectors_reused": ingestion.vectors_reused,
+        "duplicate_files": ingestion.duplicate_files,
         "error": ingestion.error,
         "created_at": ingestion.created_at,
         "completed_at": ingestion.completed_at,
@@ -92,9 +144,18 @@ def create_source(
         source = service.create_source(
             project=project,
             name=request.name,
-            root_path=request.root_path,
+            source_type=request.source_type,
+            location=request.location or request.root_path or "",
+            reference=request.reference,
+            subpath=request.subpath,
             scope=request.scope,
             approved_for_codex=request.approved_for_codex,
+            credential_username=request.credential_username,
+            credential_secret=(
+                request.credential_secret.get_secret_value()
+                if request.credential_secret is not None
+                else None
+            ),
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
@@ -105,9 +166,82 @@ def create_source(
 
 @router.get("/knowledge/sources")
 def list_sources(
+    session: Session = Depends(get_session),
     service: KnowledgeService = Depends(get_knowledge_service),
 ) -> list[dict[str, Any]]:
-    return [source_response(item) for item in service.list_sources()]
+    responses = []
+    for item in service.list_sources():
+        latest = session.scalar(
+            select(KnowledgeIngestion)
+            .where(KnowledgeIngestion.source_id == item.id)
+            .order_by(KnowledgeIngestion.created_at.desc())
+        )
+        responses.append(source_response(item, latest))
+    return responses
+
+
+@router.patch("/knowledge/sources/{source_id}")
+def update_source(
+    source_id: str,
+    request: SourceUpdate,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> dict[str, Any]:
+    try:
+        source = service.update_source(
+            source_id,
+            name=request.name,
+            source_type=request.source_type,
+            location=request.location,
+            reference=request.reference,
+            subpath=request.subpath,
+            scope=request.scope,
+            enabled=request.enabled,
+            approved_for_codex=request.approved_for_codex,
+            credential_username=request.credential_username,
+            credential_secret=(
+                request.credential_secret.get_secret_value()
+                if request.credential_secret is not None
+                else None
+            ),
+            clear_credential=request.clear_credential,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return source_response(source)
+
+
+@router.delete(
+    "/knowledge/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_source(
+    source_id: str,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> None:
+    try:
+        service.delete_source(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+
+
+@router.post("/knowledge/sources/{source_id}/validate")
+async def validate_source(
+    source_id: str,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> dict[str, Any]:
+    try:
+        result = await service.validate_source(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "ok": result.ok,
+        "revision": result.revision,
+        "message": result.message,
+    }
 
 
 @router.post(
@@ -123,8 +257,26 @@ def ingest_source(
         ingestion = service.create_ingestion(source_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Source not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     background_tasks.add_task(service.ingest, ingestion.id)
     return ingestion_response(ingestion)
+
+
+@router.get("/knowledge/sources/{source_id}/ingestions")
+def list_source_ingestions(
+    source_id: str,
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    if session.get(KnowledgeSource, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    ingestions = session.scalars(
+        select(KnowledgeIngestion)
+        .where(KnowledgeIngestion.source_id == source_id)
+        .order_by(KnowledgeIngestion.created_at.desc())
+        .limit(50)
+    )
+    return [ingestion_response(item) for item in ingestions]
 
 
 @router.get("/knowledge/ingestions/{ingestion_id}")

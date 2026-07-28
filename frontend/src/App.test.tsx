@@ -123,12 +123,14 @@ async function openConversationPage() {
 describe("Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
   let pendingApprovals: Array<Record<string, unknown>>;
+  let knowledgeSources: Array<Record<string, unknown>>;
 
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     MockEventSource.instances = [];
     submittedTasks = [];
     pendingApprovals = [];
+    knowledgeSources = [];
     vi.stubGlobal("EventSource", MockEventSource);
     vi.stubGlobal(
       "fetch",
@@ -146,8 +148,90 @@ describe("Agent Gateway conversation page", () => {
             dimensions: 1024,
           });
         }
-        if (url.endsWith("/api/v1/knowledge/sources")) {
-          return jsonResponse([]);
+        if (
+          url.endsWith("/api/v1/knowledge/sources") &&
+          init?.method === "POST"
+        ) {
+          const payload = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          const source = {
+            id: "source-1",
+            ...payload,
+            root_path: payload.location,
+            reference: payload.reference ?? null,
+            subpath: payload.subpath ?? null,
+            credential_username: payload.credential_username ?? null,
+            credential_configured: Boolean(payload.credential_secret),
+            enabled: true,
+            status: "draft",
+            source_commit: null,
+            index_fingerprint: null,
+            error: null,
+            last_validated_at: null,
+            last_collected_at: null,
+            last_ingestion: null,
+          };
+          knowledgeSources = [source];
+          return jsonResponse(source, 201);
+        }
+        if (
+          url.endsWith("/api/v1/knowledge/sources") &&
+          (!init?.method || init.method === "GET")
+        ) {
+          return jsonResponse(knowledgeSources);
+        }
+        if (
+          url.endsWith("/api/v1/knowledge/sources/source-1") &&
+          init?.method === "PATCH"
+        ) {
+          const payload = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          knowledgeSources = [
+            {
+              ...knowledgeSources[0],
+              ...payload,
+              credential_configured:
+                Boolean(payload.credential_secret) ||
+                Boolean(knowledgeSources[0]?.credential_configured),
+            },
+          ];
+          return jsonResponse(knowledgeSources[0]);
+        }
+        if (
+          url.endsWith("/api/v1/knowledge/sources/source-1/validate") &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse({
+            ok: true,
+            revision: "a".repeat(40),
+            message: "Git repository is reachable",
+          });
+        }
+        if (
+          url.endsWith("/api/v1/knowledge/sources/source-1/ingest") &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse(
+            {
+              id: "ingestion-1",
+              source_id: "source-1",
+              status: "queued",
+              files_seen: 0,
+              chunks_written: 0,
+              rejected_files: 0,
+              duplicate_files: 0,
+              unchanged_files: 0,
+              vectors_reused: 0,
+              error: null,
+              created_at: "2026-07-28T00:00:00Z",
+              completed_at: null,
+            },
+            202,
+          );
         }
         if (url.endsWith("/api/v1/memory-candidates")) {
           return jsonResponse([]);
@@ -280,6 +364,12 @@ describe("Agent Gateway conversation page", () => {
       screen.queryByRole("heading", { name: "企业知识与记忆" }),
     ).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("link", { name: "长期记忆" }));
+    expect(window.location.pathname).toBe("/memory");
+    expect(
+      await screen.findByRole("heading", { name: "长期记忆", level: 1 }),
+    ).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
     expect(window.location.pathname).toBe("/audit");
     expect(
@@ -291,6 +381,64 @@ describe("Agent Gateway conversation page", () => {
     expect(
       screen.getByRole("heading", { name: "全局审计事件流" }),
     ).toBeInTheDocument();
+  });
+
+  it("registers a GitLab source and follows ingestion stages", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
+    await screen.findByRole("heading", { name: "知识来源" });
+
+    fireEvent.change(screen.getByLabelText("来源名称"), {
+      target: { value: "产品文档" },
+    });
+    fireEvent.change(screen.getByLabelText("来源类型"), {
+      target: { value: "gitlab" },
+    });
+    fireEvent.change(screen.getByLabelText("位置或仓库 URL"), {
+      target: { value: "https://gitlab.example.com/team/product.git" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存来源" }));
+
+    expect(await screen.findByText("产品文档")).toBeInTheDocument();
+    expect(screen.getAllByText("GitLab 仓库")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(
+      screen.getByRole("button", { name: "保存修改" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("限定子目录"), {
+      target: { value: "docs/product" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(
+      await screen.findByText("docs/product"),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "采集并学习" }),
+    );
+    await waitFor(() =>
+      expect(
+        MockEventSource.instances.some((source) =>
+          source.url.includes(
+            "/api/v1/knowledge/ingestions/ingestion-1/events",
+          ),
+        ),
+      ).toBe(true),
+    );
+    const ingestionSource = MockEventSource.instances.find((source) =>
+      source.url.includes("/knowledge/ingestions/ingestion-1/events"),
+    );
+    act(() => {
+      ingestionSource?.emit("knowledge.collection.completed", {
+        event_id: "knowledge-event-1",
+        ingestion_id: "ingestion-1",
+        sequence: 3,
+        type: "knowledge.collection.completed",
+        timestamp: "2026-07-28T00:00:01Z",
+        data: { files_seen: 12 },
+      });
+    });
+    expect(await screen.findByText("资源收集完成")).toBeInTheDocument();
+    expect(screen.getByText('{"files_seen":12}')).toBeInTheDocument();
   });
 
   it("projects the global external API audit SSE into the monitor", async () => {

@@ -43,6 +43,19 @@ Enterprise knowledge text is scanned before persistence and encrypted with AES G
 
 Knowledge source text is untrusted input. Prompt Injection markers exclude suspicious chunks from Codex context. Injected blocks carry explicit source IDs, paths, scopes and immutable source commits.
 
+Knowledge source credentials use a separate operating system credential service.
+The KnowledgeSource row stores only an opaque reference and optional username.
+Git HTTP authentication uses a child-process environment header. SVN receives
+the password through standard input with its auth cache disabled. Authenticated
+Windows shares use WNet and disconnect after collection. Source secrets are
+absent from command arguments, responses and ingestion events.
+
+Remote repository hosts require deployment network policy. The current source
+registry validates URL schemes and rejects embedded URL credentials. Production
+deployments must combine an outbound allowlist with caller authentication and
+project authorization before exposing source maintenance APIs outside a trusted
+administrative network.
+
 ## 4. Authorization model
 
 Planned permissions:

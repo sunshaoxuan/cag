@@ -18,6 +18,8 @@ class CommandPolicyService:
     )
     _safe = (
         re.compile(r"^\s*(rg|git\s+(status|diff|log|show)|pytest|python\s+-m\s+pytest)\b", re.IGNORECASE),
+        re.compile(r"^\s*git\s+(clone|ls-remote|rev-parse)\b", re.IGNORECASE),
+        re.compile(r"^\s*svn\s+(info|export)\b", re.IGNORECASE),
         re.compile(r"^\s*(npm|pnpm)\s+(test|run\s+(test|build|lint))\b", re.IGNORECASE),
         re.compile(r"^\s*(get-childitem|get-content|select-string)\b", re.IGNORECASE),
     )

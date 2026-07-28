@@ -1,5 +1,8 @@
 import asyncio
 from pathlib import Path
+import shutil
+import subprocess
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,6 +10,9 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
+from app.knowledge.credentials import SourceCredential
+from app.knowledge.connectors import SourceConnectorManager
+from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
     KnowledgeCipher,
     load_knowledge_cipher,
@@ -28,17 +34,37 @@ def knowledge_settings(
             "knowledge_enabled": True,
             "knowledge_encryption_key": KnowledgeCipher.generate_key(),
             "knowledge_allowed_roots": str(root),
+            "knowledge_sources_dir": root / ".knowledge-source-cache",
         }
     )
     return Settings(**payload)
 
 
-def install_fake_knowledge(app, active_settings: Settings) -> KnowledgeService:
+class FakeCredentialStore:
+    def __init__(self) -> None:
+        self.values: dict[str, SourceCredential] = {}
+
+    def set(self, credential_ref: str, *, username: str, secret: str) -> None:
+        self.values[credential_ref] = SourceCredential(username, secret)
+
+    def get(self, credential_ref: str | None) -> SourceCredential | None:
+        return self.values.get(credential_ref or "")
+
+    def delete(self, credential_ref: str | None) -> None:
+        self.values.pop(credential_ref or "", None)
+
+
+def install_fake_knowledge(
+    app,
+    active_settings: Settings,
+    credential_store: FakeCredentialStore | None = None,
+) -> KnowledgeService:
     service = KnowledgeService(
         database=app.state.database,
         settings=active_settings,
         provider=FakeOllamaClient(),
         cipher=load_knowledge_cipher(active_settings),
+        credential_store=credential_store,
     )
     app.state.knowledge_service = service
     executor: TaskExecutor = app.state.task_executor
@@ -112,6 +138,12 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         )
         assert source_response.status_code == 201
         source = source_response.json()
+
+        validation = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/validate"
+        )
+        assert validation.status_code == 200
+        assert validation.json()["ok"] is True
 
         ingestion_response = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
@@ -191,6 +223,279 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         sources = client.get("/api/v1/knowledge/sources").json()
         assert sources[0]["status"] == "approved"
         assert service.list_sources()[0].id == source["id"]
+
+        duplicate_source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Same repository",
+                "location": str(project_repository),
+                "scope": "tenant",
+            },
+        )
+        assert duplicate_source.status_code == 422
+
+
+def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    (project_repository / "README-copy.md").write_text(
+        "# Test project\n",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    credentials = FakeCredentialStore()
+    app = create_app(settings=active_settings)
+    install_fake_knowledge(app, active_settings, credentials)
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Managed local files",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+                "approved_for_codex": True,
+                "credential_username": "reader",
+                "credential_secret": "secret-value",
+            },
+        )
+        assert created.status_code == 201
+        source = created.json()
+        assert source["credential_configured"] is True
+        assert "secret-value" not in str(source)
+        assert len(credentials.values) == 1
+
+        started = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        )
+        assert started.status_code == 202
+        ingestion = client.get(
+            f"/api/v1/knowledge/ingestions/{started.json()['id']}"
+        ).json()
+        assert ingestion["status"] == "completed"
+        assert ingestion["files_seen"] == 2
+        assert ingestion["duplicate_files"] == 1
+        assert ingestion["chunks_written"] == 1
+
+        events = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion['id']}/events",
+            params={"follow": "false"},
+        ).text
+        assert "knowledge.collection.completed" in events
+        assert "knowledge.cleaning.completed" in events
+        assert "knowledge.indexing.completed" in events
+        assert "knowledge.memory.persisted" in events
+
+        replacement = project_repository.parent / "replacement-knowledge"
+        replacement.mkdir()
+        (replacement / "GUIDE.md").write_text(
+            "# Replacement knowledge\n",
+            encoding="utf-8",
+        )
+        updated = client.patch(
+            f"/api/v1/knowledge/sources/{source['id']}",
+            json={
+                "name": "Updated managed files",
+                "source_type": "local_directory",
+                "location": str(replacement),
+                "reference": "",
+                "subpath": "",
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["name"] == "Updated managed files"
+        assert updated.json()["location"] == str(replacement)
+        assert updated.json()["status"] == "draft"
+        assert updated.json()["index_fingerprint"] is None
+
+        disabled = client.patch(
+            f"/api/v1/knowledge/sources/{source['id']}",
+            json={"enabled": False},
+        )
+        assert disabled.json()["enabled"] is False
+        assert (
+            client.post(
+                f"/api/v1/knowledge/sources/{source['id']}/ingest"
+            ).status_code
+            == 409
+        )
+        enabled = client.patch(
+            f"/api/v1/knowledge/sources/{source['id']}",
+            json={"enabled": True, "clear_credential": True},
+        )
+        assert enabled.json()["credential_configured"] is False
+        assert credentials.values == {}
+        assert client.delete(
+            f"/api/v1/knowledge/sources/{source['id']}"
+        ).status_code == 204
+        assert client.get("/api/v1/knowledge/sources").json() == []
+
+
+def test_git_source_is_validated_materialized_and_indexed(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    install_fake_knowledge(app, active_settings, FakeCredentialStore())
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Git documents",
+                "source_type": "gitlab",
+                "location": str(project_repository),
+                "reference": "master",
+                "scope": "product",
+                "approved_for_codex": True,
+            },
+        )
+        assert created.status_code == 201
+        source = created.json()
+        validated = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/validate"
+        )
+        assert validated.status_code == 200
+        assert len(validated.json()["revision"]) == 40
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        completed = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion['id']}"
+        ).json()
+        assert completed["status"] == "completed", completed["error"]
+        assert completed["chunks_written"] == 1
+        assert any(active_settings.knowledge_sources_dir.iterdir())
+        assert client.delete(
+            f"/api/v1/knowledge/sources/{source['id']}"
+        ).status_code == 204
+        assert not any(active_settings.knowledge_sources_dir.iterdir())
+
+
+@pytest.mark.skipif(
+    shutil.which("svn") is None or shutil.which("svnadmin") is None,
+    reason="SVN command line tools are unavailable",
+)
+def test_svn_source_is_materialized_and_indexed(
+    settings: Settings,
+    project_repository: Path,
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "svn-repository"
+    import_dir = tmp_path / "svn-import"
+    import_dir.mkdir()
+    (import_dir / "guide.md").write_text(
+        "# SVN guide\nReusable product knowledge.",
+        encoding="utf-8",
+    )
+    subprocess.run(["svnadmin", "create", str(repository)], check=True)
+    repository_url = repository.resolve().as_uri()
+    subprocess.run(
+        [
+            "svn",
+            "import",
+            str(import_dir),
+            repository_url,
+            "-m",
+            "initial",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    install_fake_knowledge(app, active_settings, FakeCredentialStore())
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "SVN documents",
+                "source_type": "svn",
+                "location": repository_url,
+                "scope": "product",
+                "approved_for_codex": True,
+            },
+        )
+        assert created.status_code == 201
+        source = created.json()
+        assert client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/validate"
+        ).status_code == 200
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        completed = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion['id']}"
+        ).json()
+        assert completed["status"] == "completed"
+        assert completed["files_seen"] == 1
+
+
+def test_office_document_extraction(tmp_path: Path) -> None:
+    document = tmp_path / "guide.docx"
+    with zipfile.ZipFile(document, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            (
+                '<w:document xmlns:w="urn:test"><w:body>'
+                "<w:p><w:r><w:t>Enterprise guide</w:t></w:r></w:p>"
+                "</w:body></w:document>"
+            ),
+        )
+    from app.knowledge.extractors import extract_text
+
+    assert "Enterprise guide" in extract_text(document)
+
+
+def test_connector_credentials_avoid_command_arguments(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    credentials = FakeCredentialStore()
+    credentials.values["source:test"] = SourceCredential(
+        "reader",
+        "private-token",
+    )
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=credentials,
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["environment"] = kwargs["env"]
+        return subprocess.CompletedProcess(args, 0, "abc\tHEAD\n", "")
+
+    monkeypatch.setattr("app.knowledge.connectors.subprocess.run", fake_run)
+    manager._run(
+        ["git", "ls-remote", "--", "https://gitlab.example/repo.git", "HEAD"],
+        credential=credentials.values["source:test"],
+    )
+    assert "private-token" not in str(captured["args"])
+    environment = captured["environment"]
+    assert isinstance(environment, dict)
+    assert environment["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert "private-token" not in environment["GIT_CONFIG_VALUE_0"]
+
+    svn_args = ["svn", "info", "--non-interactive"]
+    stdin = manager._append_svn_credentials(
+        svn_args,
+        credentials.values["source:test"],
+    )
+    assert stdin == "private-token\n"
+    assert "private-token" not in str(svn_args)
+    assert "--password-from-stdin" in svn_args
 
 
 def test_knowledge_api_rejects_invalid_inputs(
