@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.9.1 | Evidence |
+| Requirement | Status for 0.10.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -58,6 +58,7 @@ Legend:
 | Structured Agent artifacts | Implemented | `AgentArtifact` SHA 256 record and API tests |
 | Unified Harness SSE | Implemented | parent TaskEvent sequence and Harness event tests |
 | Idempotent vector indexing | Implemented | source fingerprint, path and ordinal uniqueness, vector reuse test |
+| Durable knowledge source registry and scheduled rescan | Implemented | persisted sync policy, database lease, retry state, restart recovery, run history and scheduler tests |
 | Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
 | Skill proposals and evaluation | Implemented | CapabilityAsset, CapabilityEvaluation and promotion API tests |

@@ -46,6 +46,28 @@ The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE
 directly. Memory candidate governance has its own `/memory` page.
 
+## Durable synchronization
+
+Knowledge locations remain in a persistent source registry. Each source chooses
+`manual` or `scheduled` synchronization and stores its interval, next due time,
+last attempt, last content change, failure count and current lease. The
+Gateway scheduler claims one due source through a database row lock and an
+expiring lease. This permits safe recovery after process restarts and prevents
+duplicate work when more than one Gateway Worker polls the same database.
+
+Every scheduled run scans the current source snapshot. The idempotent comparison
+then separates unchanged, changed, added and removed paths. Only changed and
+added files require new embeddings. Unchanged chunks retain their physical IDs
+and vectors. Removed paths delete their documents and dependent chunks. Each
+run remains available as ingestion history with its trigger, status, counts,
+timestamps and error.
+
+Failed scheduled runs increment the source failure counter and receive an
+exponential retry delay bounded by the configured regular interval. A
+successful run resets the failure counter and schedules the next interval.
+Queued or running records found during Gateway startup become failed recovery
+records, after which their sources can retry safely.
+
 ## Idempotent vector index
 
 Every cleaned file is identified by source physical ID, canonical relative path and SHA 256 content hash. A source fingerprint is derived from the sorted path and hash set. Repeating ingestion with the same fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files replace only their own chunks. Removed files delete their indexed documents. Database uniqueness on source plus path and document plus ordinal prevents duplicate results.
@@ -90,8 +112,9 @@ embedding and encrypted Source Memory persistence
 approved retrieval
 ```
 
-Disabling a source prevents new collection. Deleting a source removes its
-documents, chunks, ingestion history, credential entry and managed snapshots.
+Disabling a source prevents new collection and clears its schedule and lease.
+Deleting a source removes its documents, chunks, ingestion history, credential
+entry and managed snapshots.
 Changing reference, subpath or scope invalidates the existing index so the next
 run rebuilds it under the new governance boundary.
 

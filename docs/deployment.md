@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.9.1 development deployment
+## 0.10.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -118,6 +118,9 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
 | `AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR` | Managed Git and SVN source snapshot directory |
 | `AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` | Maximum accepted source file size |
+| `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
+| `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |
+| `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_LEASE_SECONDS` | Database lease duration for one claimed source |
 | `AGENT_GATEWAY_SVN_EXECUTABLE` | SVN command line executable |
 
 The self improvement root also contains `installation-receipts`. The Promotion
@@ -134,6 +137,12 @@ closed and requires operator review.
 | `AGENT_GATEWAY_OLLAMA_MEMORY_MODEL` | Memory extraction and reranking model |
 | `AGENT_GATEWAY_OLLAMA_EMBEDDING_DIMENSIONS` | Stored vector dimensions, fixed at 1024 |
 | `AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS` | Semicolon separated source root allowlist |
+
+Alembic revision `20260728_0010` keeps existing sources in `manual` mode.
+Operators can enable scheduled synchronization per source through the Knowledge
+page or source PATCH API. New web registrations default to scheduled mode.
+The scheduler starts only when the knowledge plane and scheduler setting are
+both enabled.
 
 ## Managed local Ollama
 

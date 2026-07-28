@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.9.1`
+Current version: `0.10.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.9.1"
+    "version": "0.10.0"
 }
 ```
 
@@ -90,6 +90,10 @@ Source create accepts local directory, Windows network share, Git, GitLab and
 SVN locations. Credential secrets are write only. The complete source schema,
 idempotency rules and ingestion SSE event catalog are documented in
 `docs/knowledge-source-api.md`.
+
+Source create and patch accept `sync_mode` and `sync_interval_minutes`.
+Source responses expose scheduler and health fields. Ingestion responses expose
+manual or scheduled trigger, changed and removed file counts, and timestamps.
 
 ## Conversations
 

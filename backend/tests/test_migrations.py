@@ -42,10 +42,36 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "reference",
         "credential_ref",
         "last_collected_at",
+        "sync_mode",
+        "sync_interval_minutes",
+        "next_sync_at",
+        "last_sync_attempt_at",
+        "last_content_change_at",
+        "consecutive_failures",
     } <= source_columns
-    assert "duplicate_files" in {
+    ingestion_columns = {
         column["name"]
         for column in inspector.get_columns("knowledge_ingestions")
+    }
+    assert {
+        "duplicate_files",
+        "changed_files",
+        "removed_files",
+        "trigger",
+        "started_at",
+    } <= ingestion_columns
+
+    command.downgrade(config, "20260728_0009")
+    scheduler_downgraded = inspect(create_engine(database_url))
+    assert "sync_mode" not in {
+        column["name"]
+        for column in scheduler_downgraded.get_columns("knowledge_sources")
+    }
+    assert "trigger" not in {
+        column["name"]
+        for column in scheduler_downgraded.get_columns(
+            "knowledge_ingestions"
+        )
     }
 
     command.downgrade(config, "20260727_0008")

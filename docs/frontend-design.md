@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.9.1 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
+Version 0.10.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -57,10 +57,13 @@ mounted during in-app navigation so an active task remains observable.
 
 The Knowledge route uses an editable source registry form followed by source
 cards and a live ingestion event panel. Location, type, version, subpath,
-scope and credentials can be maintained from the page. Credential inputs are
-write only. The UI reports files seen, chunks written, vectors reused and
-duplicate files skipped. Source Memory and task-derived Memory Candidates
-remain separate concepts and use separate routes.
+scope, sync policy and credentials can be maintained from the page. Credential
+inputs are write only. The UI reports scheduler state, next check, latest
+content change, failure count, files seen, changed and removed paths, and reused
+vectors. Each source expands its latest fifty persisted synchronization runs.
+The page refreshes source state every ten seconds while visible. Source Memory
+and task-derived Memory Candidates remain separate concepts and use separate
+routes.
 
 The Memory route uses the same 30 pixel panel gutter as the Knowledge and
 Capability routes. Its empty state stays inside a bordered inner surface so
@@ -97,3 +100,4 @@ Validated screenshots:
 * `docs/evidence/screenshots/managed-knowledge-ingestion-0.9.0.png`
 * `docs/evidence/screenshots/managed-knowledge-source-edit-0.9.0.jpg`
 * `docs/evidence/screenshots/memory-panel-spacing-0.9.1.jpg`
+* `docs/evidence/screenshots/durable-knowledge-sources-0.10.0.jpg`

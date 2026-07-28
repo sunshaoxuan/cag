@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
+from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
 from app.knowledge.connectors import SourceConnectorManager
 from app.policies.command_policy import CommandPolicyService
@@ -20,7 +22,8 @@ from app.knowledge.security import (
 )
 from app.knowledge.service import KnowledgeService
 from app.main import create_app
-from app.models import KnowledgeChunk, KnowledgeDocument
+from app.models import KnowledgeChunk, KnowledgeDocument, KnowledgeSource
+from app.models.base import utc_now
 from app.tasks.executor import TaskExecutor
 
 
@@ -35,6 +38,7 @@ def knowledge_settings(
             "knowledge_encryption_key": KnowledgeCipher.generate_key(),
             "knowledge_allowed_roots": str(root),
             "knowledge_sources_dir": root / ".knowledge-source-cache",
+            "knowledge_scheduler_enabled": False,
         }
     )
     return Settings(**payload)
@@ -332,6 +336,193 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
             f"/api/v1/knowledge/sources/{source['id']}"
         ).status_code == 204
         assert client.get("/api/v1/knowledge/sources").json() == []
+
+
+def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(
+        app,
+        active_settings,
+        FakeCredentialStore(),
+    )
+    scheduler = KnowledgeScheduler(
+        service=service,
+        poll_seconds=1,
+        lease_seconds=60,
+    )
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Continuously monitored files",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+                "approved_for_codex": True,
+                "sync_mode": "scheduled",
+                "sync_interval_minutes": 15,
+            },
+        )
+        assert created.status_code == 201
+        source = created.json()
+        assert source["sync_mode"] == "scheduled"
+        assert source["next_sync_at"] is not None
+
+        assert asyncio.run(scheduler.run_once()) is True
+        first = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/ingestions"
+        ).json()[0]
+        assert first["trigger"] == "scheduled"
+        assert first["changed_files"] == 1
+        assert first["removed_files"] == 0
+
+        (project_repository / "GUIDE.md").write_text(
+            "# Changed product guide\n",
+            encoding="utf-8",
+        )
+        with app.state.database.session_factory() as session:
+            stored = session.get(KnowledgeSource, source["id"])
+            stored.next_sync_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        assert asyncio.run(scheduler.run_once()) is True
+        second = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/ingestions"
+        ).json()[0]
+        assert second["changed_files"] == 1
+        assert second["unchanged_files"] == 1
+        assert second["vectors_reused"] == 1
+
+        (project_repository / "README.md").unlink()
+        with app.state.database.session_factory() as session:
+            stored = session.get(KnowledgeSource, source["id"])
+            stored.next_sync_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        assert asyncio.run(scheduler.run_once()) is True
+        history = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/ingestions"
+        ).json()
+        assert len(history) == 3
+        assert history[0]["removed_files"] == 1
+        assert all(item["trigger"] == "scheduled" for item in history)
+        with app.state.database.session_factory() as session:
+            paths = set(
+                session.scalars(
+                    select(KnowledgeDocument.canonical_path).where(
+                        KnowledgeDocument.source_id == source["id"]
+                    )
+                )
+            )
+        assert paths == {"GUIDE.md"}
+
+
+def test_scheduler_lease_prevents_duplicate_claim_and_failure_is_retried(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(
+        app,
+        active_settings,
+        FakeCredentialStore(),
+    )
+    scheduler = KnowledgeScheduler(
+        service=service,
+        poll_seconds=1,
+        lease_seconds=60,
+    )
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Retryable source",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+                "sync_mode": "scheduled",
+                "sync_interval_minutes": 60,
+            },
+        ).json()
+        assert service.claim_due_source(
+            worker_id="worker-a",
+            lease_seconds=60,
+        ) == source["id"]
+        assert service.claim_due_source(
+            worker_id="worker-b",
+            lease_seconds=60,
+        ) is None
+        service.release_sync_lease(source["id"], "worker-a")
+        assert service.claim_due_source(
+            worker_id="worker-b",
+            lease_seconds=60,
+        ) == source["id"]
+        service.release_sync_lease(source["id"], "worker-b")
+
+        with app.state.database.session_factory() as session:
+            stored = session.get(KnowledgeSource, source["id"])
+            stored.root_path = str(
+                project_repository.parent / "missing-source"
+            )
+            stored.next_sync_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        assert asyncio.run(scheduler.run_once()) is True
+        failed = client.get("/api/v1/knowledge/sources").json()[0]
+        assert failed["status"] == "failed"
+        assert failed["consecutive_failures"] == 1
+        assert failed["next_sync_at"] is not None
+        history = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/ingestions"
+        ).json()
+        assert history[0]["status"] == "failed"
+        assert history[0]["trigger"] == "scheduled"
+
+
+def test_scheduler_loop_survives_one_iteration_failure() -> None:
+    class FlakyService:
+        def __init__(self) -> None:
+            self.claim_attempts = 0
+            self.running_states: list[bool] = []
+
+        def recover_interrupted_ingestions(self) -> int:
+            return 0
+
+        def set_scheduler_running(self, running: bool) -> None:
+            self.running_states.append(running)
+
+        def claim_due_source(
+            self,
+            *,
+            worker_id: str,
+            lease_seconds: int,
+        ) -> None:
+            del worker_id, lease_seconds
+            self.claim_attempts += 1
+            if self.claim_attempts == 1:
+                raise RuntimeError("temporary scheduler failure")
+            return None
+
+    async def exercise() -> tuple[int, list[bool]]:
+        service = FlakyService()
+        scheduler = KnowledgeScheduler(
+            service=service,  # type: ignore[arg-type]
+            poll_seconds=0.01,  # type: ignore[arg-type]
+            lease_seconds=60,
+        )
+        scheduler.start()
+        await asyncio.sleep(0.04)
+        await scheduler.stop()
+        return service.claim_attempts, service.running_states
+
+    attempts, states = asyncio.run(exercise())
+    assert attempts >= 2
+    assert states[0] is True
+    assert states[-1] is False
 
 
 def test_git_source_is_validated_materialized_and_indexed(

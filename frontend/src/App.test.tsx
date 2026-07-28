@@ -146,6 +146,9 @@ describe("Agent Gateway conversation page", () => {
             embedding_model: "qwen3-embedding:8b",
             memory_model: "qwen3:14b",
             dimensions: 1024,
+            scheduler_enabled: true,
+            scheduler_running: true,
+            scheduler_poll_seconds: 10,
           });
         }
         if (
@@ -171,6 +174,11 @@ describe("Agent Gateway conversation page", () => {
             error: null,
             last_validated_at: null,
             last_collected_at: null,
+            next_sync_at: "2026-07-28T01:00:00Z",
+            last_sync_attempt_at: null,
+            last_content_change_at: null,
+            consecutive_failures: 0,
+            scheduler_claimed: false,
             last_ingestion: null,
           };
           knowledgeSources = [source];
@@ -181,6 +189,32 @@ describe("Agent Gateway conversation page", () => {
           (!init?.method || init.method === "GET")
         ) {
           return jsonResponse(knowledgeSources);
+        }
+        if (
+          url.endsWith(
+            "/api/v1/knowledge/sources/source-1/ingestions",
+          )
+        ) {
+          return jsonResponse([
+            {
+              id: "ingestion-history-1",
+              source_id: "source-1",
+              status: "completed",
+              files_seen: 12,
+              chunks_written: 3,
+              rejected_files: 0,
+              duplicate_files: 0,
+              unchanged_files: 10,
+              vectors_reused: 20,
+              changed_files: 2,
+              removed_files: 1,
+              trigger: "scheduled",
+              error: null,
+              created_at: "2026-07-28T00:00:00Z",
+              started_at: "2026-07-28T00:00:01Z",
+              completed_at: "2026-07-28T00:00:04Z",
+            },
+          ]);
         }
         if (
           url.endsWith("/api/v1/knowledge/sources/source-1") &&
@@ -226,8 +260,12 @@ describe("Agent Gateway conversation page", () => {
               duplicate_files: 0,
               unchanged_files: 0,
               vectors_reused: 0,
+              changed_files: 0,
+              removed_files: 0,
+              trigger: "manual",
               error: null,
               created_at: "2026-07-28T00:00:00Z",
+              started_at: null,
               completed_at: null,
             },
             202,
@@ -394,6 +432,8 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
+    expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
+    expect(screen.getByLabelText("同步策略")).toHaveValue("scheduled");
 
     fireEvent.change(screen.getByLabelText("来源名称"), {
       target: { value: "产品文档" },
@@ -419,6 +459,9 @@ describe("Agent Gateway conversation page", () => {
     expect(
       await screen.findByText("docs/product"),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "运行历史" }));
+    expect(await screen.findByText("自动同步")).toBeInTheDocument();
+    expect(screen.getByText(/变化 2 · 删除 1/)).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "采集并学习" }),
     );

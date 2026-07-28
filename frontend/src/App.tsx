@@ -20,6 +20,7 @@ import {
   getTask,
   ingestKnowledgeSource,
   knowledgeIngestionEventsUrl,
+  KnowledgeIngestion,
   KnowledgeIngestionEvent,
   KnowledgeSource,
   KnowledgeStatus,
@@ -27,6 +28,7 @@ import {
   ApprovalRequest,
   StandardControl,
   listKnowledgeSources,
+  listKnowledgeSourceIngestions,
   listMemoryCandidates,
   MemoryCandidate,
   listProjects,
@@ -172,6 +174,14 @@ const SOURCE_TYPE_LABELS: Record<KnowledgeSource["source_type"], string> = {
   svn: "SVN 仓库",
 };
 
+const SOURCE_STATUS_LABELS: Record<string, string> = {
+  draft: "待验证",
+  validated: "已验证",
+  indexing: "索引中",
+  approved: "可检索",
+  failed: "同步失败",
+};
+
 const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.ingestion.queued": "采集任务已排队",
   "knowledge.ingestion.started": "采集任务已启动",
@@ -184,6 +194,13 @@ const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.memory.persisted": "来源记忆已保存",
   "knowledge.ingestion.completed": "本轮学习完成",
   "knowledge.ingestion.failed": "本轮学习失败",
+};
+
+const INGESTION_STATUS_LABELS: Record<string, string> = {
+  queued: "排队中",
+  running: "处理中",
+  completed: "已完成",
+  failed: "失败",
 };
 
 type ChatTurn = {
@@ -340,6 +357,8 @@ export default function App() {
     reference: "",
     subpath: "",
     scope: "product" as "tenant" | "product",
+    syncMode: "scheduled" as KnowledgeSource["sync_mode"],
+    syncIntervalMinutes: 60,
     credentialUsername: "",
     credentialSecret: "",
   });
@@ -351,6 +370,12 @@ export default function App() {
   const [knowledgeEvents, setKnowledgeEvents] = useState<
     KnowledgeIngestionEvent[]
   >([]);
+  const [knowledgeHistories, setKnowledgeHistories] = useState<
+    Record<string, KnowledgeIngestion[]>
+  >({});
+  const [expandedHistorySourceId, setExpandedHistorySourceId] = useState<
+    string | null
+  >(null);
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
   const [learningMode, setLearningMode] = useState("capture");
@@ -418,6 +443,12 @@ export default function App() {
   useEffect(() => {
     refreshKnowledge();
   }, []);
+
+  useEffect(() => {
+    if (page !== "knowledge") return;
+    const timer = window.setInterval(refreshKnowledge, 10_000);
+    return () => window.clearInterval(timer);
+  }, [page]);
 
   function refreshGovernance() {
     Promise.all([
@@ -711,6 +742,8 @@ export default function App() {
       reference: "",
       subpath: "",
       scope: "product",
+      syncMode: "scheduled",
+      syncIntervalMinutes: 60,
       credentialUsername: "",
       credentialSecret: "",
     });
@@ -725,6 +758,8 @@ export default function App() {
       reference: source.reference ?? "",
       subpath: source.subpath ?? "",
       scope: source.scope,
+      syncMode: source.sync_mode,
+      syncIntervalMinutes: source.sync_interval_minutes,
       credentialUsername: source.credential_username ?? "",
       credentialSecret: "",
     });
@@ -752,6 +787,8 @@ export default function App() {
         reference: knowledgeForm.reference.trim(),
         subpath: knowledgeForm.subpath.trim(),
         scope: knowledgeForm.scope,
+        sync_mode: knowledgeForm.syncMode,
+        sync_interval_minutes: knowledgeForm.syncIntervalMinutes,
         approved_for_codex: true,
         credential_username:
           knowledgeForm.credentialUsername.trim() || undefined,
@@ -770,7 +807,11 @@ export default function App() {
           reference: sharedPayload.reference || undefined,
           subpath: sharedPayload.subpath || undefined,
         });
-        setKnowledgeNotice("知识来源已保存，可以先验证连接，再触发采集。");
+        setKnowledgeNotice(
+          knowledgeForm.syncMode === "scheduled"
+            ? "知识来源已保存，调度器会持续检查并只重新索引变化内容。"
+            : "知识来源已保存，可以先验证连接，再手动触发采集。",
+        );
       }
       resetKnowledgeSourceForm();
       refreshKnowledge();
@@ -860,6 +901,27 @@ export default function App() {
     } catch (reason) {
       setKnowledgeBusy(null);
       setError(reason instanceof Error ? reason.message : "知识采集失败");
+    }
+  }
+
+  async function handleKnowledgeHistoryToggle(sourceId: string) {
+    if (expandedHistorySourceId === sourceId) {
+      setExpandedHistorySourceId(null);
+      return;
+    }
+    setKnowledgeBusy(sourceId);
+    setError(null);
+    try {
+      const items = await listKnowledgeSourceIngestions(sourceId);
+      setKnowledgeHistories((current) => ({
+        ...current,
+        [sourceId]: items,
+      }));
+      setExpandedHistorySourceId(sourceId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "运行历史加载失败");
+    } finally {
+      setKnowledgeBusy(null);
     }
   }
 
@@ -1302,7 +1364,16 @@ export default function App() {
                 <span aria-hidden="true"> · </span>
                 {knowledgeStatus?.dimensions ?? "未知"} 维
               </p>
-              <p>重复来源受唯一键约束，重复文件按内容哈希跳过。</p>
+              <p>
+                {knowledgeStatus?.scheduler_running
+                  ? `自动监控运行中，每 ${knowledgeStatus.scheduler_poll_seconds} 秒检查到期来源`
+                  : knowledgeStatus?.scheduler_enabled
+                    ? "自动监控正在启动"
+                    : "自动监控未启用"}
+              </p>
+              <p>
+                每轮扫描来源完整快照，只对新增或变化内容重新向量化。
+              </p>
             </div>
             {knowledgeNotice && (
               <div className="knowledge-notice" role="status">
@@ -1449,6 +1520,41 @@ export default function App() {
                   </select>
                 </label>
                 <label>
+                  <span>同步策略</span>
+                  <select
+                    value={knowledgeForm.syncMode}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        syncMode: event.target
+                          .value as KnowledgeSource["sync_mode"],
+                      }))
+                    }
+                  >
+                    <option value="scheduled">持续自动同步</option>
+                    <option value="manual">仅手动同步</option>
+                  </select>
+                </label>
+                <label>
+                  <span>检查间隔</span>
+                  <select
+                    value={knowledgeForm.syncIntervalMinutes}
+                    disabled={knowledgeForm.syncMode === "manual"}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        syncIntervalMinutes: Number(event.target.value),
+                      }))
+                    }
+                  >
+                    <option value={15}>每 15 分钟</option>
+                    <option value={60}>每小时</option>
+                    <option value={360}>每 6 小时</option>
+                    <option value={1440}>每天</option>
+                    <option value={10080}>每周</option>
+                  </select>
+                </label>
+                <label>
                   <span>认证用户名</span>
                   <input
                     autoComplete="username"
@@ -1479,7 +1585,7 @@ export default function App() {
                 </label>
               </div>
               <small>
-                密码和令牌只写入操作系统凭据库，数据库保存凭据引用。
+                来源、同步策略和每轮运行历史会持久保存。密码和令牌只写入操作系统凭据库，数据库保存凭据引用。
               </small>
             </form>
 
@@ -1508,7 +1614,10 @@ export default function App() {
                             : source.status
                         }`}
                       >
-                        {source.enabled ? source.status : "已停用"}
+                        {source.enabled
+                          ? SOURCE_STATUS_LABELS[source.status] ??
+                            source.status
+                          : "已停用"}
                       </span>
                     </header>
                     <p>{source.location}</p>
@@ -1527,6 +1636,28 @@ export default function App() {
                         </>
                       )}
                     </small>
+                    <div className="source-sync-state">
+                      <span>
+                        {source.sync_mode === "scheduled"
+                          ? `自动同步 · 每 ${source.sync_interval_minutes} 分钟`
+                          : "仅手动同步"}
+                      </span>
+                      <span>
+                        {source.next_sync_at
+                          ? `下次检查 ${formatTime(source.next_sync_at)}`
+                          : "当前无计划任务"}
+                      </span>
+                      <span>
+                        {source.last_content_change_at
+                          ? `最近内容变化 ${formatTime(source.last_content_change_at)}`
+                          : "尚未发现内容变化"}
+                      </span>
+                      {source.consecutive_failures > 0 && (
+                        <span className="source-sync-warning">
+                          连续失败 {source.consecutive_failures} 次，已安排重试
+                        </span>
+                      )}
+                    </div>
                     <div className="source-tags">
                       <span>
                         {source.scope === "product"
@@ -1552,8 +1683,16 @@ export default function App() {
                           <dd>{source.last_ingestion.vectors_reused}</dd>
                         </div>
                         <div>
-                          <dt>重复跳过</dt>
-                          <dd>{source.last_ingestion.duplicate_files}</dd>
+                          <dt>变化文件</dt>
+                          <dd>{source.last_ingestion.changed_files}</dd>
+                        </div>
+                        <div>
+                          <dt>删除文件</dt>
+                          <dd>{source.last_ingestion.removed_files}</dd>
+                        </div>
+                        <div>
+                          <dt>未变化</dt>
+                          <dd>{source.last_ingestion.unchanged_files}</dd>
                         </div>
                       </dl>
                     )}
@@ -1568,6 +1707,18 @@ export default function App() {
                         onClick={() => handleKnowledgeSourceEdit(source)}
                       >
                         编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="button-quiet"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() =>
+                          handleKnowledgeHistoryToggle(source.id)
+                        }
+                      >
+                        {expandedHistorySourceId === source.id
+                          ? "收起历史"
+                          : "运行历史"}
                       </button>
                       <button
                         type="button"
@@ -1610,6 +1761,46 @@ export default function App() {
                         删除
                       </button>
                     </footer>
+                    {expandedHistorySourceId === source.id && (
+                      <div
+                        className="source-history"
+                        aria-label={`${source.name}运行历史`}
+                      >
+                        {(knowledgeHistories[source.id] ?? []).length ===
+                          0 && <p>尚无同步运行记录。</p>}
+                        {(knowledgeHistories[source.id] ?? []).map(
+                          (ingestion) => (
+                            <article key={ingestion.id}>
+                              <div>
+                                <strong>
+                                  {ingestion.trigger === "scheduled"
+                                    ? "自动同步"
+                                    : "手动同步"}
+                                </strong>
+                                <span>
+                                  {INGESTION_STATUS_LABELS[
+                                    ingestion.status
+                                  ] ?? ingestion.status}
+                                </span>
+                                <time dateTime={ingestion.created_at}>
+                                  {formatTime(ingestion.created_at)}
+                                </time>
+                              </div>
+                              <small>
+                                发现 {ingestion.files_seen} · 变化{" "}
+                                {ingestion.changed_files} · 删除{" "}
+                                {ingestion.removed_files} · 未变化{" "}
+                                {ingestion.unchanged_files} · 复用向量{" "}
+                                {ingestion.vectors_reused}
+                              </small>
+                              {ingestion.error && (
+                                <p>{ingestion.error}</p>
+                              )}
+                            </article>
+                          ),
+                        )}
+                      </div>
+                    )}
                   </article>
                 ))}
               </section>

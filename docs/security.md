@@ -50,6 +50,13 @@ the password through standard input with its auth cache disabled. Authenticated
 Windows shares use WNet and disconnect after collection. Source secrets are
 absent from command arguments, responses and ingestion events.
 
+Scheduled synchronization stores only source IDs, policy, timing, lease owner,
+counts and errors in the database. Scheduler leases never contain source
+credentials. Every scheduled run resolves the opaque credential reference at
+collection time through the same credential service and command policy used by
+manual ingestion. Failed authentication remains a source error with bounded
+retry and does not expose the supplied secret.
+
 Remote repository hosts require deployment network policy. The current source
 registry validates URL schemes and rejects embedded URL credentials. Production
 deployments must combine an outbound allowlist with caller authentication and

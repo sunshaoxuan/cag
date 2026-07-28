@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.10.0
+
+* `docs/evidence/durable-knowledge-sync-0.10.0/`
+* `docs/evidence/screenshots/durable-knowledge-sources-0.10.0.jpg`
+
 ## Version 0.9.1
 
 * `docs/evidence/memory-panel-spacing-0.9.1/`

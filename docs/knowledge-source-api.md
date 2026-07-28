@@ -31,6 +31,8 @@ Content-Type: application/json
   "subpath": "docs",
   "scope": "product",
   "approved_for_codex": true,
+  "sync_mode": "scheduled",
+  "sync_interval_minutes": 60,
   "credential_username": "oauth2",
   "credential_secret": "<write-only token>"
 }
@@ -50,8 +52,15 @@ POST   /api/v1/knowledge/sources/{source_id}/validate
 
 Patch supports `name`, `source_type`, `location`, `reference`, `subpath`,
 `scope`, `enabled`, `approved_for_codex`, credential rotation and
-`clear_credential`. Updating any location identity field invalidates the prior
-index and managed snapshot. Send an empty `reference` or `subpath` to clear it.
+`clear_credential`. It also supports `sync_mode` with `manual` or `scheduled`
+and `sync_interval_minutes` from 1 through 10080. Updating any location
+identity field invalidates the prior index and managed snapshot. Send an empty
+`reference` or `subpath` to clear it.
+
+The source response includes `next_sync_at`, `last_sync_attempt_at`,
+`last_content_change_at`, `consecutive_failures` and `scheduler_claimed`.
+These fields allow API clients and the management page to monitor persistent
+source health without reconstructing state from transient logs.
 
 ## Collect and follow
 
@@ -82,7 +91,34 @@ knowledge.ingestion.failed
 ```
 
 The terminal ingestion record includes `files_seen`, `chunks_written`,
-`rejected_files`, `duplicate_files`, `unchanged_files` and `vectors_reused`.
+`rejected_files`, `duplicate_files`, `unchanged_files`, `vectors_reused`,
+`changed_files`, `removed_files`, `trigger`, `started_at` and `completed_at`.
+The source ingestion list retains the latest fifty runs.
+
+## Scheduled lifecycle
+
+```text
+registered source
+  |
+next_sync_at becomes due
+  |
+database lease claim
+  |
+complete source snapshot
+  |
+incremental hash comparison
+  |
+reuse, replace, add and remove
+  |
+persist run receipt
+  |
+schedule next interval or bounded retry
+```
+
+New API clients may choose either sync mode explicitly. The web management form
+defaults to scheduled synchronization. Sources created before version 0.10.0
+are migrated as manual so a deployment upgrade does not unexpectedly contact
+external systems.
 
 ## Idempotency
 

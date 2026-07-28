@@ -15,6 +15,7 @@ from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
 from app.workspaces.manager import WorkspaceManager
 from app.knowledge.ollama import OllamaClient
+from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.security import load_knowledge_cipher
 from app.knowledge.service import KnowledgeService
 from app.approvals.service import ApprovalService
@@ -101,6 +102,11 @@ def create_app(
         database=database,
         capabilities=capability_service,
     )
+    knowledge_scheduler = KnowledgeScheduler(
+        service=knowledge_service,
+        poll_seconds=active_settings.knowledge_scheduler_poll_seconds,
+        lease_seconds=active_settings.knowledge_scheduler_lease_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -110,8 +116,16 @@ def create_app(
             task_service.ensure_audit_cursor(recovery_session)
             task_service.recover_interrupted_tasks(recovery_session)
         capability_service.seed_defaults()
-        yield
-        database.dispose()
+        if (
+            active_settings.knowledge_scheduler_enabled
+            and knowledge_service.configured
+        ):
+            knowledge_scheduler.start()
+        try:
+            yield
+        finally:
+            await knowledge_scheduler.stop()
+            database.dispose()
 
     application = FastAPI(
         title="Codex/ChatGPT Agent Gateway",
@@ -126,6 +140,7 @@ def create_app(
     application.state.project_registry = project_registry
     application.state.task_service = task_service
     application.state.knowledge_service = knowledge_service
+    application.state.knowledge_scheduler = knowledge_scheduler
     application.state.approval_service = approval_service
     application.state.harness = harness
     application.state.capability_service = capability_service

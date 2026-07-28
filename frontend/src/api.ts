@@ -67,6 +67,9 @@ export type Task = {
 export type KnowledgeStatus = {
   enabled: boolean;
   ready: boolean;
+  scheduler_enabled: boolean;
+  scheduler_running: boolean;
+  scheduler_poll_seconds: number;
   reason?: string;
   version?: string;
   models?: string[];
@@ -100,6 +103,13 @@ export type KnowledgeSource = {
   error: string | null;
   last_validated_at: string | null;
   last_collected_at: string | null;
+  sync_mode: "manual" | "scheduled";
+  sync_interval_minutes: number;
+  next_sync_at: string | null;
+  last_sync_attempt_at: string | null;
+  last_content_change_at: string | null;
+  consecutive_failures: number;
+  scheduler_claimed: boolean;
   last_ingestion: KnowledgeIngestion | null;
 };
 
@@ -113,8 +123,12 @@ export type KnowledgeIngestion = {
   duplicate_files: number;
   unchanged_files: number;
   vectors_reused: number;
+  changed_files: number;
+  removed_files: number;
+  trigger: "manual" | "scheduled";
   error: string | null;
   created_at: string;
+  started_at: string | null;
   completed_at: string | null;
 };
 
@@ -136,6 +150,8 @@ export type KnowledgeSourceCreate = {
   subpath?: string;
   scope: "tenant" | "product";
   approved_for_codex: boolean;
+  sync_mode: KnowledgeSource["sync_mode"];
+  sync_interval_minutes: number;
   credential_username?: string;
   credential_secret?: string;
 };
@@ -370,6 +386,14 @@ export function ingestKnowledgeSource(
   return request<KnowledgeIngestion>(
     `/api/v1/knowledge/sources/${sourceId}/ingest`,
     { method: "POST" },
+  );
+}
+
+export function listKnowledgeSourceIngestions(
+  sourceId: string,
+): Promise<KnowledgeIngestion[]> {
+  return request<KnowledgeIngestion[]>(
+    `/api/v1/knowledge/sources/${sourceId}/ingestions`,
   );
 }
 

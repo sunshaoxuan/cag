@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.9.1"
+APP_VERSION = "0.10.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     )
     knowledge_max_file_bytes: int = Field(
         default=10_000_000, ge=1_024, le=100_000_000
+    )
+    knowledge_scheduler_enabled: bool = True
+    knowledge_scheduler_poll_seconds: int = Field(
+        default=10, ge=1, le=3_600
+    )
+    knowledge_scheduler_lease_seconds: int = Field(
+        default=900, ge=30, le=7_200
     )
     svn_executable: str = "svn"
     projects_dir: Path = DEFAULT_REPOSITORY_ROOT / "projects"

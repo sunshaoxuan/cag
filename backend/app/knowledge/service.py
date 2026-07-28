@@ -3,6 +3,7 @@ import hashlib
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +38,6 @@ from app.models import (
 )
 from app.models.base import utc_now
 from app.policies.command_policy import CommandPolicyService
-
-
 
 class KnowledgeUnavailableError(RuntimeError):
     pass
@@ -90,19 +89,35 @@ class KnowledgeService:
             svn_executable=settings.svn_executable,
             max_file_bytes=settings.knowledge_max_file_bytes,
         )
+        self._scheduler_running = False
 
     @property
     def configured(self) -> bool:
         return self._settings.knowledge_enabled and self._cipher is not None
 
     async def status(self) -> dict[str, Any]:
+        scheduler_status = {
+            "scheduler_enabled": (
+                self._settings.knowledge_scheduler_enabled
+            ),
+            "scheduler_running": self._scheduler_running,
+            "scheduler_poll_seconds": (
+                self._settings.knowledge_scheduler_poll_seconds
+            ),
+        }
         if not self._settings.knowledge_enabled:
-            return {"enabled": False, "ready": False, "reason": "disabled"}
+            return {
+                "enabled": False,
+                "ready": False,
+                "reason": "disabled",
+                **scheduler_status,
+            }
         if self._cipher is None:
             return {
                 "enabled": True,
                 "ready": False,
                 "reason": "knowledge encryption key is unavailable",
+                **scheduler_status,
             }
         try:
             provider_status = await self._provider.status()
@@ -111,8 +126,12 @@ class KnowledgeService:
                 "enabled": True,
                 "ready": False,
                 "reason": str(exc),
+                **scheduler_status,
             }
-        return {"enabled": True, **provider_status}
+        return {"enabled": True, **provider_status, **scheduler_status}
+
+    def set_scheduler_running(self, running: bool) -> None:
+        self._scheduler_running = running
 
     def create_source(
         self,
@@ -125,6 +144,8 @@ class KnowledgeService:
         subpath: str | None,
         scope: str,
         approved_for_codex: bool,
+        sync_mode: str = "manual",
+        sync_interval_minutes: int = 60,
         credential_username: str | None = None,
         credential_secret: str | None = None,
     ) -> KnowledgeSource:
@@ -137,6 +158,7 @@ class KnowledgeService:
             raise ValueError("Tenant scoped knowledge requires a tenant binding")
         if scope == "product" and project.product_version_id is None:
             raise ValueError("Product scoped knowledge requires a product version")
+        self._validate_sync_policy(sync_mode, sync_interval_minutes)
         source_key = self._connectors.normalized_source_key(
             source_type=source_type,
             location=location,
@@ -164,6 +186,13 @@ class KnowledgeService:
                 ),
                 scope=scope,
                 approved_for_codex=approved_for_codex,
+                sync_mode=sync_mode,
+                sync_interval_minutes=sync_interval_minutes,
+                next_sync_at=(
+                    utc_now()
+                    if sync_mode == "scheduled"
+                    else None
+                ),
             )
             try:
                 session.add(source)
@@ -225,6 +254,8 @@ class KnowledgeService:
         scope: str | None = None,
         enabled: bool | None = None,
         approved_for_codex: bool | None = None,
+        sync_mode: str | None = None,
+        sync_interval_minutes: int | None = None,
         credential_username: str | None = None,
         credential_secret: str | None = None,
         clear_credential: bool = False,
@@ -236,6 +267,16 @@ class KnowledgeService:
             next_source_type = source_type or source.source_type
             next_location = (location or source.root_path).strip()
             next_scope = scope or source.scope
+            next_sync_mode = sync_mode or source.sync_mode
+            next_sync_interval = (
+                source.sync_interval_minutes
+                if sync_interval_minutes is None
+                else sync_interval_minutes
+            )
+            self._validate_sync_policy(
+                next_sync_mode,
+                next_sync_interval,
+            )
             next_reference = (
                 source.reference if reference is None else reference or None
             )
@@ -264,12 +305,19 @@ class KnowledgeService:
                 source.source_commit = None
                 source.last_validated_at = None
                 source.last_collected_at = None
+                source.last_content_change_at = None
             source.source_key = next_source_key
             source.source_type = next_source_type
             source.root_path = next_location
             source.reference = next_reference
             source.subpath = next_subpath
             source.scope = next_scope
+            policy_changed = (
+                next_sync_mode != source.sync_mode
+                or next_sync_interval != source.sync_interval_minutes
+            )
+            source.sync_mode = next_sync_mode
+            source.sync_interval_minutes = next_sync_interval
             project = session.get(Project, source.project_id)
             if project is None:
                 raise ValueError("Knowledge source project is unavailable")
@@ -290,6 +338,12 @@ class KnowledgeService:
                     source.status = KnowledgeStatus.DISABLED
                 elif source.status == KnowledgeStatus.DISABLED:
                     source.status = KnowledgeStatus.DRAFT
+            if not source.enabled or next_sync_mode == "manual":
+                source.next_sync_at = None
+                source.sync_lease_owner = None
+                source.sync_lease_expires_at = None
+            elif source_changed or policy_changed or enabled is True:
+                source.next_sync_at = utc_now()
             if approved_for_codex is not None:
                 source.approved_for_codex = approved_for_codex
                 if source.status in {
@@ -341,7 +395,14 @@ class KnowledgeService:
             session.commit()
         self._credential_store.delete(credential_ref)
 
-    def create_ingestion(self, source_id: str) -> KnowledgeIngestion:
+    def create_ingestion(
+        self,
+        source_id: str,
+        *,
+        trigger: str = "manual",
+    ) -> KnowledgeIngestion:
+        if trigger not in {"manual", "scheduled"}:
+            raise ValueError("Unsupported knowledge ingestion trigger")
         with self._database.session_factory() as session:
             source = session.get(KnowledgeSource, source_id)
             if source is None:
@@ -358,16 +419,20 @@ class KnowledgeService:
             )
             if active is not None:
                 return active
-            ingestion = KnowledgeIngestion(source_id=source_id)
+            ingestion = KnowledgeIngestion(
+                source_id=source_id,
+                trigger=trigger,
+            )
             source.status = KnowledgeStatus.INDEXING
             source.error = None
+            source.last_sync_attempt_at = utc_now()
             session.add(ingestion)
             session.flush()
             self._append_ingestion_event(
                 session,
                 ingestion,
                 "knowledge.ingestion.queued",
-                {"source_id": source_id},
+                {"source_id": source_id, "trigger": trigger},
             )
             session.commit()
             return ingestion
@@ -384,11 +449,12 @@ class KnowledgeService:
             if source is None:
                 return
             ingestion.status = "running"
+            ingestion.started_at = utc_now()
             self._append_ingestion_event(
                 session,
                 ingestion,
                 "knowledge.ingestion.started",
-                {},
+                {"trigger": ingestion.trigger},
             )
             session.commit()
             source_id = source.id
@@ -574,6 +640,15 @@ class KnowledgeService:
                 source.source_commit = collected.revision
                 source.index_fingerprint = index_fingerprint
                 source.last_collected_at = utc_now()
+                if changed_paths or removed_paths:
+                    source.last_content_change_at = source.last_collected_at
+                source.consecutive_failures = 0
+                source.sync_lease_owner = None
+                source.sync_lease_expires_at = None
+                source.next_sync_at = self._next_sync_at(
+                    source,
+                    source.last_collected_at,
+                )
                 source.status = (
                     KnowledgeStatus.APPROVED
                     if source.approved_for_codex
@@ -586,6 +661,8 @@ class KnowledgeService:
                 ingestion.unchanged_files = len(unchanged_paths)
                 ingestion.vectors_reused = vectors_reused
                 ingestion.duplicate_files = duplicate_files
+                ingestion.changed_files = len(changed_paths)
+                ingestion.removed_files = len(removed_paths)
                 ingestion.completed_at = utc_now()
                 self._append_ingestion_event(
                     session,
@@ -616,6 +693,8 @@ class KnowledgeService:
                         "chunks_written": len(chunks),
                         "rejected_files": collected.rejected_files,
                         "duplicate_files": duplicate_files,
+                        "changed_files": len(changed_paths),
+                        "removed_files": len(removed_paths),
                         "unchanged_files": len(unchanged_paths),
                         "vectors_reused": vectors_reused,
                         "index_fingerprint": index_fingerprint,
@@ -834,6 +913,69 @@ class KnowledgeService:
             session.commit()
         return ids
 
+    def claim_due_source(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> str | None:
+        now = utc_now()
+        with self._database.session_factory() as session:
+            source = session.scalar(
+                select(KnowledgeSource)
+                .where(
+                    KnowledgeSource.enabled.is_(True),
+                    KnowledgeSource.sync_mode == "scheduled",
+                    KnowledgeSource.next_sync_at.is_not(None),
+                    KnowledgeSource.next_sync_at <= now,
+                    KnowledgeSource.status != KnowledgeStatus.INDEXING,
+                    or_(
+                        KnowledgeSource.sync_lease_expires_at.is_(None),
+                        KnowledgeSource.sync_lease_expires_at <= now,
+                    ),
+                )
+                .order_by(
+                    KnowledgeSource.next_sync_at,
+                    KnowledgeSource.created_at,
+                )
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if source is None:
+                return None
+            source.sync_lease_owner = worker_id
+            source.sync_lease_expires_at = now + timedelta(
+                seconds=lease_seconds
+            )
+            source.last_sync_attempt_at = now
+            session.commit()
+            return source.id
+
+    def release_sync_lease(self, source_id: str, worker_id: str) -> None:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None or source.sync_lease_owner != worker_id:
+                return
+            source.sync_lease_owner = None
+            source.sync_lease_expires_at = None
+            session.commit()
+
+    def recover_interrupted_ingestions(self) -> int:
+        with self._database.session_factory() as session:
+            ingestion_ids = list(
+                session.scalars(
+                    select(KnowledgeIngestion.id).where(
+                        KnowledgeIngestion.status.in_(("queued", "running"))
+                    )
+                )
+            )
+        for ingestion_id in ingestion_ids:
+            self._fail_ingestion(
+                ingestion_id,
+                "Gateway restarted before knowledge ingestion completed",
+            )
+        return len(ingestion_ids)
+
     def list_sources(self) -> list[KnowledgeSource]:
         with self._database.session_factory() as session:
             return list(
@@ -883,6 +1025,29 @@ class KnowledgeService:
                 raise ValueError(action)
             session.commit()
             return candidate
+
+    @staticmethod
+    def _validate_sync_policy(
+        sync_mode: str,
+        sync_interval_minutes: int,
+    ) -> None:
+        if sync_mode not in {"manual", "scheduled"}:
+            raise ValueError("Unsupported knowledge sync mode")
+        if sync_interval_minutes < 1 or sync_interval_minutes > 10_080:
+            raise ValueError(
+                "Knowledge sync interval must be between 1 and 10080 minutes"
+            )
+
+    @staticmethod
+    def _next_sync_at(
+        source: KnowledgeSource,
+        completed_at: datetime,
+    ) -> datetime | None:
+        if not source.enabled or source.sync_mode != "scheduled":
+            return None
+        return completed_at + timedelta(
+            minutes=source.sync_interval_minutes
+        )
 
     @staticmethod
     def _source_config(source: KnowledgeSource) -> SourceConfig:
@@ -956,6 +1121,19 @@ class KnowledgeService:
             if source is not None:
                 source.status = KnowledgeStatus.FAILED
                 source.error = error
+                source.consecutive_failures += 1
+                source.sync_lease_owner = None
+                source.sync_lease_expires_at = None
+                if source.enabled and source.sync_mode == "scheduled":
+                    retry_minutes = min(
+                        source.sync_interval_minutes,
+                        5 * (2 ** min(source.consecutive_failures - 1, 6)),
+                    )
+                    source.next_sync_at = utc_now() + timedelta(
+                        minutes=retry_minutes
+                    )
+                else:
+                    source.next_sync_at = None
             session.commit()
 
     @staticmethod

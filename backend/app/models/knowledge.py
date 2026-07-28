@@ -125,6 +125,26 @@ class KnowledgeSource(PhysicalIdMixin, Base):
     last_collected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    sync_mode: Mapped[str] = mapped_column(
+        String(32), default="manual", index=True
+    )
+    sync_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    next_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_sync_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_content_change_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    sync_lease_owner: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    sync_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -148,7 +168,15 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     unchanged_files: Mapped[int] = mapped_column(Integer, default=0)
     vectors_reused: Mapped[int] = mapped_column(Integer, default=0)
     duplicate_files: Mapped[int] = mapped_column(Integer, default=0)
+    changed_files: Mapped[int] = mapped_column(Integer, default=0)
+    removed_files: Mapped[int] = mapped_column(Integer, default=0)
+    trigger: Mapped[str] = mapped_column(
+        String(32), default="manual", index=True
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

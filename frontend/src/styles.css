@@ -894,6 +894,27 @@ h1 span {
   line-height: 1.5;
 }
 
+.source-sync-state {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid #e8e1dd;
+  border-radius: 11px;
+  background: #faf8f6;
+}
+
+.source-sync-state span {
+  color: #665f61;
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.source-sync-state .source-sync-warning {
+  color: #a8321c;
+  font-weight: 850;
+}
+
 .source-tags {
   display: flex;
   flex-wrap: wrap;
@@ -911,7 +932,7 @@ h1 span {
 
 .source-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
 }
@@ -966,6 +987,70 @@ h1 span {
   background: #fff;
   color: #9b321d;
   box-shadow: none;
+}
+
+.source-history {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #e9dfda;
+  border-radius: 12px;
+  background: #fffdfc;
+}
+
+.source-history > p {
+  padding: 14px;
+  font-family: inherit;
+  text-align: center;
+}
+
+.source-history article {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-top: 1px solid #eee5e0;
+}
+
+.source-history article:first-of-type {
+  border-top: 0;
+}
+
+.source-history article > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.source-history article strong {
+  font-size: 0.72rem;
+}
+
+.source-history article span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-size: 0.6rem;
+  font-weight: 850;
+}
+
+.source-history article time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.source-history article small {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.source-history article p {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff0ec;
+  color: #9b321d;
+  font-family: inherit;
 }
 
 .collection-events .compact-empty,
@@ -1681,6 +1766,10 @@ textarea:focus {
 
   .source-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .source-sync-state {
+    grid-template-columns: 1fr;
   }
 
   .feedback-controls p {

@@ -171,6 +171,14 @@ Task retrieval uses tenant and product version filters before reciprocal rank fu
 
 Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect to Ollama or Codex app-server directly.
 
+The durable source scheduler polls persisted `next_sync_at` values. It claims
+one due source with `FOR UPDATE SKIP LOCKED` and an expiring database lease,
+creates a normal ingestion record with trigger `scheduled`, and runs the same
+collection and indexing path used by the manual API. Successful runs compute
+the next interval. Failed runs retain the error and schedule bounded
+exponential retry. Startup recovery closes queued or running ingestions left by
+an interrupted process.
+
 ## 5. Data identity
 
 Every business record has an independent UUID physical ID.
@@ -185,6 +193,8 @@ Every business record has an independent UUID physical ID.
 * `TaskEvent.task_id` references `Task.id`.
 * `TaskEvent.global_sequence` is unique across the Gateway deployment.
 * Conversation TaskEvents also store `conversation_id` and a Conversation-local sequence.
+* `KnowledgeSource.id` owns sync policy, lease, source health and all ingestion history.
+* `KnowledgeIngestion.id` records one manual or scheduled source snapshot comparison.
 
 The request field `project_id` accepts a project UUID or project Code for compatibility with the source specification. Storage always uses the physical UUID. Responses expose `project_id` and `project_code`.
 
@@ -304,6 +314,22 @@ encrypted Source Memory persistence
 
 The frontend follows the durable ingestion SSE. Page display limits never
 truncate backend history.
+
+Scheduled source maintenance uses this durable control loop:
+
+```text
+due source
+  |
+database row lock and expiring lease
+  |
+normal ingestion event stream
+  |
+source snapshot and idempotent comparison
+  |
+persist history and content change timestamp
+  |
+next interval or retry time
+```
 
 The Promotion Service is the only component allowed to change registry state:
 

@@ -36,6 +36,10 @@ class SourceCreate(BaseModel):
     subpath: str | None = Field(default=None, max_length=2048)
     scope: str = Field(default="tenant", pattern=r"^(tenant|product)$")
     approved_for_codex: bool = False
+    sync_mode: str = Field(
+        default="manual", pattern=r"^(manual|scheduled)$"
+    )
+    sync_interval_minutes: int = Field(default=60, ge=1, le=10_080)
     credential_username: str | None = Field(default=None, max_length=255)
     credential_secret: SecretStr | None = None
 
@@ -60,6 +64,12 @@ class SourceUpdate(BaseModel):
     )
     enabled: bool | None = None
     approved_for_codex: bool | None = None
+    sync_mode: str | None = Field(
+        default=None, pattern=r"^(manual|scheduled)$"
+    )
+    sync_interval_minutes: int | None = Field(
+        default=None, ge=1, le=10_080
+    )
     credential_username: str | None = Field(default=None, max_length=255)
     credential_secret: SecretStr | None = None
     clear_credential: bool = False
@@ -97,6 +107,13 @@ def source_response(
         "error": source.error,
         "last_validated_at": source.last_validated_at,
         "last_collected_at": source.last_collected_at,
+        "sync_mode": source.sync_mode,
+        "sync_interval_minutes": source.sync_interval_minutes,
+        "next_sync_at": source.next_sync_at,
+        "last_sync_attempt_at": source.last_sync_attempt_at,
+        "last_content_change_at": source.last_content_change_at,
+        "consecutive_failures": source.consecutive_failures,
+        "scheduler_claimed": source.sync_lease_expires_at is not None,
         "last_ingestion": (
             ingestion_response(latest_ingestion)
             if latest_ingestion is not None
@@ -118,8 +135,12 @@ def ingestion_response(ingestion: KnowledgeIngestion) -> dict[str, Any]:
         "unchanged_files": ingestion.unchanged_files,
         "vectors_reused": ingestion.vectors_reused,
         "duplicate_files": ingestion.duplicate_files,
+        "changed_files": ingestion.changed_files,
+        "removed_files": ingestion.removed_files,
+        "trigger": ingestion.trigger,
         "error": ingestion.error,
         "created_at": ingestion.created_at,
+        "started_at": ingestion.started_at,
         "completed_at": ingestion.completed_at,
     }
 
@@ -150,6 +171,8 @@ def create_source(
             subpath=request.subpath,
             scope=request.scope,
             approved_for_codex=request.approved_for_codex,
+            sync_mode=request.sync_mode,
+            sync_interval_minutes=request.sync_interval_minutes,
             credential_username=request.credential_username,
             credential_secret=(
                 request.credential_secret.get_secret_value()
@@ -197,6 +220,8 @@ def update_source(
             scope=request.scope,
             enabled=request.enabled,
             approved_for_codex=request.approved_for_codex,
+            sync_mode=request.sync_mode,
+            sync_interval_minutes=request.sync_interval_minutes,
             credential_username=request.credential_username,
             credential_secret=(
                 request.credential_secret.get_secret_value()
