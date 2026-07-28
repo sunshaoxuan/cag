@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.8.0 | Evidence |
+| Requirement | Status for 0.8.1 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -22,6 +22,7 @@ Legend:
 | Query task API | Implemented | `GET /api/v1/tasks/{task_id}` |
 | Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events` |
 | Docker Compose | Implemented | `docker-compose.yml` |
+| Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
 | Unit and API tests | Implemented | `backend/tests` |
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |

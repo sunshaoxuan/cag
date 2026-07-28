@@ -73,7 +73,8 @@ if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS) {
 }
 
 Write-Host "Starting Agent Gateway with the local ChatGPT-authenticated Codex runtime."
-Write-Host "Gateway: http://127.0.0.1:$Port"
+Write-Host "Gateway listener: http://0.0.0.0:$Port"
+Write-Host "Local access: http://127.0.0.1:$Port"
 
 Push-Location $backendRoot
 try {
@@ -85,7 +86,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Agent Gateway database migration failed."
     }
-    & $pythonExecutable -m uvicorn app.main:app --host 127.0.0.1 --port $Port
+    & $pythonExecutable -m uvicorn app.main:app --host 0.0.0.0 --port $Port
 }
 finally {
     Pop-Location

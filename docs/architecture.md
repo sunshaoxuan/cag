@@ -238,7 +238,8 @@ The runtime receives its task workspace path. Concurrent tasks have distinct phy
 * Policy Engine classifies commands independently of the Prompt.
 * App-server credentials stay in the local Codex credential store.
 * The Gateway never reads, copies, returns, or logs Codex credential material.
-* External listeners require Gateway authentication. Codex app-server remains a private local child process or loopback service.
+* Gateway listens on every IPv4 interface by default. Codex app-server remains a private local child process or loopback service.
+* Caller authentication and project authorization remain production gates. Deployments control the reachable network boundary until those gates are implemented.
 
 ## 9. Observability
 

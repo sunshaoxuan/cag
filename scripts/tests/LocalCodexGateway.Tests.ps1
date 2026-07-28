@@ -22,6 +22,19 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'AGENT_GATEWAY_DATABASE_URL'
     }
 
+    It "binds the Gateway to every IPv4 interface" {
+        $content = Get-Content -Raw -LiteralPath $runScript
+        $content | Should Match '--host 0\.0\.0\.0'
+        $content | Should Not Match '--host 127\.0\.0\.1'
+    }
+
+    It "detects the listener by port and requires an all-interface address" {
+        $content = Get-Content -Raw -LiteralPath $manageScript
+        $content | Should Match 'Get-NetTCPConnection'
+        $content | Should Match 'LocalAddress -in @\("0\.0\.0\.0", "::"\)'
+        $content | Should Not Match '-LocalAddress "127\.0\.0\.1"'
+    }
+
     It "reports the persistent Gateway as running" {
         $status = & $manageScript status
         $status.GatewayState | Should Be "running"

@@ -1,5 +1,12 @@
 # Evidence index
 
+## Version 0.8.1
+
+* `scripts/tests/LocalCodexGateway.Tests.ps1`
+* `docs/evidence/test_results.md`
+* `docs/evidence/FINAL_RECEIPT.md`
+* Live managed-task listener and non-loopback health probes
+
 ## Version 0.8.0
 
 * `docs/external-api-observability.md`

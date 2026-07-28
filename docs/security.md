@@ -4,9 +4,10 @@
 
 The Gateway is the only network-facing control plane. The local Codex runtime stays behind it as a child process or loopback-only app-server.
 
-Version 0.8.0 adds externally callable task and audit APIs. The default local
-runner remains limited to trusted loopback until caller authentication, project
-authorization, HTTPS and distributed rate limiting are released.
+Version 0.8.1 exposes the Gateway listener on every IPv4 interface. Caller
+authentication, project authorization, HTTPS and distributed rate limiting
+remain open production controls, so deployments must define the reachable
+network boundary at the host firewall or upstream proxy.
 
 ## 2. Codex subscription credentials
 
@@ -94,7 +95,7 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 ## 8. Network and service exposure
 
 * PostgreSQL and Redis have no host ports in the default Compose file.
-* Gateway exposes port 8000 for development.
+* Gateway exposes port 8000 on every IPv4 host interface by default.
 * Frontend exposes port 5173 for development.
 * Codex app-server uses stdio by default.
 * Loopback WebSocket mode is reserved for controlled local integration.

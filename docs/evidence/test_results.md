@@ -1,37 +1,45 @@
 # Current release test results
 
-Date: 2026-07-27
+Date: 2026-07-28
 
-Version: 0.4.0
+Version: 0.8.1
 
 ## Automated
 
 | Check | Result |
 |---|---|
-| Backend Pytest | 36 passed |
-| Backend coverage | 91.06 percent |
-| Frontend Vitest | 3 passed |
+| PowerShell script parsing | Passed for both local Gateway entrypoints |
+| PowerShell listener regression | 6 passed |
+| Backend Pytest | 62 passed |
+| Backend coverage | 88.69 percent |
+| Frontend Vitest | 8 passed |
 | Frontend production build | Passed |
 | Compose configuration | Passed |
-| Gateway image build | Passed |
-| Frontend image build | Passed |
 
-## Live local subscription
+The first complete backend run found stale `0.8.0` assertions and package
+metadata. Those release fields were updated to `0.8.1`, and the complete suite
+then passed.
 
-One CAG Conversation completed two local ChatGPT-authenticated Codex Tasks in distinct Git workspaces. The first turn stored marker `CAG-PERSIST-7F3A91`; the second turn resumed the same internal Codex thread and returned the exact marker.
+An isolated staged-tree run found that the repository-wide `workspaces/`
+ignore rule also excluded `backend/app/workspaces/manager.py`. The rule was
+restricted to `/workspaces/`, the existing runtime module was added to version
+control, and the isolated staged-tree suite was rerun.
 
-Conversation SSE IDs were continuous from 1 through 16. Resume after cursor 8 returned IDs 9 through 16.
+## Live all-interface listener
 
-## Self-improvement
+The managed local Codex Gateway was restarted from the prior loopback listener.
+Windows reported the active socket as `0.0.0.0:8000`.
 
-The scoped candidate Task wrote `CANDIDATE.md` and `TASK_LEARNING_RECEIPT.md` only under its assigned `D:\workspace\codex-selfimp\outputs\cag-{task_id}` directory. The project workspace remained clean and the receipt status is `proposed`.
+| Probe | Result |
+|---|---|
+| Managed task state | `running` |
+| Managed task listener | `0.0.0.0:8000` |
+| Windows TCP listener | `0.0.0.0:8000` |
+| Loopback readiness | `ready` |
+| Non-loopback IPv4 readiness | `ready` |
+| Reported Gateway version | `0.8.1` |
 
-## Container and browser
-
-All four Compose services are healthy. PostgreSQL is at Alembic revision `20260727_0004`. The browser completed two turns through one Conversation and rendered event IDs 1 through 16. Console warnings and errors were zero.
-
-Screenshot:
-
-```text
-docs/evidence/screenshots/phase4-continuous-conversation.png
-```
+The non-loopback check called `/health/ready` through a preferred host IPv4
+address. This verifies the process binding on the current host. Inbound access
+from another machine still depends on the host firewall and surrounding
+network.

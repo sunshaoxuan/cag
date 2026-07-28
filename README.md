@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.8.0`。外部系统可以通过任务 API 和持续会话 API 调用本机订阅认证的 Codex。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。网页定位为 API 测试、监控和治理客户端。
+当前版本为 `0.8.1`。Gateway 默认监听全部 IPv4 网络接口。外部系统可以通过任务 API 和持续会话 API 调用本机订阅认证的 Codex。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。网页定位为 API 测试、监控和治理客户端。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -102,10 +102,10 @@ python -m venv .venv
 启动服务：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --reload
 ```
 
-服务默认地址为 `http://127.0.0.1:8000`，OpenAPI 地址为 `http://127.0.0.1:8000/docs`。项目配置默认从 `projects/*.yaml` 加载，任务工作区默认写入 `workspaces/{project_physical_id}/{task_id}`。
+服务监听 `0.0.0.0:8000`。本机通过 `http://127.0.0.1:8000` 访问，其他机器通过 `http://<CAG主机IP>:8000` 访问。OpenAPI 路径为 `/docs`。项目配置默认从 `projects/*.yaml` 加载，任务工作区默认写入 `workspaces/{project_physical_id}/{task_id}`。
 
 ## Docker Compose
 

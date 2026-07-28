@@ -18,11 +18,19 @@ function Get-GatewayTask {
 
 function Get-GatewayListener {
     Get-NetTCPConnection `
-        -LocalAddress "127.0.0.1" `
         -LocalPort $Port `
         -State Listen `
         -ErrorAction SilentlyContinue |
         Select-Object -First 1
+}
+
+function Test-GatewayListenerIsAllInterfaces {
+    param(
+        [Parameter(Mandatory)]
+        $Listener
+    )
+
+    $Listener.LocalAddress -in @("0.0.0.0", "::")
 }
 
 function Stop-GatewayListener {
@@ -84,6 +92,12 @@ if ($Action -eq "status") {
     [pscustomobject]@{
         TaskName = $TaskName
         GatewayState = $gatewayState
+        ListenAddress = if ($null -eq $listener) {
+            $null
+        }
+        else {
+            "$($listener.LocalAddress):$Port"
+        }
         TaskState = $task.State
         LastRunTime = $taskInfo.LastRunTime
         LastTaskResult = $taskInfo.LastTaskResult
@@ -125,16 +139,21 @@ if ($null -ne $existingListener) {
             "managed background task."
         )
     }
-    $health = Wait-GatewayReady
-    [pscustomobject]@{
-        TaskName = $TaskName
-        GatewayState = "running"
-        TaskState = $existingTask.State
-        Gateway = "http://127.0.0.1:$Port"
-        Health = $health.status
-        Version = $health.version
+    if (Test-GatewayListenerIsAllInterfaces -Listener $existingListener) {
+        $health = Wait-GatewayReady
+        [pscustomobject]@{
+            TaskName = $TaskName
+            GatewayState = "running"
+            ListenAddress = "$($existingListener.LocalAddress):$Port"
+            Gateway = "http://127.0.0.1:$Port"
+            Health = $health.status
+            Version = $health.version
+        }
+        exit 0
     }
-    exit 0
+
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-GatewayListener
 }
 
 $arguments = @(
@@ -168,10 +187,18 @@ Register-ScheduledTask `
     -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 $health = Wait-GatewayReady
+$listener = Get-GatewayListener
+if (
+    $null -eq $listener -or
+    -not (Test-GatewayListenerIsAllInterfaces -Listener $listener)
+) {
+    throw "Agent Gateway is ready but is not listening on all interfaces."
+}
 
 [pscustomobject]@{
     TaskName = $TaskName
     GatewayState = "running"
+    ListenAddress = "$($listener.LocalAddress):$Port"
     TaskState = (Get-GatewayTask).State
     Gateway = "http://127.0.0.1:$Port"
     Health = $health.status

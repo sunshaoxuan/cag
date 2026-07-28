@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.6.0 development deployment
+## 0.8.1 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -27,7 +27,7 @@ The Compose deployment contains:
 
 PostgreSQL and Redis are reachable only through the Compose network.
 
-The task console is available at `http://127.0.0.1:5173`. It calls the Gateway at `http://127.0.0.1:8000`.
+The task console is available locally at `http://127.0.0.1:5173`. The Gateway container publishes port 8000 on every host interface.
 
 The console creates a CAG Conversation and keeps one Conversation SSE connection open across turns.
 
@@ -83,7 +83,7 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. It handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
 For an interactive desktop test that must remain available after the launching shell exits, register and start the on-demand background task:
 
@@ -91,7 +91,7 @@ For an interactive desktop test that must remain available after the launching s
 .\scripts\manage-local-codex-gateway-task.ps1 start
 ```
 
-Use the same script with `status`, `stop` or `uninstall` to inspect, stop or remove the background task. The task has no automatic trigger and runs only when explicitly started. Status and stop operations verify the actual port listener because the Windows virtual-environment launcher can leave the runtime Python child active after the scheduler action completes.
+Use the same script with `status`, `stop` or `uninstall` to inspect, stop or remove the background task. The task has no automatic trigger and runs only when explicitly started. Status and stop operations verify the actual port listener because the Windows virtual-environment launcher can leave the runtime Python child active after the scheduler action completes. Starting the task replaces a prior loopback-only managed listener and verifies that the resulting address is `0.0.0.0` or `::`.
 
 The host Gateway stores its SQLite runtime state under `workspaces/.gateway`, which is excluded from version control. An explicit `AGENT_GATEWAY_DATABASE_URL` value takes precedence.
 

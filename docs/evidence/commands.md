@@ -173,3 +173,31 @@ Last-Event-ID: 189
 The real local Codex run persisted 197 events, including 188
 `agent.message.delta` events. The browser verified live answer projection,
 complete feedback, the 20-row display limit and zero console errors.
+
+## 0.8.1 all-interface listener validation
+
+```powershell
+Invoke-Pester -Script scripts\tests\LocalCodexGateway.Tests.ps1
+
+cd backend
+.\.venv\Scripts\python.exe -m pytest
+
+cd ..\frontend
+pnpm test
+pnpm build
+
+cd ..
+docker compose config --quiet
+Get-NetTCPConnection -LocalPort 8000 -State Listen
+Invoke-RestMethod http://127.0.0.1:8000/health/ready
+Invoke-RestMethod http://<preferred-host-ipv4>:8000/health/ready
+git diff --check
+```
+
+The managed task migrated the prior loopback listener to `0.0.0.0:8000`.
+Both readiness probes returned `ready` and version `0.8.1`.
+
+The staged index was archived into a task-local validation directory and tested
+independently from concurrent working-tree changes. The first archive exposed
+the incorrectly ignored Workspace Manager module. After anchoring the root
+ignore rule and adding that module, the staged-tree checks were repeated.
