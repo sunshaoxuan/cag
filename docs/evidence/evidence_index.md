@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.9.1
+
+* `docs/evidence/memory-panel-spacing-0.9.1/`
+* `docs/evidence/screenshots/memory-panel-spacing-0.9.1.jpg`
+
 ## Version 0.9.0
 
 * `docs/evidence/managed-knowledge-sources-0.9.0/`

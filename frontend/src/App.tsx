@@ -1671,7 +1671,10 @@ export default function App() {
               </strong>
             </div>
           </section>
-          <section className="panel page-panel" aria-label="长期记忆治理">
+          <section
+            className="memory-console panel page-panel"
+            aria-label="长期记忆治理"
+          >
             <div className="section-heading">
               <div>
                 <p className="section-index">MEMORY</p>
@@ -1680,7 +1683,11 @@ export default function App() {
               <span>人工治理边界</span>
             </div>
             <div className="memory-list">
-              {memoryCandidates.length === 0 && <p>尚无记忆候选。</p>}
+              {memoryCandidates.length === 0 && (
+                <div className="memory-empty compact-empty">
+                  <p>尚无记忆候选。</p>
+                </div>
+              )}
               {memoryCandidates.map((candidate) => (
                 <article className="knowledge-item" key={candidate.id}>
                   <strong>{candidate.title}</strong>

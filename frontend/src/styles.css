@@ -604,12 +604,17 @@ h1 span {
 
 .knowledge-console,
 .capability-console,
+.memory-console,
 .audit-calls,
 .audit-events,
 .conversation-panel,
 .execution-panel,
 .result-panel {
   padding: 30px;
+}
+
+.memory-console {
+  margin-bottom: 28px;
 }
 
 .audit-grid {
@@ -982,6 +987,22 @@ h1 span {
 .memory-list {
   display: grid;
   gap: 0;
+}
+
+.memory-empty {
+  display: grid;
+  min-height: 160px;
+  padding: 24px;
+  place-items: center;
+  border: 1px solid #eee4df;
+  border-radius: 16px;
+  background: var(--paper);
+  color: var(--muted);
+  text-align: center;
+}
+
+.memory-empty p {
+  margin: 0;
 }
 
 .knowledge-grid,

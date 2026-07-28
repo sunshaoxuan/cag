@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.9.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
+Version 0.9.1 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -62,6 +62,10 @@ write only. The UI reports files seen, chunks written, vectors reused and
 duplicate files skipped. Source Memory and task-derived Memory Candidates
 remain separate concepts and use separate routes.
 
+The Memory route uses the same 30 pixel panel gutter as the Knowledge and
+Capability routes. Its empty state stays inside a bordered inner surface so
+headings, governance labels and status text share one alignment grid.
+
 The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
 not resolve the Gateway as the browser machine's loopback address.
@@ -92,3 +96,4 @@ Validated screenshots:
 * `docs/evidence/screenshots/managed-knowledge-sources-0.9.0.png`
 * `docs/evidence/screenshots/managed-knowledge-ingestion-0.9.0.png`
 * `docs/evidence/screenshots/managed-knowledge-source-edit-0.9.0.jpg`
+* `docs/evidence/screenshots/memory-panel-spacing-0.9.1.jpg`

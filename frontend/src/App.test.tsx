@@ -369,6 +369,13 @@ describe("Agent Gateway conversation page", () => {
     expect(
       await screen.findByRole("heading", { name: "长期记忆", level: 1 }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "长期记忆治理" }),
+    ).toHaveClass("memory-console", "panel", "page-panel");
+    expect(screen.getByText("尚无记忆候选。").parentElement).toHaveClass(
+      "memory-empty",
+      "compact-empty",
+    );
 
     fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
     expect(window.location.pathname).toBe("/audit");
