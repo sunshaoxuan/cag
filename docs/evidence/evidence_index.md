@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.11.0
+
+* `docs/evidence/credential-reveal-0.11.0/`
+* `docs/evidence/screenshots/credential-reveal-0.11.0.jpg`
+
 ## Version 0.10.0
 
 * `docs/evidence/durable-knowledge-sync-0.10.0/`

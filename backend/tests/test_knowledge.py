@@ -272,6 +272,18 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
         assert "secret-value" not in str(source)
         assert len(credentials.values) == 1
 
+        revealed = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/credential/reveal"
+        )
+        assert revealed.status_code == 200
+        assert revealed.json() == {
+            "username": "reader",
+            "secret": "secret-value",
+        }
+        assert revealed.headers["cache-control"] == "no-store, private"
+        assert revealed.headers["pragma"] == "no-cache"
+        assert revealed.headers["x-content-type-options"] == "nosniff"
+
         started = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         )
@@ -332,6 +344,12 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
         )
         assert enabled.json()["credential_configured"] is False
         assert credentials.values == {}
+        assert (
+            client.post(
+                f"/api/v1/knowledge/sources/{source['id']}/credential/reveal"
+            ).status_code
+            == 404
+        )
         assert client.delete(
             f"/api/v1/knowledge/sources/{source['id']}"
         ).status_code == 204

@@ -4,7 +4,15 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from pydantic import BaseModel, Field, SecretStr, model_validator
@@ -249,6 +257,30 @@ def delete_source(
         service.delete_source(source_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Source not found") from exc
+
+
+@router.post("/knowledge/sources/{source_id}/credential/reveal")
+def reveal_source_credential(
+    source_id: str,
+    response: Response,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    try:
+        credential = service.reveal_source_credential(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Source credential is not configured",
+        ) from exc
+    return {
+        "username": credential.username,
+        "secret": credential.secret,
+    }
 
 
 @router.post("/knowledge/sources/{source_id}/validate")

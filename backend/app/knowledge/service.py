@@ -19,7 +19,10 @@ from app.knowledge.connectors import (
     SourceConnectorManager,
     ValidationResult,
 )
-from app.knowledge.credentials import KnowledgeCredentialStore
+from app.knowledge.credentials import (
+    KnowledgeCredentialStore,
+    SourceCredential,
+)
 from app.knowledge.ollama import OllamaProvider
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
@@ -394,6 +397,17 @@ class KnowledgeService:
             session.delete(source)
             session.commit()
         self._credential_store.delete(credential_ref)
+
+    def reveal_source_credential(self, source_id: str) -> SourceCredential:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                raise KeyError(source_id)
+            credential_ref = source.credential_ref
+        credential = self._credential_store.get(credential_ref)
+        if credential is None:
+            raise ValueError("Knowledge source credential is not configured")
+        return credential
 
     def create_ingestion(
         self,

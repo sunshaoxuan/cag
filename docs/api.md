@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.10.0`
+Current version: `0.11.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.10.0"
+    "version": "0.11.0"
 }
 ```
 
@@ -74,6 +74,7 @@ Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 * `GET /api/v1/knowledge/sources`
 * `PATCH /api/v1/knowledge/sources/{source_id}`
 * `DELETE /api/v1/knowledge/sources/{source_id}`
+* `POST /api/v1/knowledge/sources/{source_id}/credential/reveal`
 * `POST /api/v1/knowledge/sources/{source_id}/validate`
 * `POST /api/v1/knowledge/sources/{source_id}/ingest`
 * `GET /api/v1/knowledge/sources/{source_id}/ingestions`
@@ -94,6 +95,9 @@ idempotency rules and ingestion SSE event catalog are documented in
 Source create and patch accept `sync_mode` and `sync_interval_minutes`.
 Source responses expose scheduler and health fields. Ingestion responses expose
 manual or scheduled trigger, changed and removed file counts, and timestamps.
+Credential reveal is a separate explicit POST response with private no-store
+headers. Source list, source update and ingestion responses never include the
+secret.
 
 ## Conversations
 

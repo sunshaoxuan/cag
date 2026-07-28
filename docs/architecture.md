@@ -298,6 +298,12 @@ pipeline. Local and network directories use the same downstream pipeline.
 Source content therefore reaches vector storage through a single security,
 deduplication and citation boundary.
 
+Credential metadata remains in the source row while the password or token stays
+in the operating system credential store. Normal registry and ingestion APIs
+return only `credential_configured`. Source editing uses a separate explicit
+credential reveal action with private no-store response headers. The frontend
+masks the value until the operator requests display.
+
 The ingestion event sequence is:
 
 ```text

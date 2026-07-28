@@ -50,6 +50,17 @@ the password through standard input with its auth cache disabled. Authenticated
 Windows shares use WNet and disconnect after collection. Source secrets are
 absent from command arguments, responses and ingestion events.
 
+Version 0.11.0 permits an explicit administrative credential reveal action.
+The normal source registry, ingestion, task and SSE contracts remain secret
+free. The reveal response is private and non-cacheable. The management page
+keeps the loaded value masked until the operator chooses to display it and
+copies only after a separate action.
+
+The current caller authentication and project authorization gap makes this
+endpoint suitable for the existing trusted administrative network boundary.
+Production exposure to untrusted networks remains blocked until those controls
+are implemented.
+
 Scheduled synchronization stores only source IDs, policy, timing, lease owner,
 counts and errors in the database. Scheduler leases never contain source
 credentials. Every scheduled run resolves the opaque credential reference at

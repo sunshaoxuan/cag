@@ -380,6 +380,15 @@ export function validateKnowledgeSource(
   });
 }
 
+export function revealKnowledgeSourceCredential(
+  sourceId: string,
+): Promise<{ username: string; secret: string }> {
+  return request<{ username: string; secret: string }>(
+    `/api/v1/knowledge/sources/${sourceId}/credential/reveal`,
+    { method: "POST" },
+  );
+}
+
 export function ingestKnowledgeSource(
   sourceId: string,
 ): Promise<KnowledgeIngestion> {

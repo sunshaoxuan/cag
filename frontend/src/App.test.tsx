@@ -124,6 +124,8 @@ describe("Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
   let pendingApprovals: Array<Record<string, unknown>>;
   let knowledgeSources: Array<Record<string, unknown>>;
+  let knowledgeSecrets: Record<string, string>;
+  let clipboardWrite: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
@@ -131,6 +133,12 @@ describe("Agent Gateway conversation page", () => {
     submittedTasks = [];
     pendingApprovals = [];
     knowledgeSources = [];
+    knowledgeSecrets = {};
+    clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
     vi.stubGlobal("EventSource", MockEventSource);
     vi.stubGlobal(
       "fetch",
@@ -159,7 +167,7 @@ describe("Agent Gateway conversation page", () => {
             string,
             unknown
           >;
-          const source = {
+          const source: Record<string, unknown> = {
             id: "source-1",
             ...payload,
             root_path: payload.location,
@@ -181,6 +189,10 @@ describe("Agent Gateway conversation page", () => {
             scheduler_claimed: false,
             last_ingestion: null,
           };
+          knowledgeSecrets["source-1"] = String(
+            payload.credential_secret ?? "",
+          );
+          delete source.credential_secret;
           knowledgeSources = [source];
           return jsonResponse(source, 201);
         }
@@ -217,6 +229,17 @@ describe("Agent Gateway conversation page", () => {
           ]);
         }
         if (
+          url.endsWith(
+            "/api/v1/knowledge/sources/source-1/credential/reveal",
+          ) &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse({
+            username: knowledgeSources[0]?.credential_username ?? "",
+            secret: knowledgeSecrets["source-1"],
+          });
+        }
+        if (
           url.endsWith("/api/v1/knowledge/sources/source-1") &&
           init?.method === "PATCH"
         ) {
@@ -224,10 +247,17 @@ describe("Agent Gateway conversation page", () => {
             string,
             unknown
           >;
+          if (payload.credential_secret) {
+            knowledgeSecrets["source-1"] = String(
+              payload.credential_secret,
+            );
+          }
+          const safePayload = { ...payload };
+          delete safePayload.credential_secret;
           knowledgeSources = [
             {
               ...knowledgeSources[0],
-              ...payload,
+              ...safePayload,
               credential_configured:
                 Boolean(payload.credential_secret) ||
                 Boolean(knowledgeSources[0]?.credential_configured),
@@ -444,14 +474,35 @@ describe("Agent Gateway conversation page", () => {
     fireEvent.change(screen.getByLabelText("位置或仓库 URL"), {
       target: { value: "https://gitlab.example.com/team/product.git" },
     });
+    fireEvent.change(screen.getByLabelText("认证用户名"), {
+      target: { value: "oauth2" },
+    });
+    fireEvent.change(screen.getByLabelText("密码或访问令牌"), {
+      target: { value: "saved-access-token" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "保存来源" }));
 
     expect(await screen.findByText("产品文档")).toBeInTheDocument();
     expect(screen.getAllByText("GitLab 仓库")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("密码或访问令牌")).toHaveValue(
+        "saved-access-token",
+      ),
+    );
     expect(
       screen.getByRole("button", { name: "保存修改" }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "显示" }));
+    expect(screen.getByLabelText("密码或访问令牌")).toHaveAttribute(
+      "type",
+      "text",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() =>
+      expect(clipboardWrite).toHaveBeenCalledWith("saved-access-token"),
+    );
+    expect(screen.getByRole("button", { name: "已复制" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("限定子目录"), {
       target: { value: "docs/product" },
     });

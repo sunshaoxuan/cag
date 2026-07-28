@@ -42,6 +42,7 @@ import {
   listTaskApprovals,
   listAuditTasks,
   resolveApproval,
+  revealKnowledgeSourceCredential,
   updateKnowledgeSource,
   deleteKnowledgeSource,
   validateKnowledgeSource,
@@ -367,6 +368,8 @@ export default function App() {
     string | null
   >(null);
   const [knowledgeNotice, setKnowledgeNotice] = useState<string | null>(null);
+  const [credentialVisible, setCredentialVisible] = useState(false);
+  const [credentialCopied, setCredentialCopied] = useState(false);
   const [knowledgeEvents, setKnowledgeEvents] = useState<
     KnowledgeIngestionEvent[]
   >([]);
@@ -735,6 +738,8 @@ export default function App() {
 
   function resetKnowledgeSourceForm() {
     setEditingKnowledgeSourceId(null);
+    setCredentialVisible(false);
+    setCredentialCopied(false);
     setKnowledgeForm({
       name: "",
       sourceType: "local_directory",
@@ -749,8 +754,10 @@ export default function App() {
     });
   }
 
-  function handleKnowledgeSourceEdit(source: KnowledgeSource) {
+  async function handleKnowledgeSourceEdit(source: KnowledgeSource) {
     setEditingKnowledgeSourceId(source.id);
+    setCredentialVisible(false);
+    setCredentialCopied(false);
     setKnowledgeForm({
       name: source.name,
       sourceType: source.source_type,
@@ -763,15 +770,60 @@ export default function App() {
       credentialUsername: source.credential_username ?? "",
       credentialSecret: "",
     });
-    setKnowledgeNotice(
-      source.credential_configured
-        ? "凭据字段留空会保留现有凭据。填写新值会安全轮换凭据。"
-        : "正在编辑知识来源。",
-    );
     document.querySelector(".source-form")?.scrollIntoView?.({
       behavior: "smooth",
       block: "start",
     });
+    if (!source.credential_configured) {
+      setKnowledgeNotice("正在编辑知识来源。");
+      return;
+    }
+    setKnowledgeBusy(source.id);
+    setKnowledgeNotice("正在从 Windows 凭据库读取已保存的凭据。");
+    try {
+      const credential = await revealKnowledgeSourceCredential(source.id);
+      setKnowledgeForm((current) => ({
+        ...current,
+        credentialUsername:
+          credential.username || source.credential_username || "",
+        credentialSecret: credential.secret,
+      }));
+      setKnowledgeNotice(
+        "已加载保存的凭据。可以显示、复制或输入新值进行轮换。",
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "凭据读取失败");
+      setKnowledgeNotice("凭据未能加载，密码字段留空会保留现有凭据。");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  async function handleCredentialCopy() {
+    if (!knowledgeForm.credentialSecret) return;
+    setError(null);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(
+          knowledgeForm.credentialSecret,
+        );
+      } else {
+        const temporary = document.createElement("textarea");
+        temporary.value = knowledgeForm.credentialSecret;
+        temporary.setAttribute("readonly", "");
+        temporary.style.position = "fixed";
+        temporary.style.opacity = "0";
+        document.body.appendChild(temporary);
+        temporary.select();
+        const copied = document.execCommand("copy");
+        temporary.remove();
+        if (!copied) throw new Error("浏览器拒绝复制");
+      }
+      setCredentialCopied(true);
+      window.setTimeout(() => setCredentialCopied(false), 2000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "凭据复制失败");
+    }
   }
 
   async function handleKnowledgeSourceSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1570,22 +1622,43 @@ export default function App() {
                 </label>
                 <label>
                   <span>密码或访问令牌</span>
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={knowledgeForm.credentialSecret}
-                    onChange={(event) =>
-                      setKnowledgeForm((current) => ({
-                        ...current,
-                        credentialSecret: event.target.value,
-                      }))
-                    }
-                    placeholder="保存到 Windows 凭据库"
-                  />
+                  <div className="credential-input-row">
+                    <input
+                      type={credentialVisible ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={knowledgeForm.credentialSecret}
+                      onChange={(event) => {
+                        setCredentialCopied(false);
+                        setKnowledgeForm((current) => ({
+                          ...current,
+                          credentialSecret: event.target.value,
+                        }));
+                      }}
+                      placeholder="保存到 Windows 凭据库"
+                    />
+                    <button
+                      type="button"
+                      className="credential-action"
+                      disabled={!knowledgeForm.credentialSecret}
+                      onClick={() =>
+                        setCredentialVisible((current) => !current)
+                      }
+                    >
+                      {credentialVisible ? "隐藏" : "显示"}
+                    </button>
+                    <button
+                      type="button"
+                      className="credential-action"
+                      disabled={!knowledgeForm.credentialSecret}
+                      onClick={handleCredentialCopy}
+                    >
+                      {credentialCopied ? "已复制" : "复制"}
+                    </button>
+                  </div>
                 </label>
               </div>
               <small>
-                来源、同步策略和每轮运行历史会持久保存。密码和令牌只写入操作系统凭据库，数据库保存凭据引用。
+                编辑时会按需从 Windows 凭据库读取密码或令牌。显示和复制只发生在当前管理页面，数据库继续保存凭据引用。
               </small>
             </form>
 

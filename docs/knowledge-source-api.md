@@ -10,9 +10,9 @@
 | `gitlab` | GitLab project or wiki Git URL | credential, `reference`, `subpath` |
 | `svn` | SVN URL | credential, `reference`, `subpath` |
 
-`credential_secret` is accepted only on create or update and is never returned.
-`credential_configured` indicates whether an operating system credential
-reference exists.
+`credential_secret` is accepted on create or update. Source list and maintenance
+responses never return it. `credential_configured` indicates whether an
+operating system credential reference exists.
 
 ## Register
 
@@ -61,6 +61,29 @@ The source response includes `next_sync_at`, `last_sync_attempt_at`,
 `last_content_change_at`, `consecutive_failures` and `scheduler_claimed`.
 These fields allow API clients and the management page to monitor persistent
 source health without reconstructing state from transient logs.
+
+## Reveal a saved credential
+
+```http
+POST /api/v1/knowledge/sources/{source_id}/credential/reveal
+```
+
+```json
+{
+  "username": "oauth2",
+  "secret": "<saved password or token>"
+}
+```
+
+The action reads the operating system credential store only after an explicit
+request. Responses carry `Cache-Control: no-store, private`, `Pragma: no-cache`
+and `X-Content-Type-Options: nosniff`. Source list, ingestion history, SSE and
+task audit responses continue to exclude the secret.
+
+The web management page calls this action when editing a source whose
+`credential_configured` field is true. The loaded value starts masked and can
+be displayed or copied. Production exposure requires caller authentication and
+project authorization.
 
 ## Collect and follow
 

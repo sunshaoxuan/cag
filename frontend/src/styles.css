@@ -821,6 +821,30 @@ h1 span {
   font-size: 0.72rem;
 }
 
+.credential-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 7px;
+}
+
+.credential-input-row .credential-action {
+  min-width: 54px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-color: #d9d2ce;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 0.7rem;
+}
+
+.credential-input-row .credential-action:disabled {
+  border-color: #e9e3df;
+  background: #f8f5f3;
+  color: #aaa2a4;
+}
+
 .source-location-field {
   grid-column: 1 / -1;
 }
