@@ -9,6 +9,9 @@ from app.models.capability import (
     StandardControl,
 )
 from app.models.knowledge import (
+    CodeDocumentLink,
+    CodeRelation,
+    CodeSymbol,
     DataQualityMetric,
     KnowledgeChunk,
     KnowledgeConflict,
@@ -53,6 +56,9 @@ __all__ = [
     "AgentRun",
     "ApprovalRequest",
     "AuditCursor",
+    "CodeDocumentLink",
+    "CodeRelation",
+    "CodeSymbol",
     "DataQualityMetric",
     "KnowledgeChunk",
     "KnowledgeConflict",

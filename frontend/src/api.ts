@@ -141,6 +141,53 @@ export type KnowledgeIngestionEvent = {
   data: Record<string, unknown>;
 };
 
+export type CodeKnowledgeSummary = {
+  symbols: number;
+  relations: number;
+  document_links: number;
+  unresolved_relations: number;
+  languages: Record<string, number>;
+  kinds: Record<string, number>;
+};
+
+export type CodeRelation = {
+  id: string;
+  source_symbol_id: string;
+  target_symbol_id: string | null;
+  relation_type: string;
+  target_name: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+};
+
+export type CodeDocumentLink = {
+  id: string;
+  document_id: string;
+  path: string;
+  link_type: string;
+  score: number;
+  evidence: Record<string, unknown>;
+};
+
+export type CodeSymbol = {
+  id: string;
+  document_id: string;
+  path: string;
+  language: string;
+  kind: string;
+  name: string;
+  qualified_name: string;
+  signature: string;
+  start_line: number;
+  end_line: number;
+  scope: string;
+  parser: string | null;
+  diagnostics: string[];
+  outgoing_relations?: CodeRelation[];
+  incoming_relations?: CodeRelation[];
+  document_links?: CodeDocumentLink[];
+};
+
 export type KnowledgeSourceCreate = {
   project_id: string;
   name: string;
@@ -412,6 +459,41 @@ export function knowledgeIngestionEventsUrl(ingestionId: string): string {
     follow: "true",
   });
   return `${API_BASE_URL}/api/v1/knowledge/ingestions/${ingestionId}/events?${query}`;
+}
+
+export function getCodeKnowledgeSummary(
+  projectId: string,
+): Promise<CodeKnowledgeSummary> {
+  const query = new URLSearchParams({ project_id: projectId });
+  return request<CodeKnowledgeSummary>(
+    `/api/v1/knowledge/code/summary?${query}`,
+  );
+}
+
+export function listCodeSymbols(
+  projectId: string,
+  search = "",
+  kind = "",
+): Promise<CodeSymbol[]> {
+  const query = new URLSearchParams({
+    project_id: projectId,
+    query: search,
+    kind,
+    limit: "200",
+  });
+  return request<CodeSymbol[]>(
+    `/api/v1/knowledge/code/symbols?${query}`,
+  );
+}
+
+export function getCodeSymbol(
+  projectId: string,
+  symbolId: string,
+): Promise<CodeSymbol> {
+  const query = new URLSearchParams({ project_id: projectId });
+  return request<CodeSymbol>(
+    `/api/v1/knowledge/code/symbols/${symbolId}?${query}`,
+  );
 }
 
 export function listMemoryCandidates(): Promise<MemoryCandidate[]> {

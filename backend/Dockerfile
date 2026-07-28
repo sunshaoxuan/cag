@@ -15,6 +15,7 @@ COPY backend/app ./app
 COPY projects /projects
 
 RUN python -m pip install --no-cache-dir .
+RUN python -c "from tree_sitter_language_pack import prefetch; prefetch(['bash','c','cpp','csharp','go','java','javascript','kotlin','php','powershell','python','ruby','rust','sql','tsx','typescript'])"
 
 EXPOSE 8000
 

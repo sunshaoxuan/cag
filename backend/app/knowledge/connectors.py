@@ -20,7 +20,7 @@ from app.knowledge.credentials import (
 )
 from app.knowledge.extractors import (
     SUPPORTED_EXTENSIONS,
-    extract_text,
+    extract_text_with_metadata,
     normalize_text,
 )
 from app.policies.command_policy import CommandPolicyService
@@ -64,6 +64,7 @@ class CollectedDocument:
     text: str
     content_hash: str
     language: str
+    encoding: str
 
 
 @dataclass(frozen=True)
@@ -320,7 +321,8 @@ class SourceConnectorManager:
 
             for path in directory_files:
                 try:
-                    text = normalize_text(extract_text(path))
+                    extracted = extract_text_with_metadata(path)
+                    text = normalize_text(extracted.text)
                 except (
                     UnicodeDecodeError,
                     OSError,
@@ -348,6 +350,7 @@ class SourceConnectorManager:
                         text=text,
                         content_hash=content_hash,
                         language=path.suffix.lstrip(".").lower() or "text",
+                        encoding=extracted.encoding,
                     )
                 )
             directories_scanned += 1

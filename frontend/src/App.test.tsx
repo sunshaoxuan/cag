@@ -159,6 +159,75 @@ describe("Agent Gateway conversation page", () => {
             scheduler_poll_seconds: 10,
           });
         }
+        if (url.includes("/api/v1/knowledge/code/summary?")) {
+          return jsonResponse({
+            symbols: 4,
+            relations: 2,
+            document_links: 1,
+            unresolved_relations: 1,
+            languages: { python: 4 },
+            kinds: { module: 1, class: 1, method: 2 },
+          });
+        }
+        if (url.includes("/api/v1/knowledge/code/symbols/symbol-1?")) {
+          return jsonResponse({
+            id: "symbol-1",
+            document_id: "document-1",
+            path: "src/customer_service.py",
+            language: "python",
+            kind: "method",
+            name: "search_customer",
+            qualified_name: "customer_service.CustomerService.search_customer",
+            signature: "def search_customer(self, name: str) -> str:",
+            start_line: 8,
+            end_line: 9,
+            scope: "product",
+            parser: "python-ast",
+            diagnostics: [],
+            outgoing_relations: [
+              {
+                id: "relation-1",
+                source_symbol_id: "symbol-1",
+                target_symbol_id: "symbol-2",
+                relation_type: "calls",
+                target_name: "normalize_customer",
+                confidence: 1,
+                evidence: { method: "parser_reference" },
+              },
+            ],
+            incoming_relations: [],
+            document_links: [
+              {
+                id: "link-1",
+                document_id: "document-2",
+                path: "README.md",
+                link_type: "documents",
+                score: 0.9,
+                evidence: { method: "symbol_name_mention" },
+              },
+            ],
+          });
+        }
+        if (url.includes("/api/v1/knowledge/code/symbols?")) {
+          return jsonResponse([
+            {
+              id: "symbol-1",
+              document_id: "document-1",
+              path: "src/customer_service.py",
+              language: "python",
+              kind: "method",
+              name: "search_customer",
+              qualified_name:
+                "customer_service.CustomerService.search_customer",
+              signature: "def search_customer(self, name: str) -> str:",
+              start_line: 8,
+              end_line: 9,
+              scope: "product",
+              parser: "python-ast",
+              diagnostics: [],
+            },
+          ]);
+        }
         if (
           url.endsWith("/api/v1/knowledge/sources") &&
           init?.method === "POST"
@@ -431,6 +500,18 @@ describe("Agent Gateway conversation page", () => {
     expect(
       screen.queryByRole("heading", { name: "企业知识与记忆" }),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "代码知识" }));
+    expect(window.location.pathname).toBe("/code-knowledge");
+    expect(
+      await screen.findByRole("heading", { name: "代码知识", level: 1 }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("search_customer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /search_customer/ }));
+    expect(
+      await screen.findByText("normalize_customer"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("README.md")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("link", { name: "长期记忆" }));
     expect(window.location.pathname).toBe("/memory");

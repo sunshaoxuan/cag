@@ -15,15 +15,19 @@ secret scan and normalization
   |
 structure-aware chunks
   |
+code symbols, relationships and documentation evidence
+  |
 Ollama embedding
   |
 pgvector and keyword projection
   |
 tenant and product authorization filter
   |
-vector and keyword recall
+vector, Japanese keyword, symbol and graph recall
   |
 reciprocal rank fusion
+  |
+optional local evidence reranking
   |
 context budget and injection isolation
   |
@@ -45,6 +49,33 @@ is ten megabytes per file and can be reduced by deployment policy.
 The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE
 directly. Memory candidate governance has its own `/memory` page.
+
+## Code knowledge plane
+
+Code is indexed as text evidence and as structured facts. `CodeSymbol` stores
+modules, classes, interfaces, structs, enums, functions and methods with the
+canonical source path and line range. `CodeRelation` stores parser-observed
+imports and calls. A resolved relation references the target symbol physical
+ID. External and ambiguous targets remain explicit unresolved facts with a
+confidence value.
+
+`CodeDocumentLink` connects symbols to non-code documents only when a
+deterministic path or symbol-name mention exists. The evidence record states the
+matching method. Model-generated guesses are excluded from this fact table.
+Changed documents replace their dependent symbols through database cascade.
+The Gateway then rebuilds source relations and documentation links from stored
+parser facts. Unique fingerprints prevent duplicate relations and links.
+
+Python uses the standard library AST. The Linux Gateway image prefetches
+Tree-sitter grammars for the supported code languages during image build. If a
+native parser is unavailable, the language-aware fallback extracts definitions,
+imports and calls and records the selected parser and diagnostics. This keeps
+the ingestion auditable across Windows application-control policies and Linux
+containers.
+
+Text decoding recognizes UTF-8 BOM, UTF-8, UTF-16 BOM, CP932 and Shift-JIS.
+Detected encoding is stored in chunk metadata. This covers Japanese Windows
+repositories without silently replacing undecodable bytes.
 
 ## Durable synchronization
 
@@ -126,7 +157,17 @@ Task memories begin as encrypted tenant scoped candidates. Approval makes the re
 
 ## Models
 
-`qwen3-embedding:8b` produces 1024 dimensional vectors. `qwen3:14b` produces JSON Schema constrained memory candidates and remains the quality reranker adapter target. One Ollama request executes at a time on the current 16GB GPU.
+`qwen3-embedding:8b` produces 1024 dimensional vectors. Query embeddings use an
+instruction that asks for Japanese enterprise code and technical evidence while
+preserving exact identifiers and paths. Retrieval applies Reciprocal Rank
+Fusion to vector, Japanese keyword and code symbol channels. Related symbols
+and documentation links expand the evidence set. The `deep` search profile uses
+`qwen3:14b` for JSON Schema constrained candidate scoring. The model must return
+every bounded candidate UUID exactly once. A complete response contributes one
+additional RRF channel. Missing, duplicated or unknown IDs discard the entire
+model channel, so semantic or structural evidence order cannot be overwritten
+by a partial response. The same model extracts memory candidates. One Ollama
+request executes at a time on the current 16GB GPU.
 
 ## Evidence and evaluation
 

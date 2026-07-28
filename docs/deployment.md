@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.12.0 development deployment
+## 0.13.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -30,6 +30,8 @@ PostgreSQL and Redis are reachable only through the Compose network.
 The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
 console, API audit monitor, enterprise knowledge and capability governance.
+The independent Code Knowledge route exposes governed structural facts without
+placing code graph controls on the source maintenance page.
 Browser API and SSE requests use the same 5173 origin. Nginx forwards `/api`
 to `CAG_GATEWAY_UPSTREAM`, which defaults to
 `host.docker.internal:8000`.
@@ -143,6 +145,18 @@ Operators can enable scheduled synchronization per source through the Knowledge
 page or source PATCH API. New web registrations default to scheduled mode.
 The scheduler starts only when the knowledge plane and scheduler setting are
 both enabled.
+
+Alembic revision `20260728_0011` adds code symbols, code relationships and
+code-document links. Existing indexed sources require one subsequent ingestion
+to populate structural facts. Unchanged document vectors remain reusable after
+that run.
+
+The Gateway image installs `tree-sitter-language-pack` and prefetches the
+supported grammar set during image build. Production image construction
+therefore requires package and grammar network access once. Running containers
+use the cached grammars and do not download parsers while processing a source.
+Windows host execution catches application-control blocks on native parser DLLs
+and uses the audited language fallback.
 
 ## Managed local Ollama
 

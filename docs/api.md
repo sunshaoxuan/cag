@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.12.0`
+Current version: `0.13.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.12.0"
+    "version": "0.13.0"
 }
 ```
 
@@ -380,3 +380,47 @@ Task SSE includes `learning.capture.started`, `learning.signal.recorded`,
 `learning.candidate.proposed`, `learning.capture.completed` and
 `learning.capture.failed`. CAG persists every event before projecting it to the
 frontend.
+
+## Code knowledge
+
+### Search knowledge
+
+`POST /api/v1/knowledge/search`
+
+The request accepts `project_id`, `query`, `limit` and `profile`. Profile values
+are `fast`, `balanced` and `deep`. All profiles combine vector, Japanese keyword
+and exact code-symbol channels. Symbol matches expand through resolved code
+relations and deterministic documentation links. `deep` additionally asks the
+local `qwen3:14b` model for JSON constrained evidence scores. Provider failure
+falls back to the deterministic Reciprocal Rank Fusion order.
+
+Each result includes `match_reasons` and `symbol_ids` in addition to chunk,
+source, path, score, scope and source revision. Possible reasons include
+`vector`, `japanese_keyword`, `code_symbol`, `code_relation`,
+`code_document_link` and `local_reranker`.
+
+### Code summary
+
+`GET /api/v1/knowledge/code/summary?project_id={project_id}`
+
+Returns accessible symbol, relationship, documentation-link and unresolved
+relationship counts plus language and symbol-kind distributions.
+
+### Code symbols
+
+`GET /api/v1/knowledge/code/symbols`
+
+Query fields are `project_id`, optional `query`, optional `kind` and `limit`.
+The text filter matches symbol name, qualified name and canonical path.
+
+`GET /api/v1/knowledge/code/symbols/{symbol_id}?project_id={project_id}`
+
+Returns the symbol location, signature, parser, diagnostics, outgoing and
+incoming relations and linked-document evidence. Project resolution, approved
+source status and Tenant or ProductVersion scope are required for every code
+knowledge endpoint.
+
+The ingestion SSE adds `knowledge.code.analysis.completed` and
+`knowledge.code.graph.persisted`. Their data reports code-file, parser, symbol,
+relationship and documentation-link counts. The facts remain in the complete
+backend event sequence even when the frontend displays fewer events.

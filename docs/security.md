@@ -175,3 +175,19 @@ Two consecutive rollout failures or a rolling quality decrease beyond five
 percent returns the asset to benchmarked status. Active state and canary
 counters are cleared. Installation and rollback receipts are stored outside
 the project repository when the self improvement root is configured.
+
+## 12. Code knowledge security
+
+Source code and extracted documentation remain untrusted knowledge input. The
+existing Secret Scanner and Prompt Injection scanner run before structural
+analysis. Symbols and relationships store names, signatures, locations and
+parser evidence. They do not store hidden Agent reasoning or credentials.
+
+Code summary, symbol list and symbol detail APIs apply the same approved-source,
+Tenant and ProductVersion filter as chunk retrieval. A relation can reference a
+target symbol only inside the indexed knowledge database. Unresolved external
+targets remain text evidence and do not cause network access or tool execution.
+
+Tree-sitter grammar downloads happen only during the controlled Gateway image
+build. Runtime ingestion loads cached grammars. Grammar package versions remain
+pinned by the backend dependency range and the built image digest.

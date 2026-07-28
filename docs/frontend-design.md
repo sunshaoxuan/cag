@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.12.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
+Version 0.13.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
 
@@ -43,6 +43,7 @@ copy the One人事 logo, photography, illustrations or product claims.
 | `/conversation` | Continuous conversation, Harness configuration, approvals and the complete CAG SSE event stream |
 | `/audit` | External API call traces and the resumable Gateway-wide audit SSE |
 | `/knowledge` | Managed local, network, Git, GitLab and SVN sources with live collection SSE |
+| `/code-knowledge` | Code symbols, relationships, parser evidence and linked documentation |
 | `/memory` | Governed task memory candidates and product-level promotion |
 | `/capabilities` | Skill, Tool, Validator, promotion and standards control governance |
 
@@ -78,6 +79,13 @@ The Memory route uses the same 30 pixel panel gutter as the Knowledge and
 Capability routes. Its empty state stays inside a bordered inner surface so
 headings, governance labels and status text share one alignment grid.
 
+The Code Knowledge route remains separate from source maintenance. Its summary
+shows symbol, relationship, document-link and unresolved-relation counts. The
+left pane filters physical code symbols by project, name, qualified name, path
+and kind. The right pane shows signature, line range, parser, calls, dependency
+resolution status and deterministic documentation evidence. Long symbol lists
+scroll inside the pane, keeping the selected evidence visible.
+
 The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
 not resolve the Gateway as the browser machine's loopback address.
@@ -93,7 +101,7 @@ animations.
 ## Verification
 
 Required acceptance includes component and route tests, TypeScript and
-production build, direct loading of all six routes at
+production build, direct loading of all seven routes at
 `http://127.0.0.1:5173`, browser history navigation, console warnings and
 errors, and screenshots under `docs/evidence/screenshots`.
 
@@ -112,3 +120,5 @@ Validated screenshots:
 * `docs/evidence/screenshots/durable-knowledge-sources-0.10.0.jpg`
 * `docs/evidence/screenshots/credential-reveal-0.11.0.jpg`
 * `docs/evidence/screenshots/directory-progress-0.12.0.jpg`
+* `docs/evidence/screenshots/code-knowledge-overview-0.13.0.png`
+* `docs/evidence/screenshots/code-knowledge-0.13.0.png`

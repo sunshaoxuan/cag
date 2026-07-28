@@ -1,5 +1,6 @@
 import re
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -44,15 +45,54 @@ OFFICE_EXTENSIONS = {".docx", ".pptx", ".xlsx", ".odt"}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | {".pdf"}
 
 
+@dataclass(frozen=True)
+class ExtractedText:
+    text: str
+    encoding: str
+
+
 def extract_text(path: Path) -> str:
+    return extract_text_with_metadata(path).text
+
+
+def extract_text_with_metadata(path: Path) -> ExtractedText:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
-        return path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
+        encoding = detect_text_encoding(raw)
+        return ExtractedText(raw.decode(encoding), encoding)
     if suffix in OFFICE_EXTENSIONS:
-        return _extract_zipped_xml(path)
+        return ExtractedText(_extract_zipped_xml(path), "office-xml")
     if suffix == ".pdf":
-        return _extract_pdf(path)
+        return ExtractedText(_extract_pdf(path), "pdf-text")
     raise ValueError(f"Unsupported knowledge file type: {suffix}")
+
+
+def detect_text_encoding(raw: bytes) -> str:
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    if raw.startswith(b"\xff\xfe"):
+        return "utf-16-le"
+    if raw.startswith(b"\xfe\xff"):
+        return "utf-16-be"
+    try:
+        raw.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("cp932", "shift_jis"):
+        try:
+            raw.decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError(
+        "supported-enterprise-text",
+        raw,
+        0,
+        min(1, len(raw)),
+        "expected UTF-8, UTF-16, CP932, or Shift-JIS",
+    )
 
 
 def _extract_zipped_xml(path: Path) -> str:

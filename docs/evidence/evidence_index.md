@@ -1,5 +1,11 @@
 # Evidence index
 
+## Version 0.13.0
+
+* `docs/evidence/code-knowledge-0.13.0/`
+* `docs/evidence/screenshots/code-knowledge-overview-0.13.0.png`
+* `docs/evidence/screenshots/code-knowledge-0.13.0.png`
+
 ## Version 0.12.0
 
 * `docs/evidence/directory-progress-0.12.0/`

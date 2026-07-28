@@ -189,3 +189,23 @@ Cleaned content hashes remove duplicate files inside one source snapshot.
 Canonical path plus content hash reuses unchanged documents and vectors across
 repeated runs. The sorted path and hash set produces the final source
 fingerprint.
+
+## Structural code indexing
+
+Supported code files run through structural analysis after cleaning. The
+ingestion stream emits:
+
+* `knowledge.code.analysis.completed` with changed code-file, symbol and parser
+  counts.
+* `knowledge.code.graph.persisted` with current source symbol, relationship and
+  documentation-link counts.
+
+The source fingerprint and path plus content-hash comparison remain the
+idempotency authority. Unchanged code files retain their vectors and symbols.
+Changed and removed files replace dependent structural records. Relationship
+and documentation evidence is rebuilt with unique fingerprints before the
+ingestion completes.
+
+Code knowledge can be queried through `/api/v1/knowledge/code/*`. These
+endpoints expose only approved sources that match the requested Project Tenant
+or ProductVersion.

@@ -60,7 +60,16 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "trigger",
         "started_at",
     } <= ingestion_columns
+    assert {
+        "code_symbols",
+        "code_relations",
+        "code_document_links",
+    } <= tables
 
+    command.downgrade(config, "20260728_0010")
+    code_downgraded = inspect(create_engine(database_url))
+    assert "code_symbols" not in set(code_downgraded.get_table_names())
+    command.upgrade(config, "head")
     command.downgrade(config, "20260728_0009")
     scheduler_downgraded = inspect(create_engine(database_url))
     assert "sync_mode" not in {

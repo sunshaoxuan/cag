@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import math
 import uuid
 from dataclasses import dataclass
@@ -19,6 +20,13 @@ from app.knowledge.connectors import (
     SourceConnectorManager,
     ValidationResult,
 )
+from app.knowledge.code_intelligence import (
+    CodeAnalysis,
+    CodeChunkFact,
+    analyze_code,
+    is_code_path,
+    japanese_search_terms,
+)
 from app.knowledge.credentials import (
     KnowledgeCredentialStore,
     SourceCredential,
@@ -26,6 +34,9 @@ from app.knowledge.credentials import (
 from app.knowledge.ollama import OllamaProvider
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
+    CodeDocumentLink,
+    CodeRelation,
+    CodeSymbol,
     DataQualityMetric,
     KnowledgeChunk,
     KnowledgeDocument,
@@ -56,6 +67,20 @@ class SearchResult:
     source_id: str
     source_commit: str | None
     prompt_injection_detected: bool
+    match_reasons: tuple[str, ...] = ()
+    symbol_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedChunk:
+    path: str
+    ordinal: int
+    text: str
+    prompt_injection_detected: bool
+    document_hash: str
+    language: str
+    encoding: str
+    metadata: dict[str, Any]
 
 
 class KnowledgeService:
@@ -512,7 +537,8 @@ class KnowledgeService:
                 "knowledge.cleaning.started",
                 {"documents": len(collected.documents)},
             )
-            chunks: list[tuple[str, int, str, bool, str, str]] = []
+            chunks: list[PreparedChunk] = []
+            code_analysis_by_path: dict[str, CodeAnalysis] = {}
             cleaned_hashes: set[str] = set()
             duplicate_files = collected.duplicate_files
             for document in collected.documents:
@@ -527,15 +553,45 @@ class KnowledgeService:
                     duplicate_files += 1
                     continue
                 cleaned_hashes.add(safe_hash)
-                for ordinal, chunk_text in enumerate(self._chunk_text(safe_text)):
+                analysis = analyze_code(document.path, safe_text)
+                if is_code_path(document.path):
+                    code_analysis_by_path[document.path] = analysis
+                prepared_parts = (
+                    analysis.chunks
+                    if analysis.chunks
+                    else tuple(
+                        CodeChunkFact(
+                            text=chunk_text,
+                            start_line=1,
+                            end_line=max(1, chunk_text.count("\n") + 1),
+                            parser="text",
+                        )
+                        for chunk_text in self._chunk_text(safe_text)
+                    )
+                )
+                for ordinal, part in enumerate(prepared_parts):
                     chunks.append(
-                        (
-                            document.path,
-                            ordinal,
-                            chunk_text,
-                            scan.prompt_injection_detected,
-                            safe_hash,
-                            document.language,
+                        PreparedChunk(
+                            path=document.path,
+                            ordinal=ordinal,
+                            text=part.text,
+                            prompt_injection_detected=(
+                                scan.prompt_injection_detected
+                            ),
+                            document_hash=safe_hash,
+                            language=(
+                                analysis.language
+                                if analysis.language != "text"
+                                else document.language
+                            ),
+                            encoding=document.encoding,
+                            metadata={
+                                "start_line": part.start_line,
+                                "end_line": part.end_line,
+                                "symbol_names": list(part.symbol_names),
+                                "symbol_kinds": list(part.symbol_kinds),
+                                "parser": part.parser,
+                            },
                         )
                     )
             self._record_ingestion_event(
@@ -547,8 +603,7 @@ class KnowledgeService:
                 },
             )
             document_hashes = {
-                path: document_hash
-                for path, _, _, _, document_hash, _ in chunks
+                item.path: item.document_hash for item in chunks
             }
             fingerprint_input = "\n".join(
                 f"{path}:{content_hash}"
@@ -586,8 +641,26 @@ class KnowledgeService:
             chunks = [
                 chunk
                 for chunk in chunks
-                if chunk[0] in changed_paths
+                if chunk.path in changed_paths
             ]
+            changed_code_paths = changed_paths & set(code_analysis_by_path)
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.code.analysis.completed",
+                {
+                    "code_files": len(changed_code_paths),
+                    "symbols_found": sum(
+                        len(code_analysis_by_path[path].symbols)
+                        for path in changed_code_paths
+                    ),
+                    "parsers": sorted(
+                        {
+                            code_analysis_by_path[path].parser
+                            for path in changed_code_paths
+                        }
+                    ),
+                },
+            )
             self._record_ingestion_event(
                 ingestion_id,
                 "knowledge.indexing.started",
@@ -601,7 +674,7 @@ class KnowledgeService:
             for start in range(0, len(chunks), 8):
                 embeddings.extend(
                     await self._provider.embed(
-                        [item[2] for item in chunks[start : start + 8]]
+                        [item.text for item in chunks[start : start + 8]]
                     )
                 )
 
@@ -620,21 +693,15 @@ class KnowledgeService:
                     )
                 document_by_path: dict[str, KnowledgeDocument] = {}
                 for chunk_data, embedding in zip(chunks, embeddings, strict=True):
-                    (
-                        relative_path,
-                        ordinal,
-                        text,
-                        injection,
-                        document_hash,
-                        language,
-                    ) = chunk_data
+                    relative_path = chunk_data.path
+                    text = chunk_data.text
                     document = document_by_path.get(relative_path)
                     if document is None:
                         document = KnowledgeDocument(
                             source_id=source.id,
                             canonical_path=relative_path,
-                            content_hash=document_hash,
-                            language=language,
+                            content_hash=chunk_data.document_hash,
+                            language=chunk_data.language,
                         )
                         session.add(document)
                         session.flush()
@@ -645,7 +712,7 @@ class KnowledgeService:
                             tenant_id=source.tenant_id,
                             product_version_id=source.product_version_id,
                             scope=source.scope,
-                            ordinal=ordinal,
+                            ordinal=chunk_data.ordinal,
                             content_ciphertext=self._cipher.encrypt(text),
                             search_text=self._search_projection(text),
                             content_hash=hashlib.sha256(
@@ -661,10 +728,45 @@ class KnowledgeService:
                                 "path": relative_path,
                                 "source_type": source.source_type,
                                 "source_revision": collected.revision,
-                                "prompt_injection_detected": injection,
+                                "prompt_injection_detected": (
+                                    chunk_data.prompt_injection_detected
+                                ),
+                                "encoding": chunk_data.encoding,
+                                **chunk_data.metadata,
                             },
                         )
                     )
+                session.flush()
+                for relative_path in sorted(changed_code_paths):
+                    document = document_by_path.get(relative_path)
+                    if document is None:
+                        continue
+                    analysis = code_analysis_by_path[relative_path]
+                    for symbol in analysis.symbols:
+                        session.add(
+                            CodeSymbol(
+                                document_id=document.id,
+                                tenant_id=source.tenant_id,
+                                product_version_id=source.product_version_id,
+                                scope=source.scope,
+                                language=analysis.language,
+                                kind=symbol.kind,
+                                name=symbol.name,
+                                qualified_name=symbol.qualified_name,
+                                signature=symbol.signature,
+                                start_line=symbol.start_line,
+                                end_line=symbol.end_line,
+                                content_hash=symbol.content_hash,
+                                metadata_json={
+                                    "parser": symbol.parser,
+                                    "references": list(symbol.references),
+                                    "imports": list(symbol.imports),
+                                    "diagnostics": list(analysis.diagnostics),
+                                },
+                            )
+                        )
+                session.flush()
+                graph_counts = self._rebuild_code_graph(session, source.id)
                 source.source_commit = collected.revision
                 source.index_fingerprint = index_fingerprint
                 source.last_collected_at = utc_now()
@@ -701,6 +803,12 @@ class KnowledgeService:
                         "vectors_reused": vectors_reused,
                         "index_fingerprint": index_fingerprint,
                     },
+                )
+                self._append_ingestion_event(
+                    session,
+                    ingestion,
+                    "knowledge.code.graph.persisted",
+                    graph_counts,
                 )
                 self._append_ingestion_event(
                     session,
@@ -744,16 +852,183 @@ class KnowledgeService:
         except Exception as exc:
             self._fail_ingestion(ingestion_id, str(exc))
 
+    def _rebuild_code_graph(self, session, source_id: str) -> dict[str, int]:
+        symbols = list(
+            session.scalars(
+                select(CodeSymbol)
+                .join(KnowledgeDocument)
+                .where(KnowledgeDocument.source_id == source_id)
+            )
+        )
+        symbol_ids = [item.id for item in symbols]
+        if not symbol_ids:
+            return {"symbols": 0, "relations": 0, "document_links": 0}
+        session.execute(
+            delete(CodeRelation).where(
+                CodeRelation.source_symbol_id.in_(symbol_ids)
+            )
+        )
+        session.execute(
+            delete(CodeDocumentLink).where(
+                CodeDocumentLink.symbol_id.in_(symbol_ids)
+            )
+        )
+        by_name: dict[str, list[CodeSymbol]] = {}
+        for symbol in symbols:
+            by_name.setdefault(symbol.name.casefold(), []).append(symbol)
+            by_name.setdefault(
+                symbol.qualified_name.casefold(),
+                [],
+            ).append(symbol)
+
+        relation_count = 0
+        for symbol in symbols:
+            facts = [
+                ("imports", item)
+                for item in symbol.metadata_json.get("imports", [])
+            ]
+            facts.extend(
+                ("calls", item)
+                for item in symbol.metadata_json.get("references", [])
+            )
+            seen: set[tuple[str, str]] = set()
+            for relation_type, raw_target in facts:
+                target_name = str(raw_target).strip()
+                if not target_name:
+                    continue
+                identity = (relation_type, target_name.casefold())
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                target_key = (
+                    target_name.replace("::", ".")
+                    .split("(")[0]
+                    .split(".")[-1]
+                    .split("/")[-1]
+                    .casefold()
+                )
+                target = next(
+                    (
+                        candidate
+                        for candidate in by_name.get(target_key, [])
+                        if candidate.id != symbol.id
+                    ),
+                    None,
+                )
+                fingerprint = hashlib.sha256(
+                    (
+                        f"{symbol.id}\n{relation_type}\n"
+                        f"{target.id if target else ''}\n{target_name}"
+                    ).encode("utf-8")
+                ).hexdigest()
+                session.add(
+                    CodeRelation(
+                        source_symbol_id=symbol.id,
+                        target_symbol_id=target.id if target else None,
+                        relation_type=relation_type,
+                        target_name=target_name,
+                        confidence=1.0 if target else 0.65,
+                        fingerprint=fingerprint,
+                        evidence_json={
+                            "method": "parser_reference",
+                            "resolved": target is not None,
+                        },
+                    )
+                )
+                relation_count += 1
+
+        documents = list(
+            session.scalars(
+                select(KnowledgeDocument)
+                .options(selectinload(KnowledgeDocument.chunks))
+                .where(KnowledgeDocument.source_id == source_id)
+            )
+        )
+        link_count = 0
+        for document in documents:
+            if is_code_path(document.canonical_path):
+                continue
+            search_text = " ".join(
+                chunk.search_text.casefold() for chunk in document.chunks
+            )
+            for symbol in symbols:
+                if symbol.kind == "module":
+                    code_path = symbol.document.canonical_path.casefold()
+                    path_match = code_path in search_text
+                    stem_match = (
+                        len(symbol.name) >= 3
+                        and symbol.name.casefold() in search_text
+                    )
+                    if not (path_match or stem_match):
+                        continue
+                    evidence = (
+                        "code_path_mention" if path_match else "module_name_mention"
+                    )
+                    score = 1.0 if path_match else 0.82
+                else:
+                    name = symbol.name.casefold()
+                    code_path = symbol.document.canonical_path.casefold()
+                    if len(name) >= 3 and name in search_text:
+                        evidence = "symbol_name_mention"
+                        score = 0.9
+                    elif code_path in search_text:
+                        evidence = "code_path_context"
+                        score = 0.75
+                    else:
+                        continue
+                fingerprint = hashlib.sha256(
+                    f"{symbol.id}\n{document.id}\n{evidence}".encode("utf-8")
+                ).hexdigest()
+                session.add(
+                    CodeDocumentLink(
+                        symbol_id=symbol.id,
+                        document_id=document.id,
+                        link_type="documents",
+                        score=score,
+                        fingerprint=fingerprint,
+                        evidence_json={
+                            "method": evidence,
+                            "document_path": document.canonical_path,
+                            "symbol_name": symbol.name,
+                        },
+                    )
+                )
+                link_count += 1
+        return {
+            "symbols": len(symbols),
+            "relations": relation_count,
+            "document_links": link_count,
+        }
+
     async def search(
         self,
         *,
         project: Project,
         query: str,
         limit: int | None = None,
+        profile: str = "balanced",
     ) -> list[SearchResult]:
         if not self.configured:
             raise KnowledgeUnavailableError("Knowledge service is not ready")
-        query_vector = (await self._provider.embed([query]))[0]
+        instructed_query = (
+            "Instruct: Retrieve evidence from Japanese enterprise source code "
+            "and technical documentation. Preserve identifiers and exact paths.\n"
+            f"Query: {query}"
+        )
+        query_vector = (await self._provider.embed([instructed_query]))[0]
+        access_filter = or_(
+            (
+                (KnowledgeChunk.scope == "tenant")
+                & (KnowledgeChunk.tenant_id == project.tenant_id)
+            ),
+            (
+                (KnowledgeChunk.scope == "product")
+                & (
+                    KnowledgeChunk.product_version_id
+                    == project.product_version_id
+                )
+            ),
+        )
         with self._database.session_factory() as session:
             chunks = list(
                 session.scalars(
@@ -768,15 +1043,28 @@ class KnowledgeService:
                     .where(
                         KnowledgeSource.approved_for_codex.is_(True),
                         KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                        access_filter,
+                    )
+                )
+            )
+            symbols = list(
+                session.scalars(
+                    select(CodeSymbol)
+                    .join(KnowledgeDocument)
+                    .join(KnowledgeSource)
+                    .options(selectinload(CodeSymbol.document))
+                    .where(
+                        KnowledgeSource.approved_for_codex.is_(True),
+                        KnowledgeSource.status == KnowledgeStatus.APPROVED,
                         or_(
                             (
-                                (KnowledgeChunk.scope == "tenant")
-                                & (KnowledgeChunk.tenant_id == project.tenant_id)
+                                (CodeSymbol.scope == "tenant")
+                                & (CodeSymbol.tenant_id == project.tenant_id)
                             ),
                             (
-                                (KnowledgeChunk.scope == "product")
+                                (CodeSymbol.scope == "product")
                                 & (
-                                    KnowledgeChunk.product_version_id
+                                    CodeSymbol.product_version_id
                                     == project.product_version_id
                                 )
                             ),
@@ -784,7 +1072,30 @@ class KnowledgeService:
                     )
                 )
             )
-        terms = {item.lower() for item in query.split() if len(item) > 1}
+            symbol_ids = [item.id for item in symbols]
+            relations = (
+                list(
+                    session.scalars(
+                        select(CodeRelation).where(
+                            CodeRelation.source_symbol_id.in_(symbol_ids)
+                        )
+                    )
+                )
+                if symbol_ids
+                else []
+            )
+            document_links = (
+                list(
+                    session.scalars(
+                        select(CodeDocumentLink).where(
+                            CodeDocumentLink.symbol_id.in_(symbol_ids)
+                        )
+                    )
+                )
+                if symbol_ids
+                else []
+            )
+        terms = japanese_search_terms(query)
         vector_ranked = sorted(
             chunks,
             key=lambda item: self._cosine(query_vector, item.embedding),
@@ -792,16 +1103,153 @@ class KnowledgeService:
         )[:20]
         keyword_ranked = sorted(
             chunks,
-            key=lambda item: sum(term in item.search_text.lower() for term in terms),
+            key=lambda item: sum(
+                term in item.search_text.casefold() for term in terms
+            ),
             reverse=True,
         )[:20]
         scores: dict[str, float] = {}
+        reasons: dict[str, set[str]] = {}
+        symbol_hits_by_chunk: dict[str, set[str]] = {}
         for rank, chunk in enumerate(vector_ranked, start=1):
             scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (60 + rank)
+            reasons.setdefault(chunk.id, set()).add("vector")
         for rank, chunk in enumerate(keyword_ranked, start=1):
             scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (60 + rank)
+            reasons.setdefault(chunk.id, set()).add("japanese_keyword")
         by_id = {chunk.id: chunk for chunk in chunks}
+        chunks_by_document: dict[str, list[KnowledgeChunk]] = {}
+        for chunk in chunks:
+            chunks_by_document.setdefault(chunk.document_id, []).append(chunk)
+
+        query_folded = query.casefold()
+        symbol_ranked = sorted(
+            (
+                (
+                    symbol,
+                    self._symbol_match_score(symbol, query_folded, terms),
+                )
+                for symbol in symbols
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        matched_symbols = [
+            symbol for symbol, score in symbol_ranked[:20] if score > 0
+        ]
+        for rank, symbol in enumerate(matched_symbols, start=1):
+            for chunk in chunks_by_document.get(symbol.document_id, []):
+                scores[chunk.id] = (
+                    scores.get(chunk.id, 0.0) + 1.0 / (30 + rank)
+                )
+                reasons.setdefault(chunk.id, set()).add("code_symbol")
+                symbol_hits_by_chunk.setdefault(chunk.id, set()).add(symbol.id)
+
+        matched_ids = {item.id for item in matched_symbols}
+        related_symbol_ids = {
+            relation.target_symbol_id
+            for relation in relations
+            if relation.source_symbol_id in matched_ids
+            and relation.target_symbol_id is not None
+        }
+        symbol_by_id = {item.id: item for item in symbols}
+        for related_id in related_symbol_ids:
+            related = symbol_by_id.get(related_id)
+            if related is None:
+                continue
+            for chunk in chunks_by_document.get(related.document_id, []):
+                scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / 45
+                reasons.setdefault(chunk.id, set()).add("code_relation")
+                symbol_hits_by_chunk.setdefault(chunk.id, set()).add(related.id)
+        for link in document_links:
+            if link.symbol_id not in matched_ids:
+                continue
+            for chunk in chunks_by_document.get(link.document_id, []):
+                scores[chunk.id] = (
+                    scores.get(chunk.id, 0.0) + link.score / 45
+                )
+                reasons.setdefault(chunk.id, set()).add("code_document_link")
+
         ranked_ids = sorted(scores, key=scores.get, reverse=True)
+        if profile == "deep" and ranked_ids:
+            requested_limit = limit or self._settings.knowledge_max_chunks
+            rerank_ids = ranked_ids[: min(8, max(5, requested_limit))]
+            rerank_payload = [
+                {
+                    "id": chunk_id,
+                    "path": by_id[chunk_id].document.canonical_path,
+                    "text": self._cipher.decrypt(
+                        by_id[chunk_id].content_ciphertext
+                    )[:1800],
+                }
+                for chunk_id in rerank_ids
+            ]
+            try:
+                reranked = await self._provider.structured_generate(
+                    (
+                        "次の候補を、質問への根拠としての関連性だけで0から1に"
+                        "採点してください。各idは候補のUUIDをそのまま返してください。"
+                        "全候補を重複なく一度ずつ返してください。"
+                        "識別子とパスの一致を重視してください。\n"
+                        f"質問: {query}\n候補JSON: "
+                        f"{json.dumps(rerank_payload, ensure_ascii=False)}"
+                    ),
+                    {
+                        "type": "object",
+                        "properties": {
+                            "scores": {
+                                "type": "array",
+                                "minItems": len(rerank_ids),
+                                "maxItems": len(rerank_ids),
+                                "uniqueItems": True,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {
+                                            "type": "string",
+                                            "enum": rerank_ids,
+                                        },
+                                        "score": {
+                                            "type": "number",
+                                            "minimum": 0,
+                                            "maximum": 1,
+                                        },
+                                    },
+                                    "required": ["id", "score"],
+                                },
+                            }
+                        },
+                        "required": ["scores"],
+                    },
+                )
+                model_items = reranked.get("scores", [])
+                model_ids = [str(item.get("id", "")) for item in model_items]
+                if (
+                    len(model_ids) == len(rerank_ids)
+                    and len(set(model_ids)) == len(rerank_ids)
+                    and set(model_ids) == set(rerank_ids)
+                ):
+                    ordered_model_ids = [
+                        str(item["id"])
+                        for item in sorted(
+                            model_items,
+                            key=lambda value: float(value.get("score", 0)),
+                            reverse=True,
+                        )
+                    ]
+                    for rank, chunk_id in enumerate(
+                        ordered_model_ids,
+                        start=1,
+                    ):
+                        scores[chunk_id] = (
+                            scores.get(chunk_id, 0.0) + 1.0 / (60 + rank)
+                        )
+                        reasons.setdefault(chunk_id, set()).add(
+                            "local_reranker"
+                        )
+                    ranked_ids = sorted(scores, key=scores.get, reverse=True)
+            except Exception:
+                pass
         result: list[SearchResult] = []
         for chunk_id in ranked_ids[: limit or self._settings.knowledge_max_chunks]:
             chunk = by_id[chunk_id]
@@ -819,9 +1267,226 @@ class KnowledgeService:
                     prompt_injection_detected=bool(
                         chunk.metadata_json.get("prompt_injection_detected")
                     ),
+                    match_reasons=tuple(sorted(reasons.get(chunk.id, set()))),
+                    symbol_ids=tuple(
+                        sorted(symbol_hits_by_chunk.get(chunk.id, set()))
+                    ),
                 )
             )
         return result
+
+    @staticmethod
+    def _symbol_match_score(
+        symbol: CodeSymbol,
+        query_folded: str,
+        terms: set[str],
+    ) -> float:
+        name = symbol.name.casefold()
+        qualified = symbol.qualified_name.casefold()
+        path = symbol.document.canonical_path.casefold()
+        if query_folded == name or query_folded == qualified:
+            return 10.0
+        score = 0.0
+        if name and name in query_folded:
+            score += 6.0
+        if qualified and qualified in query_folded:
+            score += 7.0
+        if path and path in query_folded:
+            score += 5.0
+        score += sum(
+            1.0 for term in terms if term in name or term in qualified
+        )
+        return score
+
+    def code_summary(self, project: Project) -> dict[str, Any]:
+        with self._database.session_factory() as session:
+            symbols = self._accessible_symbols(session, project)
+            symbol_ids = [item.id for item in symbols]
+            relations = (
+                list(
+                    session.scalars(
+                        select(CodeRelation).where(
+                            CodeRelation.source_symbol_id.in_(symbol_ids)
+                        )
+                    )
+                )
+                if symbol_ids
+                else []
+            )
+            links = (
+                list(
+                    session.scalars(
+                        select(CodeDocumentLink).where(
+                            CodeDocumentLink.symbol_id.in_(symbol_ids)
+                        )
+                    )
+                )
+                if symbol_ids
+                else []
+            )
+        languages: dict[str, int] = {}
+        kinds: dict[str, int] = {}
+        for symbol in symbols:
+            languages[symbol.language] = languages.get(symbol.language, 0) + 1
+            kinds[symbol.kind] = kinds.get(symbol.kind, 0) + 1
+        return {
+            "symbols": len(symbols),
+            "relations": len(relations),
+            "document_links": len(links),
+            "languages": languages,
+            "kinds": kinds,
+            "unresolved_relations": sum(
+                item.target_symbol_id is None for item in relations
+            ),
+        }
+
+    def list_code_symbols(
+        self,
+        *,
+        project: Project,
+        query: str = "",
+        kind: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self._database.session_factory() as session:
+            symbols = self._accessible_symbols(session, project)
+            filtered = [
+                item
+                for item in symbols
+                if (not kind or item.kind == kind)
+                and (
+                    not query
+                    or query.casefold() in item.name.casefold()
+                    or query.casefold() in item.qualified_name.casefold()
+                    or query.casefold()
+                    in item.document.canonical_path.casefold()
+                )
+            ]
+            return [
+                self._code_symbol_payload(item)
+                for item in sorted(
+                    filtered,
+                    key=lambda value: (
+                        value.document.canonical_path.casefold(),
+                        value.start_line,
+                        value.name.casefold(),
+                    ),
+                )[:limit]
+            ]
+
+    def code_symbol_detail(
+        self,
+        *,
+        project: Project,
+        symbol_id: str,
+    ) -> dict[str, Any] | None:
+        with self._database.session_factory() as session:
+            symbols = self._accessible_symbols(session, project)
+            symbol_by_id = {item.id: item for item in symbols}
+            symbol = symbol_by_id.get(symbol_id)
+            if symbol is None:
+                return None
+            outgoing = list(
+                session.scalars(
+                    select(CodeRelation).where(
+                        CodeRelation.source_symbol_id == symbol.id
+                    )
+                )
+            )
+            incoming = list(
+                session.scalars(
+                    select(CodeRelation).where(
+                        CodeRelation.target_symbol_id == symbol.id
+                    )
+                )
+            )
+            links = list(
+                session.scalars(
+                    select(CodeDocumentLink)
+                    .options(selectinload(CodeDocumentLink.document))
+                    .where(CodeDocumentLink.symbol_id == symbol.id)
+                )
+            )
+            payload = self._code_symbol_payload(symbol)
+            payload["outgoing_relations"] = [
+                self._relation_payload(item) for item in outgoing
+            ]
+            payload["incoming_relations"] = [
+                self._relation_payload(item) for item in incoming
+            ]
+            payload["document_links"] = [
+                {
+                    "id": item.id,
+                    "document_id": item.document_id,
+                    "path": item.document.canonical_path,
+                    "link_type": item.link_type,
+                    "score": item.score,
+                    "evidence": item.evidence_json,
+                }
+                for item in links
+            ]
+            return payload
+
+    def _accessible_symbols(
+        self,
+        session,
+        project: Project,
+    ) -> list[CodeSymbol]:
+        return list(
+            session.scalars(
+                select(CodeSymbol)
+                .join(KnowledgeDocument)
+                .join(KnowledgeSource)
+                .options(selectinload(CodeSymbol.document))
+                .where(
+                    KnowledgeSource.approved_for_codex.is_(True),
+                    KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                    or_(
+                        (
+                            (CodeSymbol.scope == "tenant")
+                            & (CodeSymbol.tenant_id == project.tenant_id)
+                        ),
+                        (
+                            (CodeSymbol.scope == "product")
+                            & (
+                                CodeSymbol.product_version_id
+                                == project.product_version_id
+                            )
+                        ),
+                    ),
+                )
+            )
+        )
+
+    @staticmethod
+    def _code_symbol_payload(symbol: CodeSymbol) -> dict[str, Any]:
+        return {
+            "id": symbol.id,
+            "document_id": symbol.document_id,
+            "path": symbol.document.canonical_path,
+            "language": symbol.language,
+            "kind": symbol.kind,
+            "name": symbol.name,
+            "qualified_name": symbol.qualified_name,
+            "signature": symbol.signature,
+            "start_line": symbol.start_line,
+            "end_line": symbol.end_line,
+            "scope": symbol.scope,
+            "parser": symbol.metadata_json.get("parser"),
+            "diagnostics": symbol.metadata_json.get("diagnostics", []),
+        }
+
+    @staticmethod
+    def _relation_payload(relation: CodeRelation) -> dict[str, Any]:
+        return {
+            "id": relation.id,
+            "source_symbol_id": relation.source_symbol_id,
+            "target_symbol_id": relation.target_symbol_id,
+            "relation_type": relation.relation_type,
+            "target_name": relation.target_name,
+            "confidence": relation.confidence,
+            "evidence": relation.evidence_json,
+        }
 
     async def build_context(
         self,

@@ -157,6 +157,27 @@ Feedback controls are frontend projections over the complete CAG event sequence.
 
 The adapter communicates through stdio JSONL. It declares the experimental API capability required by `runtimeWorkspaceRoots`, verifies ChatGPT authentication and selects `thread/start` or `thread/resume` from the CAG Conversation mapping.
 
+### Structural code knowledge
+
+The knowledge plane has a semantic index and a structural code index. Text
+chunks keep encrypted evidence and 1024 dimensional vectors. `CodeSymbol`
+records addressable definitions with source locations. `CodeRelation` records
+imports and calls and references a target symbol when resolution is
+deterministic. `CodeDocumentLink` records direct path and symbol mentions in
+non-code documents.
+
+Ingestion scans and cleans the source once. Code analysis then creates
+symbol-boundary chunks and parser facts before embedding. Changed documents
+replace their dependent chunks and symbols through foreign-key cascade. The
+source graph is rebuilt from persisted parser facts with unique fingerprints,
+so unchanged vectors remain reusable and repeated ingestion stays idempotent.
+
+Retrieval runs vector, Japanese keyword and symbol channels, combines them with
+Reciprocal Rank Fusion and expands matched symbols through relations and
+documentation links. The deep profile applies the local memory model as a
+bounded evidence reranker. Codex receives only the resulting governed evidence
+and citations.
+
 `read-only-analysis` selects the read-only sandbox. Executor selects workspace-write. Version 0.6.0 uses app-server approval policy `untrusted` when the persistent approval callback is configured. Command Policy Engine allows mechanical verification commands, denies destructive patterns and pauses other commands for a stored decision.
 
 ### Self-improvement candidate profile

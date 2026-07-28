@@ -603,6 +603,7 @@ h1 span {
 }
 
 .knowledge-console,
+.code-knowledge-console,
 .capability-console,
 .memory-console,
 .audit-calls,
@@ -615,6 +616,202 @@ h1 span {
 
 .memory-console {
   margin-bottom: 28px;
+}
+
+.code-knowledge-console {
+  margin-bottom: 28px;
+}
+
+.code-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.code-summary-grid article {
+  padding: 16px;
+  border: 1px solid #eee4df;
+  border-radius: 14px;
+  background: #fff9f6;
+}
+
+.code-summary-grid span,
+.code-summary-grid strong {
+  display: block;
+}
+
+.code-summary-grid span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.code-summary-grid strong {
+  margin-top: 4px;
+  color: var(--teal-dark);
+  font-size: 1.6rem;
+}
+
+.code-search {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.7fr) minmax(280px, 1.4fr) minmax(150px, 0.5fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 16px;
+  border: 1px solid #eee4df;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.code-search label {
+  display: grid;
+  gap: 7px;
+}
+
+.code-search label > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.code-search button {
+  min-height: 44px;
+}
+
+.code-browser {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.72fr) minmax(420px, 1.28fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.code-symbol-list,
+.code-detail {
+  min-width: 0;
+  min-height: 420px;
+  padding: 18px;
+  border: 1px solid #eee4df;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.code-symbol-list {
+  max-height: 720px;
+  overflow: auto;
+}
+
+.code-symbol-row {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  gap: 4px;
+  padding: 14px 12px;
+  border-width: 1px 0 0;
+  border-color: #eee5e0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  text-align: left;
+}
+
+.code-symbol-row:first-of-type {
+  border-top-color: var(--orange);
+}
+
+.code-symbol-row:hover,
+.code-symbol-row.is-selected {
+  background: #fff4ee;
+  transform: none;
+}
+
+.code-symbol-row span {
+  color: var(--orange);
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.code-symbol-row strong {
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+}
+
+.code-symbol-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-detail > header {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #eee4df;
+}
+
+.code-detail > header > span {
+  color: var(--teal-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.code-detail h3 {
+  overflow-wrap: anywhere;
+  font-size: 1.15rem;
+}
+
+.code-detail code {
+  overflow: auto;
+  padding: 11px;
+  border-radius: 10px;
+  background: #f7f4f2;
+  color: #4f494b;
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+}
+
+.code-detail header small,
+.code-fact-group small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.code-fact-group {
+  margin-top: 20px;
+}
+
+.code-fact-group h4 {
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+}
+
+.code-fact-group > p {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.code-fact-group article {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid #eee5e0;
+}
+
+.code-fact-group article span {
+  color: var(--orange);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.code-fact-group article strong {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
 }
 
 .audit-grid {
@@ -1712,7 +1909,8 @@ textarea:focus {
 
   .workspace-grid,
   .audit-grid,
-  .source-workspace {
+  .source-workspace,
+  .code-browser {
     grid-template-columns: 1fr;
   }
 
@@ -1796,6 +1994,9 @@ textarea:focus {
   .knowledge-grid,
   .source-workspace,
   .source-form-grid,
+  .code-summary-grid,
+  .code-search,
+  .code-browser,
   .capability-grid,
   .harness-controls,
   .feedback-controls,
@@ -1821,6 +2022,7 @@ textarea:focus {
   }
 
   .knowledge-console,
+  .code-knowledge-console,
   .capability-console,
   .audit-calls,
   .audit-events,

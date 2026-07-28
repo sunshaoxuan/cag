@@ -223,6 +223,9 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
     chunks = relationship(
         "KnowledgeChunk", back_populates="document", cascade="all, delete-orphan"
     )
+    code_symbols = relationship(
+        "CodeSymbol", back_populates="document", cascade="all, delete-orphan"
+    )
 
 
 class KnowledgeChunk(PhysicalIdMixin, Base):
@@ -258,6 +261,109 @@ class KnowledgeChunk(PhysicalIdMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     document = relationship("KnowledgeDocument", back_populates="chunks")
+
+
+class CodeSymbol(PhysicalIdMixin, Base):
+    __tablename__ = "code_symbols"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "kind",
+            "qualified_name",
+            "start_line",
+            name="uq_code_symbols_document_identity",
+        ),
+    )
+
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    tenant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    product_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("product_versions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    scope: Mapped[str] = mapped_column(String(32), index=True)
+    language: Mapped[str] = mapped_column(String(32), index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(512), index=True)
+    qualified_name: Mapped[str] = mapped_column(Text)
+    signature: Mapped[str] = mapped_column(Text, default="")
+    start_line: Mapped[int] = mapped_column(Integer)
+    end_line: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    document = relationship("KnowledgeDocument", back_populates="code_symbols")
+    outgoing_relations = relationship(
+        "CodeRelation",
+        foreign_keys="CodeRelation.source_symbol_id",
+        back_populates="source_symbol",
+        cascade="all, delete-orphan",
+    )
+    document_links = relationship(
+        "CodeDocumentLink",
+        back_populates="symbol",
+        cascade="all, delete-orphan",
+    )
+
+
+class CodeRelation(PhysicalIdMixin, Base):
+    __tablename__ = "code_relations"
+    __table_args__ = (
+        UniqueConstraint(
+            "fingerprint",
+            name="uq_code_relations_fingerprint",
+        ),
+    )
+
+    source_symbol_id: Mapped[str] = mapped_column(
+        ForeignKey("code_symbols.id", ondelete="CASCADE"), index=True
+    )
+    target_symbol_id: Mapped[str | None] = mapped_column(
+        ForeignKey("code_symbols.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    relation_type: Mapped[str] = mapped_column(String(32), index=True)
+    target_name: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    source_symbol = relationship(
+        "CodeSymbol",
+        foreign_keys=[source_symbol_id],
+        back_populates="outgoing_relations",
+    )
+    target_symbol = relationship("CodeSymbol", foreign_keys=[target_symbol_id])
+
+
+class CodeDocumentLink(PhysicalIdMixin, Base):
+    __tablename__ = "code_document_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "fingerprint",
+            name="uq_code_document_links_fingerprint",
+        ),
+    )
+
+    symbol_id: Mapped[str] = mapped_column(
+        ForeignKey("code_symbols.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    link_type: Mapped[str] = mapped_column(String(32), index=True)
+    score: Mapped[float] = mapped_column(Float, default=1.0)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    symbol = relationship("CodeSymbol", back_populates="document_links")
+    document = relationship("KnowledgeDocument")
 
 
 class MemoryCandidate(PhysicalIdMixin, Base):

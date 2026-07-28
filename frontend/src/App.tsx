@@ -17,6 +17,8 @@ import {
   createConversation,
   createTask,
   getKnowledgeStatus,
+  getCodeKnowledgeSummary,
+  getCodeSymbol,
   getTask,
   ingestKnowledgeSource,
   knowledgeIngestionEventsUrl,
@@ -24,10 +26,13 @@ import {
   KnowledgeIngestionEvent,
   KnowledgeSource,
   KnowledgeStatus,
+  CodeKnowledgeSummary,
+  CodeSymbol,
   CapabilityAsset,
   ApprovalRequest,
   StandardControl,
   listKnowledgeSources,
+  listCodeSymbols,
   listKnowledgeSourceIngestions,
   listMemoryCandidates,
   MemoryCandidate,
@@ -193,6 +198,8 @@ const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.cleaning.completed": "内容清洗完成",
   "knowledge.indexing.started": "正在向量化并建立索引",
   "knowledge.indexing.completed": "向量索引完成",
+  "knowledge.code.analysis.completed": "代码结构分析完成",
+  "knowledge.code.graph.persisted": "代码知识图谱已保存",
   "knowledge.memory.persisted": "来源记忆已保存",
   "knowledge.ingestion.completed": "本轮学习完成",
   "knowledge.ingestion.failed": "本轮学习失败",
@@ -220,6 +227,7 @@ type AppPage =
   | "conversation"
   | "audit"
   | "knowledge"
+  | "codeKnowledge"
   | "memory"
   | "capabilities";
 
@@ -228,6 +236,7 @@ const PAGE_PATHS: Record<AppPage, string> = {
   conversation: "/conversation",
   audit: "/audit",
   knowledge: "/knowledge",
+  codeKnowledge: "/code-knowledge",
   memory: "/memory",
   capabilities: "/capabilities",
 };
@@ -236,6 +245,7 @@ function pageFromPath(pathname: string): AppPage {
   if (pathname.startsWith("/conversation")) return "conversation";
   if (pathname.startsWith("/audit")) return "audit";
   if (pathname.startsWith("/knowledge")) return "knowledge";
+  if (pathname.startsWith("/code-knowledge")) return "codeKnowledge";
   if (pathname.startsWith("/memory")) return "memory";
   if (pathname.startsWith("/capabilities")) return "capabilities";
   return "overview";
@@ -371,6 +381,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] =
     useState<KnowledgeStatus | null>(null);
+  const [codeKnowledgeSummary, setCodeKnowledgeSummary] =
+    useState<CodeKnowledgeSummary | null>(null);
+  const [codeSymbols, setCodeSymbols] = useState<CodeSymbol[]>([]);
+  const [selectedCodeSymbol, setSelectedCodeSymbol] =
+    useState<CodeSymbol | null>(null);
+  const [codeSearch, setCodeSearch] = useState("");
+  const [codeKind, setCodeKind] = useState("");
+  const [codeLoading, setCodeLoading] = useState(false);
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [knowledgeForm, setKnowledgeForm] = useState({
@@ -488,6 +506,44 @@ export default function App() {
   useEffect(() => {
     refreshKnowledge();
   }, []);
+
+  function refreshCodeKnowledge(search = codeSearch, kind = codeKind) {
+    if (!projectId) return;
+    setCodeLoading(true);
+    Promise.all([
+      getCodeKnowledgeSummary(projectId),
+      listCodeSymbols(projectId, search, kind),
+    ])
+      .then(([summary, symbols]) => {
+        setCodeKnowledgeSummary(summary);
+        setCodeSymbols(symbols);
+        if (
+          selectedCodeSymbol &&
+          !symbols.some((item) => item.id === selectedCodeSymbol.id)
+        ) {
+          setSelectedCodeSymbol(null);
+        }
+      })
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => setCodeLoading(false));
+  }
+
+  useEffect(() => {
+    if (page === "codeKnowledge" && projectId) {
+      refreshCodeKnowledge();
+    }
+  }, [page, projectId]);
+
+  async function selectCodeSymbol(symbol: CodeSymbol) {
+    setCodeLoading(true);
+    try {
+      setSelectedCodeSymbol(await getCodeSymbol(projectId, symbol.id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "代码知识读取失败");
+    } finally {
+      setCodeLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (page !== "knowledge") return;
@@ -961,6 +1017,8 @@ export default function App() {
       "knowledge.cleaning.completed",
       "knowledge.indexing.started",
       "knowledge.indexing.completed",
+      "knowledge.code.analysis.completed",
+      "knowledge.code.graph.persisted",
       "knowledge.memory.persisted",
       "knowledge.ingestion.completed",
       "knowledge.ingestion.failed",
@@ -1147,6 +1205,13 @@ export default function App() {
             onClick={(event) => navigateTo("knowledge", event)}
           >
             企业知识
+          </a>
+          <a
+            href="/code-knowledge"
+            aria-current={page === "codeKnowledge" ? "page" : undefined}
+            onClick={(event) => navigateTo("codeKnowledge", event)}
+          >
+            代码知识
           </a>
           <a
             href="/memory"
@@ -1979,6 +2044,201 @@ export default function App() {
                       </li>
                     ))}
                   </ol>
+                )}
+              </section>
+            </div>
+          </section>
+        </>
+      )}
+
+      {page === "codeKnowledge" && (
+        <>
+          <section className="page-intro">
+            <div>
+              <p className="eyebrow">CODE KNOWLEDGE GRAPH</p>
+              <h1>代码知识</h1>
+              <p>查看符号、调用、依赖和代码文档关联的可验证事实。</p>
+            </div>
+            <div className="page-metric">
+              <span>已识别符号</span>
+              <strong>{codeKnowledgeSummary?.symbols ?? 0}</strong>
+            </div>
+          </section>
+          <section
+            className="code-knowledge-console panel page-panel"
+            aria-label="代码知识治理"
+          >
+            <div className="section-heading">
+              <div>
+                <p className="section-index">STRUCTURAL INDEX</p>
+                <h2>代码事实浏览器</h2>
+              </div>
+              <span className="status status-completed">
+                AST 与语义检索协同
+              </span>
+            </div>
+            <div className="code-summary-grid">
+              <article>
+                <span>符号</span>
+                <strong>{codeKnowledgeSummary?.symbols ?? 0}</strong>
+              </article>
+              <article>
+                <span>关系</span>
+                <strong>{codeKnowledgeSummary?.relations ?? 0}</strong>
+              </article>
+              <article>
+                <span>文档关联</span>
+                <strong>{codeKnowledgeSummary?.document_links ?? 0}</strong>
+              </article>
+              <article>
+                <span>待解析关系</span>
+                <strong>
+                  {codeKnowledgeSummary?.unresolved_relations ?? 0}
+                </strong>
+              </article>
+            </div>
+            <form
+              className="code-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                refreshCodeKnowledge(codeSearch, codeKind);
+              }}
+            >
+              <label>
+                <span>项目</span>
+                <select
+                  aria-label="代码知识项目"
+                  value={projectId}
+                  onChange={(event) => {
+                    setProjectId(event.target.value);
+                    setSelectedCodeSymbol(null);
+                  }}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name} · {project.code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="code-search-query">
+                <span>符号、限定名或路径</span>
+                <input
+                  aria-label="搜索代码符号"
+                  value={codeSearch}
+                  onChange={(event) => setCodeSearch(event.target.value)}
+                  placeholder="例如 search_customer 或 src/service.py"
+                />
+              </label>
+              <label>
+                <span>类型</span>
+                <select
+                  aria-label="代码符号类型"
+                  value={codeKind}
+                  onChange={(event) => setCodeKind(event.target.value)}
+                >
+                  <option value="">全部类型</option>
+                  {Object.keys(codeKnowledgeSummary?.kinds ?? {}).map(
+                    (kind) => (
+                      <option key={kind} value={kind}>
+                        {kind}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+              <button type="submit" disabled={codeLoading || !projectId}>
+                {codeLoading ? "读取中" : "检索事实"}
+              </button>
+            </form>
+            <div className="code-browser">
+              <section className="code-symbol-list" aria-label="代码符号列表">
+                <div className="source-section-title">
+                  <h3>符号索引</h3>
+                  <span>{codeSymbols.length} 条</span>
+                </div>
+                {codeSymbols.length === 0 && (
+                  <div className="compact-empty">
+                    <p>当前项目尚无代码符号，请先完成知识采集。</p>
+                  </div>
+                )}
+                {codeSymbols.map((symbol) => (
+                  <button
+                    type="button"
+                    className={
+                      selectedCodeSymbol?.id === symbol.id
+                        ? "code-symbol-row is-selected"
+                        : "code-symbol-row"
+                    }
+                    key={symbol.id}
+                    onClick={() => selectCodeSymbol(symbol)}
+                  >
+                    <span>{symbol.kind} · {symbol.language}</span>
+                    <strong>{symbol.name}</strong>
+                    <small>
+                      {symbol.path}:{symbol.start_line}
+                    </small>
+                  </button>
+                ))}
+              </section>
+              <section className="code-detail" aria-label="代码符号详情">
+                {!selectedCodeSymbol && (
+                  <div className="compact-empty">
+                    <p>选择符号后查看调用关系、解析证据和关联文档。</p>
+                  </div>
+                )}
+                {selectedCodeSymbol && (
+                  <>
+                    <header>
+                      <span>
+                        {selectedCodeSymbol.kind} ·{" "}
+                        {selectedCodeSymbol.parser ?? "unknown"}
+                      </span>
+                      <h3>{selectedCodeSymbol.qualified_name}</h3>
+                      <code>{selectedCodeSymbol.signature}</code>
+                      <small>
+                        {selectedCodeSymbol.path}:
+                        {selectedCodeSymbol.start_line} 至{" "}
+                        {selectedCodeSymbol.end_line}
+                      </small>
+                    </header>
+                    <div className="code-fact-group">
+                      <h4>调用与依赖</h4>
+                      {(selectedCodeSymbol.outgoing_relations ?? []).length ===
+                        0 && <p>没有已记录的出向关系。</p>}
+                      {(selectedCodeSymbol.outgoing_relations ?? []).map(
+                        (relation) => (
+                          <article key={relation.id}>
+                            <span>{relation.relation_type}</span>
+                            <strong>{relation.target_name}</strong>
+                            <small>
+                              {relation.target_symbol_id
+                                ? "已解析到代码符号"
+                                : "保留外部或待解析目标"}
+                              {" · "}
+                              置信度 {relation.confidence.toFixed(2)}
+                            </small>
+                          </article>
+                        ),
+                      )}
+                    </div>
+                    <div className="code-fact-group">
+                      <h4>关联文档</h4>
+                      {(selectedCodeSymbol.document_links ?? []).length ===
+                        0 && <p>尚无具有直接证据的文档关联。</p>}
+                      {(selectedCodeSymbol.document_links ?? []).map((link) => (
+                        <article key={link.id}>
+                          <span>{link.link_type}</span>
+                          <strong>{link.path}</strong>
+                          <small>
+                            {String(link.evidence.method ?? "deterministic")}
+                            {" · "}
+                            评分 {link.score.toFixed(2)}
+                          </small>
+                        </article>
+                      ))}
+                    </div>
+                  </>
                 )}
               </section>
             </div>

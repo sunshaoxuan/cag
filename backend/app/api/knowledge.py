@@ -87,6 +87,10 @@ class SearchRequest(BaseModel):
     project_id: str = Field(min_length=1, max_length=128)
     query: str = Field(min_length=1, max_length=20_000)
     limit: int = Field(default=8, ge=1, le=50)
+    profile: str = Field(
+        default="balanced",
+        pattern=r"^(fast|balanced|deep)$",
+    )
 
 
 def source_response(
@@ -421,6 +425,7 @@ async def search_knowledge(
             project=project,
             query=request.query.strip(),
             limit=request.limit,
+            profile=request.profile,
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
@@ -437,10 +442,69 @@ async def search_knowledge(
                 "score": item.score,
                 "scope": item.scope,
                 "source_commit": item.source_commit,
+                "match_reasons": item.match_reasons,
+                "symbol_ids": item.symbol_ids,
             }
             for item in results
         ],
     }
+
+
+@router.get("/knowledge/code/summary")
+def code_knowledge_summary(
+    project_id: str = Query(min_length=1, max_length=128),
+    session: Session = Depends(get_session),
+    task_service: TaskService = Depends(get_task_service),
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> dict[str, Any]:
+    try:
+        project = task_service.resolve_project(session, project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found") from exc
+    return service.code_summary(project)
+
+
+@router.get("/knowledge/code/symbols")
+def list_code_symbols(
+    project_id: str = Query(min_length=1, max_length=128),
+    query: str = Query(default="", max_length=2000),
+    kind: str = Query(default="", max_length=32),
+    limit: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_session),
+    task_service: TaskService = Depends(get_task_service),
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> list[dict[str, Any]]:
+    try:
+        project = task_service.resolve_project(session, project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found") from exc
+    return service.list_code_symbols(
+        project=project,
+        query=query.strip(),
+        kind=kind.strip(),
+        limit=limit,
+    )
+
+
+@router.get("/knowledge/code/symbols/{symbol_id}")
+def get_code_symbol(
+    symbol_id: str,
+    project_id: str = Query(min_length=1, max_length=128),
+    session: Session = Depends(get_session),
+    task_service: TaskService = Depends(get_task_service),
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> dict[str, Any]:
+    try:
+        project = task_service.resolve_project(session, project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found") from exc
+    result = service.code_symbol_detail(
+        project=project,
+        symbol_id=symbol_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Code symbol not found")
+    return result
 
 
 @router.get("/memory-candidates")

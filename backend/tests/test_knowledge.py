@@ -1,5 +1,6 @@
 import asyncio
 from datetime import timedelta
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,7 +23,14 @@ from app.knowledge.security import (
 )
 from app.knowledge.service import KnowledgeService
 from app.main import create_app
-from app.models import KnowledgeChunk, KnowledgeDocument, KnowledgeSource
+from app.models import (
+    CodeDocumentLink,
+    CodeRelation,
+    CodeSymbol,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    KnowledgeSource,
+)
 from app.models.base import utc_now
 from app.tasks.executor import TaskExecutor
 
@@ -56,6 +64,31 @@ class FakeCredentialStore:
 
     def delete(self, credential_ref: str | None) -> None:
         self.values.pop(credential_ref or "", None)
+
+
+class CompleteRerankFakeOllama(FakeOllamaClient):
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+    ) -> dict:
+        if "候補JSON: " not in prompt:
+            return await super().structured_generate(prompt, schema)
+        self.generated.append(prompt)
+        candidates = json.loads(prompt.split("候補JSON: ", 1)[1])
+        return {
+            "scores": [
+                {
+                    "id": item["id"],
+                    "score": (
+                        1.0
+                        if "customer_service.py" in item["path"]
+                        else 0.1
+                    ),
+                }
+                for item in candidates
+            ]
+        }
 
 
 def install_fake_knowledge(
@@ -227,6 +260,116 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         sources = client.get("/api/v1/knowledge/sources").json()
         assert sources[0]["status"] == "approved"
         assert service.list_sources()[0].id == source["id"]
+
+
+def test_code_knowledge_graph_is_idempotent_and_searchable(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    source_dir = project_repository / "src"
+    source_dir.mkdir()
+    (source_dir / "customer_service.py").write_text(
+        """\
+def normalize_customer(name: str) -> str:
+    return name.strip()
+
+class CustomerService:
+    def search_customer(self, name: str) -> str:
+        return normalize_customer(name)
+""",
+        encoding="utf-8",
+    )
+    (project_repository / "README.md").write_text(
+        "# 顧客検索\n\n`src/customer_service.py` の CustomerService が顧客情報を検索する。\n",
+        encoding="utf-8",
+    )
+    (project_repository / "設計.txt").write_bytes(
+        "顧客情報の検索仕様".encode("cp932")
+    )
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = CompleteRerankFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Code repository",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        first = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert client.get(
+            f"/api/v1/knowledge/ingestions/{first['id']}"
+        ).json()["status"] == "completed"
+
+        summary = client.get(
+            "/api/v1/knowledge/code/summary",
+            params={"project_id": "test-project"},
+        )
+        assert summary.status_code == 200
+        assert summary.json()["symbols"] >= 4
+        assert summary.json()["relations"] >= 1
+        assert summary.json()["document_links"] >= 1
+
+        symbols = client.get(
+            "/api/v1/knowledge/code/symbols",
+            params={
+                "project_id": "test-project",
+                "query": "search_customer",
+            },
+        ).json()
+        assert symbols[0]["name"] == "search_customer"
+        detail = client.get(
+            f"/api/v1/knowledge/code/symbols/{symbols[0]['id']}",
+            params={"project_id": "test-project"},
+        ).json()
+        assert detail["outgoing_relations"][0]["target_name"] == (
+            "normalize_customer"
+        )
+        assert detail["outgoing_relations"][0]["target_symbol_id"] is not None
+        assert any(
+            item["path"] == "README.md"
+            for item in detail["document_links"]
+        )
+
+        search = client.post(
+            "/api/v1/knowledge/search",
+            json={
+                "project_id": "test-project",
+                "query": "search_customer 顧客情報",
+                "profile": "deep",
+                "limit": 5,
+            },
+        ).json()
+        assert search["results"][0]["path"] == "src/customer_service.py"
+        assert "code_symbol" in search["results"][0]["match_reasons"]
+        assert "local_reranker" in search["results"][0]["match_reasons"]
+        assert service._provider.generated
+
+        second = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert client.get(
+            f"/api/v1/knowledge/ingestions/{second['id']}"
+        ).json()["unchanged_files"] == 3
+        with app.state.database.session_factory() as session:
+            symbol_count = session.scalar(select(func.count(CodeSymbol.id)))
+            relation_count = session.scalar(select(func.count(CodeRelation.id)))
+            link_count = session.scalar(select(func.count(CodeDocumentLink.id)))
+        repeated_summary = client.get(
+            "/api/v1/knowledge/code/summary",
+            params={"project_id": "test-project"},
+        ).json()
+        assert repeated_summary["symbols"] == symbol_count
+        assert repeated_summary["relations"] == relation_count
+        assert repeated_summary["document_links"] == link_count
 
         duplicate_source = client.post(
             "/api/v1/knowledge/sources",
@@ -534,7 +677,10 @@ def test_scheduler_loop_survives_one_iteration_failure() -> None:
             lease_seconds=60,
         )
         scheduler.start()
-        await asyncio.sleep(0.04)
+        for _ in range(50):
+            if service.claim_attempts >= 2:
+                break
+            await asyncio.sleep(0.01)
         await scheduler.stop()
         return service.claim_attempts, service.running_states
 
