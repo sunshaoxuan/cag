@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: http://127.0.0.1:8000
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-same-origin}
+    environment:
+      CAG_GATEWAY_UPSTREAM: ${CAG_GATEWAY_UPSTREAM:-host.docker.internal:8000}
     ports:
       - "5173:80"
     depends_on:
@@ -32,6 +34,7 @@ services:
       AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
       AGENT_GATEWAY_RUNTIME_PROVIDER: fake
       AGENT_GATEWAY_KNOWLEDGE_ENABLED: "false"
+      AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR: /workspaces/.knowledge-sources
       AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
       AGENT_GATEWAY_PROJECTS_DIR: /projects
       AGENT_GATEWAY_WORKSPACE_ROOT: /workspaces

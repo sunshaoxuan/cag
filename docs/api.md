@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.8.1`
+Current version: `0.8.2`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.8.1"
+    "version": "0.8.2"
 }
 ```
 

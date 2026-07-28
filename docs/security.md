@@ -96,7 +96,9 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 
 * PostgreSQL and Redis have no host ports in the default Compose file.
 * Gateway exposes port 8000 on every IPv4 host interface by default.
-* Frontend exposes port 5173 for development.
+* Frontend exposes the visual management console on port 5173.
+* Management API and SSE requests use the 5173 origin and are proxied to the
+  host Gateway without exposing Codex app-server.
 * Codex app-server uses stdio by default.
 * Loopback WebSocket mode is reserved for controlled local integration.
 * Non-loopback app-server WebSocket mode is excluded until its experimental support and authentication constraints are explicitly accepted.

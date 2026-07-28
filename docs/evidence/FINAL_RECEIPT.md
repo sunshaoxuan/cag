@@ -1,6 +1,6 @@
 # Current release receipt
 
-Version: 0.8.1
+Version: 0.8.2
 
 Date: 2026-07-28
 
@@ -8,35 +8,32 @@ Branch: `master`
 
 ## Delivered
 
-* The local ChatGPT-authenticated Gateway binds to `0.0.0.0` by default.
-* The managed background task detects a listener by port.
-* Starting the managed task replaces an existing loopback-only listener.
-* Managed startup verifies that the ready process listens on `0.0.0.0` or `::`.
-* Status output includes the actual listener address.
-* The root workspace ignore rule no longer excludes the backend Workspace
-  Manager module from Git.
-* Version, changelog, requirement matrix, architecture, deployment, security,
-  API and operator documentation are aligned with the listener behavior.
+* Port 5173 is the unified CAG visual management console.
+* The console retains API testing, API audit, enterprise knowledge and
+  capability governance in one routed application.
+* Browser API and SSE requests use same-origin `/api` URLs.
+* Frontend Nginx proxies `/api` to the host ChatGPT-authenticated Gateway.
+* LAN browsers no longer resolve the Gateway as their own loopback address.
+* HTML entry responses disable caching and hashed assets use immutable caching.
 
 ## Verified
 
-* 6 PowerShell listener tests passed.
 * 62 backend tests passed with 88.69 percent coverage.
-* 8 frontend tests and the production build passed.
-* Docker Compose configuration validation passed.
-* The live managed process reported `0.0.0.0:8000`.
-* Readiness passed through loopback and a non-loopback host IPv4 address.
-* The live health response reported version `0.8.1`.
+* 10 frontend tests and the production build passed.
+* Compose configuration, frontend image build and `nginx -t` passed.
+* LAN management console project API returned one project.
+* Overview rendered 12 traces, 2 knowledge sources and 18 capabilities.
+* API audit rendered 12 traces and received 3,500 SSE events.
+* Browser console contained zero warnings and errors.
+* Screenshot evidence was saved.
 
-## Security boundary
+## Runtime boundary
 
-The Gateway HTTP listener is reachable through all IPv4 host interfaces.
-Caller authentication, project authorization, HTTPS and distributed rate
-limiting remain open production gates. Codex app-server and Ollama retain their
-private local boundaries.
+Codex app-server remains a private local child process. Port 5173 exposes the
+management frontend and its same-origin Gateway proxy. Port 8000 remains the
+direct external API endpoint.
 
 ## Rollback
 
-Revert the 0.8.1 commit, restart the managed task and verify that the listener
-returns to the prior loopback behavior. No database migration or data rollback
-is required.
+Deploy the prior `cag-frontend` image and recreate only the frontend service.
+The host Gateway, database, task history and Codex runtime require no rollback.

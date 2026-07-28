@@ -42,14 +42,28 @@ copy the One人事 logo, photography, illustrations or product claims.
 | `/` | Product overview, runtime proof and links to the three operational domains |
 | `/conversation` | Continuous conversation, Harness configuration, approvals and the complete CAG SSE event stream |
 | `/audit` | External API call traces and the resumable Gateway-wide audit SSE |
-| `/knowledge` | Knowledge source ingestion, idempotent vector indexing and governed memory candidates |
+| `/knowledge` | Managed local, network, Git, GitLab and SVN sources with live collection SSE |
+| `/memory` | Governed task memory candidates and product-level promotion |
 | `/capabilities` | Skill, Tool, Validator, promotion and standards control governance |
 
-The conversation route is an API test console. It marks task submissions as
-`test_console`; external callers default to `external_api`. Route transitions
+Port 5173 is the unified CAG visual management console. The overview, API
+monitor, enterprise knowledge and capability routes provide management
+functions. The conversation route is an API test console. It marks task
+submissions as `test_console`; external callers default to `external_api`.
+Route transitions
 use browser history and reset document scroll position. Direct
 loads and reloads are served by the frontend fallback. Conversation state stays
 mounted during in-app navigation so an active task remains observable.
+
+The Knowledge route uses a source registry form followed by source cards and a
+live ingestion event panel. Credential inputs are write only. The UI reports
+files seen, chunks written, vectors reused and duplicate files skipped. Source
+Memory and task-derived Memory Candidates remain separate concepts and use
+separate routes.
+
+The production frontend uses its own origin for API and SSE requests. Nginx
+forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
+not resolve the Gateway as the browser machine's loopback address.
 
 ## Responsive and accessibility rules
 

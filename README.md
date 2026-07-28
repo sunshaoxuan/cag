@@ -4,7 +4,7 @@ Agent Gateway 让网站、内部平台和自动化系统通过自然语言 Promp
 
 ## 当前版本
 
-当前版本为 `0.8.1`。Gateway 默认监听全部 IPv4 网络接口。外部系统可以通过任务 API 和持续会话 API 调用本机订阅认证的 Codex。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。网页定位为 API 测试、监控和治理客户端。
+当前版本为 `0.8.2`。Gateway 默认监听全部 IPv4 网络接口。5173 端口提供统一的 CAG 可视化管理台，包含 API 测试、调用监控、企业知识和能力治理。管理台通过同源反向代理连接本机订阅认证的 Codex Gateway。外部系统可以通过任务 API 和持续会话 API 调用 CAG。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -122,7 +122,7 @@ docker compose up --build
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
-浏览器任务控制台地址为 `http://127.0.0.1:5173`。默认 Compose Gateway 使用 Fake Runtime，适合无配额的确定性测试。本机订阅运行时通过上面的主机脚本启动。
+本机管理台地址为 `http://127.0.0.1:5173`，局域网地址为 `http://<CAG主机IP>:5173`。管理台的 `/api` 请求和 SSE 由前端 Nginx 同源转发到本机 Gateway。默认 Compose Gateway 使用 Fake Runtime，适合无配额的确定性测试。本机订阅运行时通过上面的主机脚本启动。
 
 ## 测试
 

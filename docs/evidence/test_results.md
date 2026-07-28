@@ -2,44 +2,46 @@
 
 Date: 2026-07-28
 
-Version: 0.8.1
+Version: 0.8.2
 
 ## Automated
 
 | Check | Result |
 |---|---|
-| PowerShell script parsing | Passed for both local Gateway entrypoints |
-| PowerShell listener regression | 6 passed |
 | Backend Pytest | 62 passed |
 | Backend coverage | 88.69 percent |
-| Frontend Vitest | 8 passed |
-| Frontend production build | Passed |
-| Compose configuration | Passed |
+| Frontend Vitest | 10 passed in 2 files |
+| Frontend TypeScript and production build | Passed |
+| Docker Compose configuration | Passed |
+| Frontend image build | Passed |
+| Nginx configuration | Passed |
 
-The first complete backend run found stale `0.8.0` assertions and package
-metadata. Those release fields were updated to `0.8.1`, and the complete suite
-then passed.
+All automated checks ran from an archive of the staged Git tree. Concurrent
+knowledge-source changes in the working tree were excluded.
 
-An isolated staged-tree run found that the repository-wide `workspaces/`
-ignore rule also excluded `backend/app/workspaces/manager.py`. The rule was
-restricted to `/workspaces/`, the existing runtime module was added to version
-control, and the isolated staged-tree suite was rerun.
+## Live management console
 
-## Live all-interface listener
-
-The managed local Codex Gateway was restarted from the prior loopback listener.
-Windows reported the active socket as `0.0.0.0:8000`.
+The staged frontend image was deployed to the existing `cag-frontend-1`
+container. The frontend uses same-origin `/api` requests and Nginx forwards
+them to `host.docker.internal:8000`.
 
 | Probe | Result |
 |---|---|
-| Managed task state | `running` |
-| Managed task listener | `0.0.0.0:8000` |
-| Windows TCP listener | `0.0.0.0:8000` |
-| Loopback readiness | `ready` |
-| Non-loopback IPv4 readiness | `ready` |
-| Reported Gateway version | `0.8.1` |
+| `http://192.168.20.54:5173/health` | HTTP 200 |
+| `http://192.168.20.54:5173/api/v1/projects` | HTTP 200, 1 project |
+| Overview through LAN IP | 12 audit traces, 2 knowledge sources, 18 capabilities |
+| API audit route | 12 traces and 3,500 SSE events received |
+| Browser warning and error console | 0 entries |
+| HTML cache policy | `no-cache, no-store, must-revalidate` |
+| Hashed asset cache policy | `public, max-age=31536000, immutable` |
 
-The non-loopback check called `/health/ready` through a preferred host IPv4
-address. This verifies the process binding on the current host. Inbound access
-from another machine still depends on the host firewall and surrounding
-network.
+The live host Gateway process continues to report 0.8.1 because this patch
+changes the frontend connection boundary and did not restart the host process
+while unrelated 0.9.0 backend work was present in the shared working tree. The
+management console and proxied API path are live.
+
+Screenshot:
+
+```text
+docs/evidence/screenshots/cag-management-console-0.8.2.png
+```

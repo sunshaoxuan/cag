@@ -1,5 +1,13 @@
 # Evidence index
 
+## Version 0.8.2
+
+* `frontend/src/api.same-origin.test.ts`
+* `frontend/nginx.conf`
+* `docs/evidence/test_results.md`
+* `docs/evidence/FINAL_RECEIPT.md`
+* `docs/evidence/screenshots/cag-management-console-0.8.2.png`
+
 ## Version 0.8.1
 
 * `scripts/tests/LocalCodexGateway.Tests.ps1`

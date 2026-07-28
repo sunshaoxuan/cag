@@ -138,6 +138,12 @@ The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only th
 
 ### Frontend
 
+The React application on port 5173 is the unified visual management console.
+Its overview, API audit, enterprise knowledge and capability routes provide
+management functions, while the Conversation route provides the API test
+console. Production browser traffic uses same-origin `/api` and SSE URLs.
+Frontend Nginx proxies those requests to the host Gateway.
+
 The React test console loads configured projects, submits a Prompt through the
 public Task API, subscribes to named SSE events, keeps them ordered by sequence,
 projects live Agent message deltas into the active conversation bubble and

@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.8.1 | Evidence |
+| Requirement | Status for 0.8.2 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -27,6 +27,8 @@ Legend:
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |
+| Unified visual management console | Implemented | Port 5173 overview, API test, audit, knowledge and capability routes |
+| Same-origin management API and SSE | Implemented | Frontend Nginx `/api` proxy and LAN browser validation |
 | OneHR design language frontend | Implemented | `docs/frontend-design.md`, responsive CSS, browser screenshot and console evidence |
 | Routed frontend information architecture | Implemented | `/`, `/conversation`, `/audit`, `/knowledge`, `/capabilities`, route isolation tests and browser evidence |
 | External task API trace contract | Implemented | Trace ID, client request ID, request hash, source and idempotency tests |

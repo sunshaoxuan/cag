@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.8.1 development deployment
+## 0.8.2 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -27,7 +27,14 @@ The Compose deployment contains:
 
 PostgreSQL and Redis are reachable only through the Compose network.
 
-The task console is available locally at `http://127.0.0.1:5173`. The Gateway container publishes port 8000 on every host interface.
+The unified management console is available locally at `http://127.0.0.1:5173`
+and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
+console, API audit monitor, enterprise knowledge and capability governance.
+Browser API and SSE requests use the same 5173 origin. Nginx forwards `/api`
+to `CAG_GATEWAY_UPSTREAM`, which defaults to
+`host.docker.internal:8000`.
+HTML entry responses disable browser caching so a deployment immediately loads
+the new content-hashed JavaScript and CSS assets.
 
 The console creates a CAG Conversation and keeps one Conversation SSE connection open across turns.
 

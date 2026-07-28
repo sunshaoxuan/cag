@@ -201,3 +201,26 @@ The staged index was archived into a task-local validation directory and tested
 independently from concurrent working-tree changes. The first archive exposed
 the incorrectly ignored Workspace Manager module. After anchoring the root
 ignore rule and adding that module, the staged-tree checks were repeated.
+
+## 0.8.2 unified management console validation
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest
+
+cd ..\frontend
+pnpm test
+pnpm build
+
+docker compose config --quiet
+docker compose build frontend
+docker compose up -d --no-deps frontend
+docker exec cag-frontend-1 nginx -t
+
+Invoke-WebRequest http://192.168.20.54:5173/health
+Invoke-WebRequest http://192.168.20.54:5173/api/v1/projects
+```
+
+Browser validation opened the LAN management URL, checked overview data,
+opened `/audit`, confirmed persisted traces and live SSE events, inspected the
+warning and error console and saved the release screenshot.
