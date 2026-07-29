@@ -1,8 +1,8 @@
-# Agent Gateway Architecture
+# One Agent Gateway Architecture
 
 ## 1. Purpose
 
-Agent Gateway receives a project reference and natural language Prompt through
+One Agent Gateway receives a project reference and natural language Prompt through
 an external HTTP API, resolves policy and runtime configuration, runs a local
 Codex agent in an isolated workspace, streams structured events, pauses for
 approvals, and stores auditable results. The web application is an API test,
@@ -124,9 +124,15 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests.
-Alembic owns schema versioning through revision `20260727_0008`. Local
+Alembic owns schema versioning through revision `20260729_0012`. Local
 development can create missing tables; container deployment runs Alembic before
 serving traffic.
+
+The current Windows host launcher also falls back to SQLite when no database
+URL is configured. This compatibility behavior is not the target enterprise
+storage boundary. ADR 0015 requires a verified migration and PostgreSQL plus
+pgvector for the managed host runtime before resumable parallel ingestion is
+claimed.
 
 ### Project registry
 
@@ -177,6 +183,21 @@ Reciprocal Rank Fusion and expands matched symbols through relations and
 documentation links. The deep profile applies the local memory model as a
 bounded evidence reranker. Codex receives only the resulting governed evidence
 and citations.
+
+### Knowledge rejection audit
+
+The collector emits one structured record for every rejected or skipped entry.
+The service flushes these records to `KnowledgeIngestionRejection` in bounded
+batches while directory scanning is active. Each record holds a physical UUID,
+ingestion foreign key, source-relative path, disposition, metadata, stable
+reason code and sanitized exception evidence.
+
+After collection, the service writes a schema-versioned gzip JSONL archive,
+computes its SHA 256 and stores the receipt on `KnowledgeIngestion`. Query,
+filter, CSV export and archive download APIs expose the evidence to the
+management console. Database detail rotates after its retention window only
+when a terminal run has a completed archive. Archive files use a longer,
+independent retention window.
 
 `read-only-analysis` selects the read-only sandbox. Executor selects workspace-write. Version 0.6.0 uses app-server approval policy `untrusted` when the persistent approval callback is configured. Command Policy Engine allows mechanical verification commands, denies destructive patterns and pauses other commands for a stored decision.
 

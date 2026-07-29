@@ -1,5 +1,11 @@
 # Evidence index
 
+## Version 0.14.0
+
+* `docs/evidence/knowledge-rejection-audit-0.14.0/`
+* `docs/evidence/screenshots/knowledge-source-management-0.14.0.jpg`
+* `docs/evidence/screenshots/knowledge-rejection-audit-0.14.0.jpg`
+
 ## Version 0.13.0
 
 * `docs/evidence/code-knowledge-0.13.0/`

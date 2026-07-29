@@ -1,8 +1,8 @@
-# Agent Gateway API
+# One Agent Gateway API
 
 Base path: `/api/v1`
 
-Current version: `0.13.0`
+Current version: `0.14.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.13.0"
+    "version": "0.14.0"
 }
 ```
 
@@ -44,7 +44,7 @@ Returns every valid YAML-configured project:
   {
     "id": "6ee71a6a-f30a-4a2d-a281-309c7511b832",
     "code": "cag",
-    "name": "Codex/ChatGPT Agent Gateway",
+    "name": "One Agent Gateway",
     "default_branch": "master",
     "default_runtime_profile": "general-engineering",
     "allowed_runtime_profiles": [
@@ -78,6 +78,9 @@ Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 * `POST /api/v1/knowledge/sources/{source_id}/validate`
 * `POST /api/v1/knowledge/sources/{source_id}/ingest`
 * `GET /api/v1/knowledge/sources/{source_id}/ingestions`
+* `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections`
+* `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export`
+* `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
 * `POST /api/v1/knowledge/search`

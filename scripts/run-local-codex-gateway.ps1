@@ -72,7 +72,7 @@ if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS) {
     )
 }
 
-Write-Host "Starting Agent Gateway with the local ChatGPT-authenticated Codex runtime."
+Write-Host "Starting One Agent Gateway with the local ChatGPT-authenticated Codex runtime."
 Write-Host "Gateway listener: http://0.0.0.0:$Port"
 Write-Host "Local access: http://127.0.0.1:$Port"
 
@@ -80,11 +80,11 @@ Push-Location $backendRoot
 try {
     & $pythonExecutable -m app.migrations.legacy_baseline
     if ($LASTEXITCODE -ne 0) {
-        throw "Agent Gateway legacy database baseline failed."
+        throw "One Agent Gateway legacy database baseline failed."
     }
     & $pythonExecutable -m alembic upgrade head
     if ($LASTEXITCODE -ne 0) {
-        throw "Agent Gateway database migration failed."
+        throw "One Agent Gateway database migration failed."
     }
     & $pythonExecutable -m uvicorn app.main:app --host 0.0.0.0 --port $Port
 }

@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import hashlib
 import json
 import math
@@ -15,6 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.config import Settings
 from app.database import Database
 from app.knowledge.connectors import (
+    CollectionRejection,
     CollectionResult,
     SourceConfig,
     SourceConnectorManager,
@@ -42,6 +44,7 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
+    KnowledgeIngestionRejection,
     KnowledgeSource,
     KnowledgeStatus,
     KnowledgeUsage,
@@ -480,6 +483,15 @@ class KnowledgeService:
         if self._cipher is None:
             self._fail_ingestion(ingestion_id, "Knowledge encryption key is unavailable")
             return
+        rejection_buffer: list[CollectionRejection] = []
+
+        def flush_rejections() -> None:
+            if not rejection_buffer:
+                return
+            pending = tuple(rejection_buffer)
+            self._persist_ingestion_rejections(ingestion_id, pending)
+            rejection_buffer.clear()
+
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
@@ -511,23 +523,41 @@ class KnowledgeService:
             def report_collection_progress(
                 data: dict[str, int | str],
             ) -> None:
+                flush_rejections()
                 self._record_ingestion_event(
                     ingestion_id,
                     "knowledge.collection.progress",
                     data,
                 )
 
+            def report_collection_rejection(
+                item: CollectionRejection,
+            ) -> None:
+                rejection_buffer.append(item)
+                if len(rejection_buffer) >= 100:
+                    flush_rejections()
+
             collected = await asyncio.to_thread(
                 self._connectors.collect,
                 source_config,
                 report_collection_progress,
+                report_collection_rejection,
             )
+            flush_rejections()
+            archive = self._archive_ingestion_rejections(ingestion_id)
+            self._record_ingestion_event(
+                ingestion_id,
+                "knowledge.rejection.archive.created",
+                archive,
+            )
+            self._prune_rejection_audit()
             self._record_ingestion_event(
                 ingestion_id,
                 "knowledge.collection.completed",
                 {
                     "files_seen": collected.files_seen,
                     "rejected_files": collected.rejected_files,
+                    "skipped_files": collected.skipped_files,
                     "duplicate_files": collected.duplicate_files,
                     "revision": collected.revision,
                 },
@@ -788,6 +818,7 @@ class KnowledgeService:
                 ingestion.files_seen = collected.files_seen
                 ingestion.chunks_written = len(chunks)
                 ingestion.rejected_files = collected.rejected_files
+                ingestion.skipped_files = collected.skipped_files
                 ingestion.unchanged_files = len(unchanged_paths)
                 ingestion.vectors_reused = vectors_reused
                 ingestion.duplicate_files = duplicate_files
@@ -828,6 +859,7 @@ class KnowledgeService:
                         "files_seen": collected.files_seen,
                         "chunks_written": len(chunks),
                         "rejected_files": collected.rejected_files,
+                        "skipped_files": collected.skipped_files,
                         "duplicate_files": duplicate_files,
                         "changed_files": len(changed_paths),
                         "removed_files": len(removed_paths),
@@ -850,7 +882,189 @@ class KnowledgeService:
                 )
                 session.commit()
         except Exception as exc:
+            try:
+                flush_rejections()
+                archive = self._archive_ingestion_rejections(ingestion_id)
+                self._record_ingestion_event(
+                    ingestion_id,
+                    "knowledge.rejection.archive.created",
+                    {**archive, "partial": True},
+                )
+            except Exception as archive_exc:
+                self._record_ingestion_event(
+                    ingestion_id,
+                    "knowledge.rejection.archive.failed",
+                    {
+                        "error_type": type(archive_exc).__name__,
+                        "error": str(archive_exc)[:500],
+                    },
+                )
             self._fail_ingestion(ingestion_id, str(exc))
+
+    def _persist_ingestion_rejections(
+        self,
+        ingestion_id: str,
+        items: tuple[CollectionRejection, ...],
+    ) -> None:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                raise KeyError(ingestion_id)
+            for item in items:
+                session.add(
+                    KnowledgeIngestionRejection(
+                        ingestion_id=ingestion_id,
+                        relative_path=item.relative_path,
+                        entry_kind=item.entry_kind,
+                        disposition=item.disposition,
+                        extension=item.extension,
+                        file_size=item.file_size,
+                        reason_code=item.reason_code,
+                        extractor=item.extractor,
+                        error_type=item.error_type,
+                        error_message=item.error_message,
+                    )
+                )
+            ingestion.rejected_files += sum(
+                item.disposition == "rejected" for item in items
+            )
+            ingestion.skipped_files += sum(
+                item.disposition == "skipped" for item in items
+            )
+            session.commit()
+
+    def _archive_ingestion_rejections(
+        self,
+        ingestion_id: str,
+    ) -> dict[str, Any]:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                raise KeyError(ingestion_id)
+            records = list(
+                session.scalars(
+                    select(KnowledgeIngestionRejection)
+                    .where(
+                        KnowledgeIngestionRejection.ingestion_id
+                        == ingestion_id
+                    )
+                    .order_by(
+                        KnowledgeIngestionRejection.created_at,
+                        KnowledgeIngestionRejection.id,
+                    )
+                )
+            )
+            archive_root = (
+                self._settings.knowledge_rejection_archive_dir.resolve()
+            )
+            archive_root.mkdir(parents=True, exist_ok=True)
+            archive_name = f"{ingestion_id}.jsonl.gz"
+            target = archive_root / archive_name
+            temporary = archive_root / f".{archive_name}.tmp"
+            header = {
+                "record_type": "knowledge_rejection_archive",
+                "schema_version": 1,
+                "ingestion_id": ingestion_id,
+                "source_id": ingestion.source_id,
+                "record_count": len(records),
+                "created_at": utc_now().isoformat(),
+            }
+            with gzip.open(
+                temporary,
+                mode="wt",
+                encoding="utf-8",
+                newline="\n",
+            ) as stream:
+                stream.write(json.dumps(header, ensure_ascii=False) + "\n")
+                for record in records:
+                    stream.write(
+                        json.dumps(
+                            {
+                                "id": record.id,
+                                "ingestion_id": record.ingestion_id,
+                                "relative_path": record.relative_path,
+                                "entry_kind": record.entry_kind,
+                                "disposition": record.disposition,
+                                "extension": record.extension,
+                                "file_size": record.file_size,
+                                "reason_code": record.reason_code,
+                                "extractor": record.extractor,
+                                "error_type": record.error_type,
+                                "error_message": record.error_message,
+                                "created_at": record.created_at.isoformat(),
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            temporary.replace(target)
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            ingestion.rejection_archive_name = archive_name
+            ingestion.rejection_archive_sha256 = digest
+            ingestion.rejection_archive_created_at = utc_now()
+            session.commit()
+        return {
+            "archive_name": archive_name,
+            "sha256": digest,
+            "record_count": len(records),
+            "compression": "gzip",
+        }
+
+    def rejection_archive_path(self, ingestion_id: str) -> Path:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                raise KeyError(ingestion_id)
+            archive_name = ingestion.rejection_archive_name
+        if not archive_name:
+            raise FileNotFoundError(ingestion_id)
+        archive_root = self._settings.knowledge_rejection_archive_dir.resolve()
+        path = (archive_root / archive_name).resolve()
+        if archive_root not in path.parents or not path.is_file():
+            raise FileNotFoundError(ingestion_id)
+        return path
+
+    def _prune_rejection_audit(self) -> None:
+        now = utc_now()
+        database_cutoff = now - timedelta(
+            days=self._settings.knowledge_rejection_db_retention_days
+        )
+        with self._database.session_factory() as session:
+            expired_ids = list(
+                session.scalars(
+                    select(KnowledgeIngestion.id).where(
+                        KnowledgeIngestion.status.in_(
+                            ("completed", "failed", "cancelled")
+                        ),
+                        KnowledgeIngestion.rejection_archive_created_at
+                        < database_cutoff,
+                        KnowledgeIngestion.rejection_archive_name.is_not(None),
+                    )
+                )
+            )
+            if expired_ids:
+                session.execute(
+                    delete(KnowledgeIngestionRejection).where(
+                        KnowledgeIngestionRejection.ingestion_id.in_(
+                            expired_ids
+                        )
+                    )
+                )
+                session.commit()
+        archive_cutoff = now - timedelta(
+            days=self._settings.knowledge_rejection_archive_retention_days
+        )
+        archive_root = self._settings.knowledge_rejection_archive_dir.resolve()
+        if not archive_root.is_dir():
+            return
+        cutoff_timestamp = archive_cutoff.timestamp()
+        for path in archive_root.glob("*.jsonl.gz"):
+            resolved = path.resolve()
+            if (
+                archive_root in resolved.parents
+                and resolved.stat().st_mtime < cutoff_timestamp
+            ):
+                resolved.unlink()
 
     def _rebuild_code_graph(self, session, source_id: str) -> dict[str, int]:
         symbols = list(

@@ -59,13 +59,30 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "removed_files",
         "trigger",
         "started_at",
+        "skipped_files",
+        "rejection_archive_name",
+        "rejection_archive_sha256",
+        "rejection_archive_created_at",
     } <= ingestion_columns
     assert {
         "code_symbols",
         "code_relations",
         "code_document_links",
+        "knowledge_ingestion_rejections",
     } <= tables
 
+    command.downgrade(config, "20260728_0011")
+    audit_downgraded = inspect(create_engine(database_url))
+    assert "knowledge_ingestion_rejections" not in set(
+        audit_downgraded.get_table_names()
+    )
+    assert "skipped_files" not in {
+        column["name"]
+        for column in audit_downgraded.get_columns(
+            "knowledge_ingestions"
+        )
+    }
+    command.upgrade(config, "head")
     command.downgrade(config, "20260728_0010")
     code_downgraded = inspect(create_engine(database_url))
     assert "code_symbols" not in set(code_downgraded.get_table_names())

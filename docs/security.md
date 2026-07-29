@@ -1,4 +1,4 @@
-# Agent Gateway Security
+# One Agent Gateway Security
 
 ## 1. Trust boundary
 

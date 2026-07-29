@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.13.0 development deployment
+## 0.14.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -37,6 +37,14 @@ to `CAG_GATEWAY_UPSTREAM`, which defaults to
 `host.docker.internal:8000`.
 HTML entry responses disable browser caching so a deployment immediately loads
 the new content-hashed JavaScript and CSS assets.
+
+Knowledge ingestion writes file-level rejection audit rows to the database and
+one gzip JSONL archive per run. Configure
+`AGENT_GATEWAY_KNOWLEDGE_REJECTION_ARCHIVE_DIR`,
+`AGENT_GATEWAY_KNOWLEDGE_REJECTION_DB_RETENTION_DAYS` and
+`AGENT_GATEWAY_KNOWLEDGE_REJECTION_ARCHIVE_RETENTION_DAYS`. Defaults retain
+queryable database detail for 90 days and compressed archives for 365 days.
+The archive directory must use persistent host or volume storage in production.
 
 The console creates a CAG Conversation and keeps one Conversation SSE connection open across turns.
 

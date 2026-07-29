@@ -13,7 +13,7 @@ import type { Conversation, Task } from "./api";
 const project = {
   id: "6ee71a6a-f30a-4a2d-a281-309c7511b832",
   code: "cag",
-  name: "Codex/ChatGPT Agent Gateway",
+  name: "One Agent Gateway",
   default_branch: "master",
   default_runtime_profile: "general-engineering",
   allowed_runtime_profiles: [
@@ -120,7 +120,7 @@ async function openConversationPage() {
   await screen.findByRole("heading", { name: "连续对话测试" });
 }
 
-describe("Agent Gateway conversation page", () => {
+describe("One Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
   let pendingApprovals: Array<Record<string, unknown>>;
   let knowledgeSources: Array<Record<string, unknown>>;
@@ -283,7 +283,8 @@ describe("Agent Gateway conversation page", () => {
               status: "completed",
               files_seen: 12,
               chunks_written: 3,
-              rejected_files: 0,
+              rejected_files: 2,
+              skipped_files: 1,
               duplicate_files: 0,
               unchanged_files: 10,
               vectors_reused: 20,
@@ -294,8 +295,66 @@ describe("Agent Gateway conversation page", () => {
               created_at: "2026-07-28T00:00:00Z",
               started_at: "2026-07-28T00:00:01Z",
               completed_at: "2026-07-28T00:00:04Z",
+              rejection_archive_name:
+                "ingestion-history-1.jsonl.gz",
+              rejection_archive_sha256: "b".repeat(64),
+              rejection_archive_created_at: "2026-07-28T00:00:05Z",
             },
           ]);
+        }
+        if (
+          url.includes(
+            "/api/v1/knowledge/ingestions/ingestion-history-1/rejections?",
+          )
+        ) {
+          return jsonResponse({
+            items: [
+              {
+                id: "rejection-1",
+                ingestion_id: "ingestion-history-1",
+                relative_path: "db/legacy.sql",
+                entry_kind: "file",
+                disposition: "rejected",
+                extension: ".sql",
+                file_size: 128,
+                reason_code: "encoding_unsupported",
+                extractor: "text",
+                error_type: "UnicodeDecodeError",
+                error_message: "unable to decode input",
+                created_at: "2026-07-28T00:00:02Z",
+              },
+              {
+                id: "rejection-2",
+                ingestion_id: "ingestion-history-1",
+                relative_path: "docs/legacy.doc",
+                entry_kind: "file",
+                disposition: "skipped",
+                extension: ".doc",
+                file_size: 256,
+                reason_code: "unsupported_extension",
+                extractor: "filesystem",
+                error_type: null,
+                error_message: null,
+                created_at: "2026-07-28T00:00:03Z",
+              },
+            ],
+            total: 3,
+            limit: 100,
+            offset: 0,
+            summary: [
+              {
+                disposition: "rejected",
+                reason_code: "encoding_unsupported",
+                count: 2,
+              },
+              {
+                disposition: "skipped",
+                reason_code: "unsupported_extension",
+                count: 1,
+              },
+            ],
+            archive_available: true,
+          });
         }
         if (
           url.endsWith(
@@ -356,6 +415,7 @@ describe("Agent Gateway conversation page", () => {
               files_seen: 0,
               chunks_written: 0,
               rejected_files: 0,
+              skipped_files: 0,
               duplicate_files: 0,
               unchanged_files: 0,
               vectors_reused: 0,
@@ -366,6 +426,9 @@ describe("Agent Gateway conversation page", () => {
               created_at: "2026-07-28T00:00:00Z",
               started_at: null,
               completed_at: null,
+              rejection_archive_name: null,
+              rejection_archive_sha256: null,
+              rejection_archive_created_at: null,
             },
             202,
           );
@@ -467,7 +530,7 @@ describe("Agent Gateway conversation page", () => {
     expect(window.location.pathname).toBe("/conversation");
     expect(
       await screen.findByRole("option", {
-        name: "Codex/ChatGPT Agent Gateway · cag",
+        name: "One Agent Gateway · cag",
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
@@ -541,9 +604,16 @@ describe("Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
+    expect(screen.getByText("v0.14.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "学习运行中心" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "创建知识来源" }),
+    );
     expect(screen.getByLabelText("同步策略")).toHaveValue("scheduled");
 
     fireEvent.change(screen.getByLabelText("来源名称"), {
@@ -564,7 +634,34 @@ describe("Agent Gateway conversation page", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存来源" }));
 
     expect(await screen.findByText("产品文档")).toBeInTheDocument();
-    expect(screen.getAllByText("GitLab 仓库")).toHaveLength(2);
+    expect(screen.getAllByText("GitLab 仓库")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("搜索知识来源"), {
+      target: { value: "不存在的来源" },
+    });
+    expect(
+      screen.getByText("没有符合当前搜索和筛选条件的来源。"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("搜索知识来源"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "停用" }));
+    expect(
+      await screen.findByRole("button", { name: "启用" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("筛选知识来源"), {
+      target: { value: "disabled" },
+    });
+    expect(screen.getByText("产品文档")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() =>
+      expect(screen.queryByText("产品文档")).not.toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText("筛选知识来源"), {
+      target: { value: "all" },
+    });
+    expect(
+      await screen.findByRole("button", { name: "停用" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     await waitFor(() =>
       expect(screen.getByLabelText("密码或访问令牌")).toHaveValue(
@@ -594,9 +691,35 @@ describe("Agent Gateway conversation page", () => {
     fireEvent.click(screen.getByRole("button", { name: "运行历史" }));
     expect(await screen.findByText("自动同步")).toBeInTheDocument();
     expect(screen.getByText(/变化 2 · 删除 1/)).toBeInTheDocument();
+    expect(screen.getByText(/拒绝 2 · 跳过 1/)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "查看文件审计" }),
+    );
+    expect(await screen.findByText("db/legacy.sql")).toBeInTheDocument();
+    expect(screen.getByText("无法识别文本编码")).toBeInTheDocument();
+    expect(screen.getByText("docs/legacy.doc")).toBeInTheDocument();
+    expect(screen.getByText("不支持的文件类型")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "导出 CSV" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining(
+        "/ingestion-history-1/rejections/export",
+      ),
+    );
+    expect(
+      screen.getByRole("link", { name: "下载压缩归档" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining(
+        "/ingestion-history-1/rejections/archive",
+      ),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "采集并学习" }),
     );
+    expect(await screen.findByText("当前正在学习")).toBeInTheDocument();
+    expect(screen.getAllByText("产品文档")).toHaveLength(2);
     await waitFor(() =>
       expect(
         MockEventSource.instances.some((source) =>
@@ -673,7 +796,7 @@ describe("Agent Gateway conversation page", () => {
     expect(screen.getByText("后端已反馈 205 条")).toBeInTheDocument();
     expect(
       screen
-        .getByRole("region", { name: "采集过程" })
+        .getByRole("region", { name: "学习运行中心" })
         .querySelectorAll("li"),
     ).toHaveLength(200);
     expect(screen.queryByText("资源收集完成")).not.toBeInTheDocument();
@@ -724,7 +847,7 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
-      name: "Codex/ChatGPT Agent Gateway · cag",
+      name: "One Agent Gateway · cag",
     });
 
     fireEvent.change(screen.getByLabelText("发送消息"), {
@@ -759,7 +882,7 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
-      name: "Codex/ChatGPT Agent Gateway · cag",
+      name: "One Agent Gateway · cag",
     });
     fireEvent.change(screen.getByLabelText("发送消息"), {
       target: { value: "第一轮" },
@@ -828,7 +951,7 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
-      name: "Codex/ChatGPT Agent Gateway · cag",
+      name: "One Agent Gateway · cag",
     });
     fireEvent.change(screen.getByLabelText("发送消息"), {
       target: { value: "查询天气" },
@@ -907,7 +1030,7 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
-      name: "Codex/ChatGPT Agent Gateway · cag",
+      name: "One Agent Gateway · cag",
     });
     fireEvent.change(screen.getByLabelText("发送消息"), {
       target: { value: "反馈数量测试" },
@@ -976,7 +1099,7 @@ describe("Agent Gateway conversation page", () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
-      name: "Codex/ChatGPT Agent Gateway · cag",
+      name: "One Agent Gateway · cag",
     });
     fireEvent.change(screen.getByLabelText("发送消息"), {
       target: { value: "审批测试" },

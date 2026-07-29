@@ -1,6 +1,8 @@
 import asyncio
 from datetime import timedelta
+import gzip
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,6 +31,8 @@ from app.models import (
     CodeSymbol,
     KnowledgeChunk,
     KnowledgeDocument,
+    KnowledgeIngestion,
+    KnowledgeIngestionRejection,
     KnowledgeSource,
 )
 from app.models.base import utc_now
@@ -46,6 +50,11 @@ def knowledge_settings(
             "knowledge_encryption_key": KnowledgeCipher.generate_key(),
             "knowledge_allowed_roots": str(root),
             "knowledge_sources_dir": root / ".knowledge-source-cache",
+            "knowledge_rejection_archive_dir": (
+                root / ".knowledge-rejection-archives"
+            ),
+            "knowledge_rejection_db_retention_days": 90,
+            "knowledge_rejection_archive_retention_days": 365,
             "knowledge_scheduler_enabled": False,
         }
     )
@@ -832,6 +841,7 @@ def test_encrypted_pdf_is_rejected_without_stopping_collection(
         max_file_bytes=10_000,
     )
 
+    rejections = []
     result = manager.collect(
         SourceConfig(
             id="encrypted-pdf-source",
@@ -840,12 +850,164 @@ def test_encrypted_pdf_is_rejected_without_stopping_collection(
             reference=None,
             subpath=None,
             credential_ref=None,
-        )
+        ),
+        rejection=rejections.append,
     )
 
     assert result.files_seen == 2
     assert result.rejected_files == 1
     assert [document.path for document in result.documents] == ["README.md"]
+    assert len(rejections) == 1
+    assert rejections[0].relative_path == "encrypted.pdf"
+    assert rejections[0].reason_code == "pdf_unreadable"
+    assert rejections[0].error_type == "ValueError"
+    assert rejections[0].error_message
+
+
+def test_ingestion_persists_and_exports_file_level_rejection_audit(
+    settings: Settings,
+    project_repository: Path,
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "enterprise-source"
+    source_root.mkdir()
+    (source_root / "accepted.md").write_text(
+        "# Accepted knowledge",
+        encoding="utf-8",
+    )
+    (source_root / "legacy.sql").write_bytes(b"\x81")
+    (source_root / "empty.sql").write_text("", encoding="utf-8")
+    (source_root / "legacy.doc").write_bytes(b"legacy-document")
+    (source_root / "oversized.txt").write_text(
+        "x" * 2_048,
+        encoding="utf-8",
+    )
+    configured = knowledge_settings(settings, tmp_path)
+    active_settings = Settings(
+        **{
+            **configured.model_dump(),
+            "knowledge_max_file_bytes": 1_024,
+        }
+    )
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Enterprise rejection audit",
+                "root_path": str(source_root),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        )
+        assert created.status_code == 201
+        source_id = created.json()["id"]
+        started = client.post(
+            f"/api/v1/knowledge/sources/{source_id}/ingest"
+        )
+        assert started.status_code == 202
+        ingestion_id = started.json()["id"]
+        ingestion = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion_id}"
+        ).json()
+
+        assert ingestion["status"] == "completed"
+        assert ingestion["rejected_files"] == 2
+        assert ingestion["skipped_files"] == 2
+        assert ingestion["rejection_archive_sha256"]
+        audit = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections"
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert payload["total"] == 4
+        assert payload["archive_available"] is True
+        by_path = {
+            item["relative_path"]: item for item in payload["items"]
+        }
+        assert by_path["legacy.sql"]["reason_code"] == "encoding_unsupported"
+        assert by_path["legacy.sql"]["disposition"] == "rejected"
+        assert by_path["empty.sql"]["reason_code"] == "empty_text"
+        assert (
+            by_path["legacy.doc"]["reason_code"]
+            == "unsupported_extension"
+        )
+        assert by_path["legacy.doc"]["disposition"] == "skipped"
+        assert by_path["oversized.txt"]["reason_code"] == "file_too_large"
+        assert by_path["oversized.txt"]["file_size"] == 2_048
+
+        filtered = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections",
+            params={"disposition": "rejected", "limit": 1},
+        ).json()
+        assert filtered["total"] == 2
+        assert len(filtered["items"]) == 1
+        assert {item["count"] for item in filtered["summary"]} == {1}
+
+        exported = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections/export"
+        )
+        assert exported.status_code == 200
+        assert exported.content.startswith(b"\xef\xbb\xbf")
+        exported_text = exported.content.decode("utf-8-sig")
+        assert "legacy.sql" in exported_text
+        assert "encoding_unsupported" in exported_text
+        assert "oversized.txt" in exported_text
+
+        archived = client.get(
+            f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive"
+        )
+        assert archived.status_code == 200
+        archive_lines = gzip.decompress(archived.content).decode(
+            "utf-8"
+        ).splitlines()
+        archive_header = json.loads(archive_lines[0])
+        assert archive_header["record_count"] == 4
+        assert len(archive_lines) == 5
+        assert {
+            json.loads(line)["relative_path"]
+            for line in archive_lines[1:]
+        } == {
+            "legacy.sql",
+            "empty.sql",
+            "legacy.doc",
+            "oversized.txt",
+        }
+
+    with app.state.database.session_factory() as session:
+        assert (
+            session.scalar(
+                select(func.count(KnowledgeIngestionRejection.id))
+            )
+            == 4
+        )
+        stored_ingestion = session.get(KnowledgeIngestion, ingestion_id)
+        assert stored_ingestion is not None
+        stored_ingestion.rejection_archive_created_at = (
+            utc_now() - timedelta(days=91)
+        )
+        session.commit()
+
+    archive_path = service.rejection_archive_path(ingestion_id)
+    service._prune_rejection_audit()
+    with app.state.database.session_factory() as session:
+        assert (
+            session.scalar(
+                select(func.count(KnowledgeIngestionRejection.id))
+            )
+            == 0
+        )
+    assert archive_path.is_file()
+
+    expired_timestamp = (
+        utc_now() - timedelta(days=366)
+    ).timestamp()
+    os.utime(archive_path, (expired_timestamp, expired_timestamp))
+    service._prune_rejection_audit()
+    assert not archive_path.exists()
 
 
 def test_connector_scans_directories_breadth_first_with_progress(

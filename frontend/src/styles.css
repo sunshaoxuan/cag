@@ -115,6 +115,15 @@ p {
   transform: skewX(-7deg);
 }
 
+.brand-version {
+  align-self: flex-end;
+  margin: 0 0 2px -5px;
+  color: var(--ink-muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .site-nav {
   display: flex;
   justify-content: center;
@@ -958,6 +967,50 @@ h1 span {
   font-weight: 800;
 }
 
+.knowledge-management-bar {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid #eee4df;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 103, 46, 0.07), transparent 42%),
+    #fff;
+}
+
+.knowledge-management-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.knowledge-management-metrics article {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #f0e5df;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.knowledge-management-metrics span {
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 800;
+}
+
+.knowledge-management-metrics strong {
+  color: var(--ink);
+  font-size: 1.35rem;
+}
+
+.knowledge-management-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 170px auto;
+  gap: 10px;
+}
+
 .source-form-heading,
 .source-card header,
 .source-card footer,
@@ -1094,6 +1147,70 @@ h1 span {
   padding: 0 28px 0 9px;
   border-radius: 8px;
   font-size: 0.68rem;
+}
+
+.learning-run-overview {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 15px;
+  border: 1px solid #e8e2df;
+  border-radius: 14px;
+  background: #faf8f7;
+}
+
+.learning-run-overview.is-running {
+  border-color: rgba(8, 191, 194, 0.35);
+  background: var(--teal-soft);
+}
+
+.learning-run-overview > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.learning-run-overview > div:first-child span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.learning-run-overview > div:first-child strong {
+  font-size: 0.92rem;
+}
+
+.learning-run-overview dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.learning-run-overview dl div {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.learning-run-overview dt {
+  color: var(--muted);
+  font-size: 0.61rem;
+}
+
+.learning-run-overview dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learning-run-overview p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
 }
 
 .source-card {
@@ -1292,6 +1409,72 @@ h1 span {
   background: #fff0ec;
   color: #9b321d;
   font-family: inherit;
+}
+
+.source-history article > .rejection-audit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rejection-audit-actions a {
+  align-content: center;
+  color: var(--teal-dark);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.rejection-audit {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #ded6d1;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.source-history article .rejection-audit-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.rejection-audit-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #eee5e0;
+  border-radius: 8px;
+}
+
+.rejection-audit table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 0.67rem;
+}
+
+.rejection-audit th,
+.rejection-audit td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee5e0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rejection-audit th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #faf7f5;
+  color: var(--muted);
+}
+
+.rejection-audit td:nth-child(2),
+.rejection-audit td:nth-child(5) {
+  max-width: 360px;
+  overflow-wrap: anywhere;
 }
 
 .collection-events .compact-empty,
@@ -1914,6 +2097,10 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .knowledge-management-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .module-grid {
     grid-template-columns: 1fr;
   }
@@ -1935,8 +2122,12 @@ textarea:focus {
     display: none;
   }
 
-  .brand > span:last-child {
+  .brand-title {
     font-size: 0.95rem;
+  }
+
+  .brand-version {
+    font-size: 0.56rem;
   }
 
   .hero {
@@ -1994,6 +2185,7 @@ textarea:focus {
   .knowledge-grid,
   .source-workspace,
   .source-form-grid,
+  .knowledge-management-controls,
   .code-summary-grid,
   .code-search,
   .code-browser,
@@ -2003,6 +2195,11 @@ textarea:focus {
   .result-grid,
   .task-summary {
     grid-template-columns: 1fr;
+  }
+
+  .knowledge-management-metrics,
+  .learning-run-overview dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .source-location-field {

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.13.0"
+APP_VERSION = "0.14.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     knowledge_max_chunks: int = Field(default=8, ge=1, le=50)
     knowledge_sources_dir: Path = (
         DEFAULT_REPOSITORY_ROOT / ".gateway" / "knowledge-sources"
+    )
+    knowledge_rejection_archive_dir: Path = (
+        DEFAULT_REPOSITORY_ROOT / ".gateway" / "knowledge-rejection-archives"
+    )
+    knowledge_rejection_db_retention_days: int = Field(
+        default=90, ge=1, le=3_650
+    )
+    knowledge_rejection_archive_retention_days: int = Field(
+        default=365, ge=30, le=3_650
     )
     knowledge_max_file_bytes: int = Field(
         default=10_000_000, ge=1_024, le=100_000_000

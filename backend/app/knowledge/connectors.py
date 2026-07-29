@@ -73,7 +73,21 @@ class CollectionResult:
     documents: list[CollectedDocument]
     files_seen: int
     rejected_files: int
+    skipped_files: int
     duplicate_files: int
+
+
+@dataclass(frozen=True)
+class CollectionRejection:
+    relative_path: str
+    entry_kind: str
+    disposition: str
+    extension: str
+    file_size: int | None
+    reason_code: str
+    extractor: str
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,7 @@ class ValidationResult:
 
 
 CollectionProgress = Callable[[dict[str, int | str]], None]
+CollectionRejectionSink = Callable[[CollectionRejection], None]
 
 
 class SourceConnectorManager:
@@ -192,6 +207,7 @@ class SourceConnectorManager:
         self,
         source: SourceConfig,
         progress: CollectionProgress | None = None,
+        rejection: CollectionRejectionSink | None = None,
     ) -> CollectionResult:
         credential = self._credentials.get(source.credential_ref)
         if source.source_type == "local_directory":
@@ -203,11 +219,12 @@ class SourceConnectorManager:
                 root,
                 self._git_revision(root),
                 progress,
+                rejection,
             )
         if source.source_type == "network_share":
             with self._network_connection(source.location, credential):
                 root = self._selected_root(Path(source.location), source.subpath)
-                return self._read_documents(root, None, progress)
+                return self._read_documents(root, None, progress, rejection)
         if source.source_type in {"git", "gitlab"}:
             root, revision = self._materialize_git(source, credential)
         else:
@@ -216,6 +233,7 @@ class SourceConnectorManager:
             self._selected_root(root, source.subpath),
             revision,
             progress,
+            rejection,
         )
 
     def purge(self, source_id: str) -> None:
@@ -243,11 +261,13 @@ class SourceConnectorManager:
         root: Path,
         revision: str | None,
         progress: CollectionProgress | None = None,
+        rejection: CollectionRejectionSink | None = None,
     ) -> CollectionResult:
         if not root.is_dir():
             raise ValueError("Selected source subpath does not exist")
         documents: list[CollectedDocument] = []
         rejected = 0
+        skipped = 0
         duplicates = 0
         files_discovered = 0
         files_processed = 0
@@ -278,6 +298,7 @@ class SourceConnectorManager:
                 "files_processed": files_processed,
                 "current_directory_files": current_directory_files,
                 "rejected_files": rejected,
+                "skipped_files": skipped,
             }
             if error:
                 data["error"] = error[:500]
@@ -294,33 +315,76 @@ class SourceConnectorManager:
                     )
             except OSError as exc:
                 rejected += 1
+                self._report_rejection(
+                    rejection,
+                    root=root,
+                    path=directory,
+                    entry_kind="directory",
+                    disposition="rejected",
+                    file_size=None,
+                    reason_code="directory_read_error",
+                    error=exc,
+                )
                 directories_scanned += 1
                 report("failed", directory, error=str(exc))
                 continue
 
             directory_files: list[Path] = []
             for entry in entries:
+                path = Path(entry.path)
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         if entry.name not in EXCLUDED_PARTS:
                             pending_directories.append(Path(entry.path))
                         continue
-                    if (
-                        not entry.is_file(follow_symlinks=False)
-                        or Path(entry.name).suffix.lower()
-                        not in SUPPORTED_EXTENSIONS
-                        or entry.stat(follow_symlinks=False).st_size
-                        > self._max_file_bytes
-                    ):
+                    if not entry.is_file(follow_symlinks=False):
                         continue
-                except OSError:
+                    file_size = entry.stat(follow_symlinks=False).st_size
+                except OSError as exc:
                     rejected += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="rejected",
+                        file_size=None,
+                        reason_code="file_stat_error",
+                        error=exc,
+                    )
                     continue
-                directory_files.append(Path(entry.path))
+                suffix = path.suffix.lower()
+                if suffix not in SUPPORTED_EXTENSIONS:
+                    skipped += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="skipped",
+                        file_size=file_size,
+                        reason_code="unsupported_extension",
+                    )
+                    continue
+                if file_size > self._max_file_bytes:
+                    skipped += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="skipped",
+                        file_size=file_size,
+                        reason_code="file_too_large",
+                    )
+                    continue
+                directory_files.append(path)
                 files_discovered += 1
 
             for path in directory_files:
+                file_size: int | None = None
                 try:
+                    file_size = path.stat().st_size
                     extracted = extract_text_with_metadata(path)
                     text = normalize_text(extracted.text)
                 except (
@@ -329,13 +393,32 @@ class SourceConnectorManager:
                     RuntimeError,
                     ValueError,
                     zipfile.BadZipFile,
-                ):
+                ) as exc:
                     rejected += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="rejected",
+                        file_size=file_size,
+                        reason_code=self._rejection_reason(path, exc),
+                        error=exc,
+                    )
                     files_processed += 1
                     continue
                 files_processed += 1
                 if not text:
                     rejected += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="rejected",
+                        file_size=file_size,
+                        reason_code="empty_text",
+                    )
                     continue
                 content_hash = hashlib.sha256(
                     text.encode("utf-8")
@@ -365,7 +448,77 @@ class SourceConnectorManager:
             documents=documents,
             files_seen=files_discovered,
             rejected_files=rejected,
+            skipped_files=skipped,
             duplicate_files=duplicates,
+        )
+
+    @staticmethod
+    def _rejection_reason(path: Path, error: Exception) -> str:
+        if isinstance(error, UnicodeDecodeError):
+            return "encoding_unsupported"
+        if isinstance(error, zipfile.BadZipFile):
+            return "office_archive_invalid"
+        if isinstance(error, PermissionError):
+            return "file_permission_denied"
+        if isinstance(error, OSError):
+            return "file_read_error"
+        if path.suffix.lower() == ".pdf":
+            return "pdf_unreadable"
+        if isinstance(error, RuntimeError):
+            return "extractor_unavailable"
+        return "extractor_rejected"
+
+    @staticmethod
+    def _extractor_name(path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            return "pdf"
+        if suffix in {".docx", ".pptx", ".xlsx", ".odt"}:
+            return "office-xml"
+        if suffix in SUPPORTED_EXTENSIONS:
+            return "text"
+        return "filesystem"
+
+    @classmethod
+    def _report_rejection(
+        cls,
+        sink: CollectionRejectionSink | None,
+        *,
+        root: Path,
+        path: Path,
+        entry_kind: str,
+        disposition: str,
+        file_size: int | None,
+        reason_code: str,
+        error: Exception | None = None,
+    ) -> None:
+        if sink is None:
+            return
+        relative_path = (
+            "."
+            if path == root
+            else path.relative_to(root).as_posix()
+        )
+        error_message = None
+        if error is not None:
+            error_message = (
+                str(error)
+                .replace(str(root), "<source-root>")
+                .replace("\r", " ")
+                .replace("\n", " ")
+            )[:1_000]
+        sink(
+            CollectionRejection(
+                relative_path=relative_path,
+                entry_kind=entry_kind,
+                disposition=disposition,
+                extension=path.suffix.lower(),
+                file_size=file_size,
+                reason_code=reason_code,
+                extractor=cls._extractor_name(path),
+                error_type=type(error).__name__ if error is not None else None,
+                error_message=error_message,
+            )
         )
 
     def _materialize_git(

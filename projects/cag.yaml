@@ -1,6 +1,6 @@
 physical_id: 6ee71a6a-f30a-4a2d-a281-309c7511b832
 id: cag
-name: Codex/ChatGPT Agent Gateway
+name: One Agent Gateway
 version: "1"
 
 tenant:
@@ -9,7 +9,7 @@ tenant:
 
 product:
   code: cag
-  name: Agent Gateway
+  name: One Agent Gateway
   version: "0.6.0"
 
 knowledge:

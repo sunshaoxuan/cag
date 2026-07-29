@@ -8,7 +8,7 @@ from app.knowledge.security import KnowledgeCipher
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Manage the Agent Gateway enterprise knowledge key."
+        description="Manage the One Agent Gateway enterprise knowledge key."
     )
     parser.add_argument("command", choices=["init", "status", "delete"])
     args = parser.parse_args()

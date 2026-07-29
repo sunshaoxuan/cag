@@ -2,7 +2,7 @@
 
 ## Boundary
 
-The enterprise knowledge plane belongs to Agent Gateway. Ollama supplies local model inference and Codex supplies the ChatGPT-authenticated engineering Agent. Frontends call CAG APIs and SSE only.
+The enterprise knowledge plane belongs to One Agent Gateway. Ollama supplies local model inference and Codex supplies the ChatGPT-authenticated engineering Agent. Frontends call CAG APIs and SSE only.
 
 ## Modular RAG
 
@@ -46,9 +46,23 @@ text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies,
 binary executables and repository metadata are excluded. The default size limit
 is ten megabytes per file and can be reduced by deployment policy.
 
+Version 0.14.0 indexes successfully extracted content. Empty files, directory
+names and unsupported file names are retained in file-level audit evidence and
+are not yet embedded as path-semantic knowledge. ADR 0015 defines the required
+path-complete and resumable worker architecture without claiming it is
+implemented in this version.
+
 The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE
 directly. Memory candidate governance has its own `/memory` page.
+
+Every collection outcome outside the accepted document set is auditable.
+Rejected and skipped entries are stored with source-relative path, stable
+reason code, file metadata, extractor identity and sanitized exception detail.
+The database supports paged operational queries and CSV export. Each run also
+produces a gzip JSONL snapshot with a SHA 256 receipt. Database rows and
+compressed archives use separate retention windows so the searchable working
+set can rotate while longer-lived evidence remains available.
 
 ## Code knowledge plane
 
@@ -91,7 +105,8 @@ then separates unchanged, changed, added and removed paths. Only changed and
 added files require new embeddings. Unchanged chunks retain their physical IDs
 and vectors. Removed paths delete their documents and dependent chunks. Each
 run remains available as ingestion history with its trigger, status, counts,
-timestamps and error.
+timestamps, error and rejection archive receipt. The management page exposes
+the file-level audit, CSV export and compressed archive from this history.
 
 Failed scheduled runs increment the source failure counter and receive an
 exponential retry delay bounded by the configured regular interval. A

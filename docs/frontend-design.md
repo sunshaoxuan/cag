@@ -2,9 +2,22 @@
 
 ## Scope
 
-Version 0.13.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
+Version 0.14.0 keeps the OneHR language and separates the CAG frontend. API requests, Conversation
 state, SSE event handling, approval actions, Harness controls, knowledge
 operations and capability governance keep their existing contracts.
+
+Starting with version 0.14.0, the persistent header uses the product name
+`One Agent Gateway` and renders the packaged frontend version immediately
+after it in smaller type. The version value comes from
+`frontend/package.json`.
+
+The enterprise knowledge route begins with a lifecycle management surface.
+Operators can search and filter registered sources, open the create or edit
+form only when needed, validate, enable, disable and trigger learning from each
+source. A continuously visible learning run center shows the active source,
+status, start time, directory, file progress, rejected count and skipped count.
+Run history remains attached to each source and opens its file-level rejection
+audit.
 
 ## Reference
 
@@ -122,3 +135,5 @@ Validated screenshots:
 * `docs/evidence/screenshots/directory-progress-0.12.0.jpg`
 * `docs/evidence/screenshots/code-knowledge-overview-0.13.0.png`
 * `docs/evidence/screenshots/code-knowledge-0.13.0.png`
+* `docs/evidence/screenshots/knowledge-source-management-0.14.0.jpg`
+* `docs/evidence/screenshots/knowledge-rejection-audit-0.14.0.jpg`

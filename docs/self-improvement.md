@@ -117,7 +117,7 @@ CapabilityPromotion, CapabilityRollback and GardenerRun. Public endpoints are
 available under `/api/v1/capabilities`, `/api/v1/evaluations`,
 `/api/v1/promotions`, `/api/v1/rollbacks` and `/api/v1/gardeners`.
 
-An active asset is registered only in the current Agent Gateway deployment.
+An active asset is registered only in the current One Agent Gateway deployment.
 The service does not modify another Codex installation. Every activation and
 rollback writes a JSON receipt below
 `D:\workspace\codex-selfimp\installation-receipts` when that root is configured.

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveApiBaseUrl } from "./api";
 
-describe("Agent Gateway API base URL", () => {
+describe("One Agent Gateway API base URL", () => {
   it("uses the management console origin by default", () => {
     expect(resolveApiBaseUrl(undefined)).toBe("");
     expect(resolveApiBaseUrl("same-origin")).toBe("");

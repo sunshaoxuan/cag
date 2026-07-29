@@ -1,8 +1,10 @@
 from typing import Any
 
 import asyncio
+import csv
+import io
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 from fastapi import (
     APIRouter,
@@ -13,8 +15,8 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import func, select
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
@@ -24,7 +26,12 @@ from app.api.dependencies import (
     get_task_service,
 )
 from app.knowledge.service import KnowledgeService, KnowledgeUnavailableError
-from app.models import KnowledgeIngestion, KnowledgeIngestionEvent, KnowledgeSource
+from app.models import (
+    KnowledgeIngestion,
+    KnowledgeIngestionEvent,
+    KnowledgeIngestionRejection,
+    KnowledgeSource,
+)
 from app.services.task_service import ProjectNotFoundError, TaskService
 
 
@@ -144,6 +151,7 @@ def ingestion_response(ingestion: KnowledgeIngestion) -> dict[str, Any]:
         "files_seen": ingestion.files_seen,
         "chunks_written": ingestion.chunks_written,
         "rejected_files": ingestion.rejected_files,
+        "skipped_files": ingestion.skipped_files,
         "unchanged_files": ingestion.unchanged_files,
         "vectors_reused": ingestion.vectors_reused,
         "duplicate_files": ingestion.duplicate_files,
@@ -154,6 +162,11 @@ def ingestion_response(ingestion: KnowledgeIngestion) -> dict[str, Any]:
         "created_at": ingestion.created_at,
         "started_at": ingestion.started_at,
         "completed_at": ingestion.completed_at,
+        "rejection_archive_name": ingestion.rejection_archive_name,
+        "rejection_archive_sha256": ingestion.rejection_archive_sha256,
+        "rejection_archive_created_at": (
+            ingestion.rejection_archive_created_at
+        ),
     }
 
 
@@ -350,6 +363,240 @@ def get_ingestion(
     if ingestion is None:
         raise HTTPException(status_code=404, detail="Ingestion not found")
     return ingestion_response(ingestion)
+
+
+def rejection_response(
+    item: KnowledgeIngestionRejection,
+) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "ingestion_id": item.ingestion_id,
+        "relative_path": item.relative_path,
+        "entry_kind": item.entry_kind,
+        "disposition": item.disposition,
+        "extension": item.extension,
+        "file_size": item.file_size,
+        "reason_code": item.reason_code,
+        "extractor": item.extractor,
+        "error_type": item.error_type,
+        "error_message": item.error_message,
+        "created_at": item.created_at,
+    }
+
+
+def rejection_filters(
+    ingestion_id: str,
+    disposition: str | None,
+    reason_code: str | None,
+    extension: str | None,
+) -> list[Any]:
+    filters: list[Any] = [
+        KnowledgeIngestionRejection.ingestion_id == ingestion_id
+    ]
+    if disposition:
+        filters.append(
+            KnowledgeIngestionRejection.disposition == disposition
+        )
+    if reason_code:
+        filters.append(
+            KnowledgeIngestionRejection.reason_code == reason_code
+        )
+    if extension:
+        normalized = extension.lower()
+        if not normalized.startswith("."):
+            normalized = f".{normalized}"
+        filters.append(KnowledgeIngestionRejection.extension == normalized)
+    return filters
+
+
+@router.get("/knowledge/ingestions/{ingestion_id}/rejections")
+def list_ingestion_rejections(
+    ingestion_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    disposition: str | None = Query(
+        default=None, pattern=r"^(rejected|skipped)$"
+    ),
+    reason_code: str | None = Query(
+        default=None, min_length=1, max_length=64
+    ),
+    extension: str | None = Query(
+        default=None, min_length=1, max_length=64
+    ),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    ingestion = session.get(KnowledgeIngestion, ingestion_id)
+    if ingestion is None:
+        raise HTTPException(status_code=404, detail="Ingestion not found")
+    filters = rejection_filters(
+        ingestion_id, disposition, reason_code, extension
+    )
+    total = int(
+        session.scalar(
+            select(func.count(KnowledgeIngestionRejection.id)).where(
+                *filters
+            )
+        )
+        or 0
+    )
+    items = list(
+        session.scalars(
+            select(KnowledgeIngestionRejection)
+            .where(*filters)
+            .order_by(
+                KnowledgeIngestionRejection.created_at,
+                KnowledgeIngestionRejection.id,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    summary_rows = session.execute(
+        select(
+            KnowledgeIngestionRejection.disposition,
+            KnowledgeIngestionRejection.reason_code,
+            func.count(KnowledgeIngestionRejection.id),
+        )
+        .where(
+            KnowledgeIngestionRejection.ingestion_id == ingestion_id
+        )
+        .group_by(
+            KnowledgeIngestionRejection.disposition,
+            KnowledgeIngestionRejection.reason_code,
+        )
+        .order_by(
+            KnowledgeIngestionRejection.disposition,
+            KnowledgeIngestionRejection.reason_code,
+        )
+    )
+    return {
+        "items": [rejection_response(item) for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "summary": [
+            {
+                "disposition": row[0],
+                "reason_code": row[1],
+                "count": row[2],
+            }
+            for row in summary_rows
+        ],
+        "archive_available": bool(ingestion.rejection_archive_name),
+    }
+
+
+@router.get("/knowledge/ingestions/{ingestion_id}/rejections/export")
+def export_ingestion_rejections(
+    ingestion_id: str,
+    disposition: str | None = Query(
+        default=None, pattern=r"^(rejected|skipped)$"
+    ),
+    reason_code: str | None = Query(
+        default=None, min_length=1, max_length=64
+    ),
+    extension: str | None = Query(
+        default=None, min_length=1, max_length=64
+    ),
+    session: Session = Depends(get_session),
+) -> StreamingResponse:
+    if session.get(KnowledgeIngestion, ingestion_id) is None:
+        raise HTTPException(status_code=404, detail="Ingestion not found")
+    filters = rejection_filters(
+        ingestion_id, disposition, reason_code, extension
+    )
+
+    def rows() -> Iterator[str]:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+
+        def emit(values: list[Any]) -> str:
+            buffer.seek(0)
+            buffer.truncate(0)
+            writer.writerow(values)
+            return buffer.getvalue()
+
+        yield "\ufeff"
+        yield emit(
+            [
+                "id",
+                "ingestion_id",
+                "relative_path",
+                "entry_kind",
+                "disposition",
+                "extension",
+                "file_size",
+                "reason_code",
+                "extractor",
+                "error_type",
+                "error_message",
+                "created_at",
+            ]
+        )
+        result = session.scalars(
+            select(KnowledgeIngestionRejection)
+            .where(*filters)
+            .order_by(
+                KnowledgeIngestionRejection.created_at,
+                KnowledgeIngestionRejection.id,
+            )
+            .execution_options(yield_per=500)
+        )
+        for item in result:
+            yield emit(
+                [
+                    item.id,
+                    item.ingestion_id,
+                    item.relative_path,
+                    item.entry_kind,
+                    item.disposition,
+                    item.extension,
+                    item.file_size,
+                    item.reason_code,
+                    item.extractor,
+                    item.error_type,
+                    item.error_message,
+                    item.created_at.isoformat(),
+                ]
+            )
+
+    return StreamingResponse(
+        rows(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="knowledge-rejections-{ingestion_id}.csv"'
+            ),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/knowledge/ingestions/{ingestion_id}/rejections/archive")
+def download_ingestion_rejection_archive(
+    ingestion_id: str,
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> FileResponse:
+    try:
+        path = service.rejection_archive_path(ingestion_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Ingestion not found"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Rejection archive not found"
+        ) from exc
+    return FileResponse(
+        path,
+        media_type="application/gzip",
+        filename=path.name,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 async def stream_ingestion_events(

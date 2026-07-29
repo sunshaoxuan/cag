@@ -59,7 +59,7 @@ function Stop-GatewayListener {
             return
         }
     }
-    throw "Agent Gateway did not release port $Port."
+    throw "One Agent Gateway did not release port $Port."
 }
 
 function Wait-GatewayReady {
@@ -77,7 +77,7 @@ function Wait-GatewayReady {
             continue
         }
     }
-    throw "Agent Gateway did not become ready on port $Port."
+    throw "One Agent Gateway did not become ready on port $Port."
 }
 
 if ($Action -eq "status") {
@@ -135,7 +135,7 @@ $existingListener = Get-GatewayListener
 if ($null -ne $existingListener) {
     if ($null -eq $existingTask) {
         throw (
-            "Agent Gateway is already listening on port $Port without the " +
+            "One Agent Gateway is already listening on port $Port without the " +
             "managed background task."
         )
     }
@@ -192,7 +192,7 @@ if (
     $null -eq $listener -or
     -not (Test-GatewayListenerIsAllInterfaces -Listener $listener)
 ) {
-    throw "Agent Gateway is ready but is not listening on all interfaces."
+    throw "One Agent Gateway is ready but is not listening on all interfaces."
 }
 
 [pscustomobject]@{

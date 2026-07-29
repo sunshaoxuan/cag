@@ -22,8 +22,11 @@ import {
   getTask,
   ingestKnowledgeSource,
   knowledgeIngestionEventsUrl,
+  knowledgeIngestionRejectionsArchiveUrl,
+  knowledgeIngestionRejectionsExportUrl,
   KnowledgeIngestion,
   KnowledgeIngestionEvent,
+  KnowledgeIngestionRejectionPage,
   KnowledgeSource,
   KnowledgeStatus,
   CodeKnowledgeSummary,
@@ -34,6 +37,7 @@ import {
   listKnowledgeSources,
   listCodeSymbols,
   listKnowledgeSourceIngestions,
+  listKnowledgeIngestionRejections,
   listMemoryCandidates,
   MemoryCandidate,
   listProjects,
@@ -52,6 +56,7 @@ import {
   deleteKnowledgeSource,
   validateKnowledgeSource,
 } from "./api";
+import packageMetadata from "../package.json";
 import "./styles.css";
 
 const EVENT_TYPES = [
@@ -184,6 +189,7 @@ const SOURCE_STATUS_LABELS: Record<string, string> = {
   draft: "待验证",
   validated: "已验证",
   indexing: "索引中",
+  ready: "可检索",
   approved: "可检索",
   failed: "同步失败",
 };
@@ -198,6 +204,8 @@ const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.cleaning.completed": "内容清洗完成",
   "knowledge.indexing.started": "正在向量化并建立索引",
   "knowledge.indexing.completed": "向量索引完成",
+  "knowledge.rejection.archive.created": "文件审计归档完成",
+  "knowledge.rejection.archive.failed": "文件审计归档失败",
   "knowledge.code.analysis.completed": "代码结构分析完成",
   "knowledge.code.graph.persisted": "代码知识图谱已保存",
   "knowledge.memory.persisted": "来源记忆已保存",
@@ -211,6 +219,25 @@ const INGESTION_STATUS_LABELS: Record<string, string> = {
   completed: "已完成",
   failed: "失败",
 };
+
+const REJECTION_REASON_LABELS: Record<string, string> = {
+  unsupported_extension: "不支持的文件类型",
+  file_too_large: "文件超过大小限制",
+  encoding_unsupported: "无法识别文本编码",
+  empty_text: "未提取到有效文本",
+  directory_read_error: "目录无法读取",
+  file_stat_error: "无法读取文件属性",
+  file_permission_denied: "没有文件读取权限",
+  file_read_error: "文件读取失败",
+  pdf_unreadable: "PDF 无法解析或已加密",
+  office_archive_invalid: "Office 文件结构损坏",
+  extractor_unavailable: "内容提取器不可用",
+  extractor_rejected: "内容提取失败",
+};
+
+function rejectionReasonLabel(reasonCode: string): string {
+  return REJECTION_REASON_LABELS[reasonCode] ?? reasonCode;
+}
 
 type ChatTurn = {
   taskId: string;
@@ -407,6 +434,11 @@ export default function App() {
   const [editingKnowledgeSourceId, setEditingKnowledgeSourceId] = useState<
     string | null
   >(null);
+  const [knowledgeFormOpen, setKnowledgeFormOpen] = useState(false);
+  const [knowledgeSourceQuery, setKnowledgeSourceQuery] = useState("");
+  const [knowledgeSourceFilter, setKnowledgeSourceFilter] = useState<
+    "all" | "enabled" | "disabled" | "running"
+  >("all");
   const [knowledgeNotice, setKnowledgeNotice] = useState<string | null>(null);
   const [credentialVisible, setCredentialVisible] = useState(false);
   const [credentialCopied, setCredentialCopied] = useState(false);
@@ -423,6 +455,11 @@ export default function App() {
   const [expandedHistorySourceId, setExpandedHistorySourceId] = useState<
     string | null
   >(null);
+  const [expandedRejectionIngestionId, setExpandedRejectionIngestionId] =
+    useState<string | null>(null);
+  const [knowledgeRejections, setKnowledgeRejections] = useState<
+    Record<string, KnowledgeIngestionRejectionPage>
+  >({});
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
   const [learningMode, setLearningMode] = useState("capture");
@@ -852,7 +889,19 @@ export default function App() {
     });
   }
 
+  function openKnowledgeSourceCreate() {
+    resetKnowledgeSourceForm();
+    setKnowledgeFormOpen(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector(".source-form")?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }
+
   async function handleKnowledgeSourceEdit(source: KnowledgeSource) {
+    setKnowledgeFormOpen(true);
     setEditingKnowledgeSourceId(source.id);
     setCredentialVisible(false);
     setCredentialCopied(false);
@@ -868,9 +917,11 @@ export default function App() {
       credentialUsername: source.credential_username ?? "",
       credentialSecret: "",
     });
-    document.querySelector(".source-form")?.scrollIntoView?.({
-      behavior: "smooth",
-      block: "start",
+    window.requestAnimationFrame(() => {
+      document.querySelector(".source-form")?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
     });
     if (!source.credential_configured) {
       setKnowledgeNotice("正在编辑知识来源。");
@@ -964,6 +1015,7 @@ export default function App() {
         );
       }
       resetKnowledgeSourceForm();
+      setKnowledgeFormOpen(false);
       refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "知识来源保存失败");
@@ -1017,6 +1069,8 @@ export default function App() {
       "knowledge.cleaning.completed",
       "knowledge.indexing.started",
       "knowledge.indexing.completed",
+      "knowledge.rejection.archive.created",
+      "knowledge.rejection.archive.failed",
       "knowledge.code.analysis.completed",
       "knowledge.code.graph.persisted",
       "knowledge.memory.persisted",
@@ -1060,6 +1114,13 @@ export default function App() {
     setKnowledgeNotice("采集任务已创建，正在接收后端事实事件。");
     try {
       const ingestion = await ingestKnowledgeSource(sourceId);
+      setKnowledgeSources((current) =>
+        current.map((source) =>
+          source.id === sourceId
+            ? { ...source, last_ingestion: ingestion }
+            : source,
+        ),
+      );
       connectKnowledgeIngestion(ingestion.id);
     } catch (reason) {
       setKnowledgeBusy(null);
@@ -1083,6 +1144,29 @@ export default function App() {
       setExpandedHistorySourceId(sourceId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "运行历史加载失败");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  async function handleKnowledgeRejectionToggle(ingestionId: string) {
+    if (expandedRejectionIngestionId === ingestionId) {
+      setExpandedRejectionIngestionId(null);
+      return;
+    }
+    setKnowledgeBusy(ingestionId);
+    setError(null);
+    try {
+      const page = await listKnowledgeIngestionRejections(ingestionId);
+      setKnowledgeRejections((current) => ({
+        ...current,
+        [ingestionId]: page,
+      }));
+      setExpandedRejectionIngestionId(ingestionId);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "文件审计明细加载失败",
+      );
     } finally {
       setKnowledgeBusy(null);
     }
@@ -1165,17 +1249,48 @@ export default function App() {
     document.body.scrollTop = 0;
   }
 
+  const filteredKnowledgeSources = knowledgeSources.filter((source) => {
+    const query = knowledgeSourceQuery.trim().toLocaleLowerCase();
+    const matchesQuery =
+      !query ||
+      source.name.toLocaleLowerCase().includes(query) ||
+      source.location.toLocaleLowerCase().includes(query) ||
+      SOURCE_TYPE_LABELS[source.source_type]
+        .toLocaleLowerCase()
+        .includes(query);
+    const isRunning =
+      source.last_ingestion?.status === "queued" ||
+      source.last_ingestion?.status === "running";
+    const matchesFilter =
+      knowledgeSourceFilter === "all" ||
+      (knowledgeSourceFilter === "enabled" && source.enabled) ||
+      (knowledgeSourceFilter === "disabled" && !source.enabled) ||
+      (knowledgeSourceFilter === "running" && isRunning);
+    return matchesQuery && matchesFilter;
+  });
+  const activeKnowledgeSource = knowledgeSources.find(
+    (source) =>
+      source.last_ingestion?.status === "queued" ||
+      source.last_ingestion?.status === "running",
+  );
+  const latestCollectionProgress = [...knowledgeEvents]
+    .reverse()
+    .find((event) => event.type === "knowledge.collection.progress");
+
   return (
     <main className="app-shell">
       <header className="site-header">
         <a
           className="brand"
           href="/"
-          aria-label="Agent Gateway 首页"
+          aria-label="One Agent Gateway 首页"
           onClick={(event) => navigateTo("overview", event)}
         >
           <span className="brand-mark" aria-hidden="true">AG</span>
-          <span>Agent Gateway</span>
+          <span className="brand-title">One Agent Gateway</span>
+          <small className="brand-version">
+            v{packageMetadata.version}
+          </small>
         </a>
         <nav className="site-nav" aria-label="主要导航">
           <a
@@ -1551,10 +1666,75 @@ export default function App() {
               </div>
             )}
 
-            <form
-              className="source-form"
-              onSubmit={handleKnowledgeSourceSubmit}
+            <section
+              className="knowledge-management-bar"
+              aria-label="知识来源管理工具"
             >
+              <div className="knowledge-management-metrics">
+                <article>
+                  <span>来源总数</span>
+                  <strong>{knowledgeSources.length}</strong>
+                </article>
+                <article>
+                  <span>已启用</span>
+                  <strong>
+                    {
+                      knowledgeSources.filter((source) => source.enabled)
+                        .length
+                    }
+                  </strong>
+                </article>
+                <article>
+                  <span>正在学习</span>
+                  <strong>{activeKnowledgeSource ? 1 : 0}</strong>
+                </article>
+                <article>
+                  <span>需要处理</span>
+                  <strong>
+                    {
+                      knowledgeSources.filter(
+                        (source) =>
+                          source.status === "failed" ||
+                          source.consecutive_failures > 0,
+                      ).length
+                    }
+                  </strong>
+                </article>
+              </div>
+              <div className="knowledge-management-controls">
+                <input
+                  aria-label="搜索知识来源"
+                  value={knowledgeSourceQuery}
+                  onChange={(event) =>
+                    setKnowledgeSourceQuery(event.target.value)
+                  }
+                  placeholder="按名称、位置或类型搜索"
+                />
+                <select
+                  aria-label="筛选知识来源"
+                  value={knowledgeSourceFilter}
+                  onChange={(event) =>
+                    setKnowledgeSourceFilter(
+                      event.target.value as typeof knowledgeSourceFilter,
+                    )
+                  }
+                >
+                  <option value="all">全部来源</option>
+                  <option value="enabled">仅已启用</option>
+                  <option value="disabled">仅已停用</option>
+                  <option value="running">正在学习</option>
+                </select>
+                <button type="button" onClick={openKnowledgeSourceCreate}>
+                  创建知识来源
+                </button>
+              </div>
+            </section>
+
+            {knowledgeFormOpen && (
+              <form
+                className="source-form"
+                onSubmit={handleKnowledgeSourceSubmit}
+              >
               <div className="source-form-heading">
                 <div>
                   <span>
@@ -1572,7 +1752,10 @@ export default function App() {
                       type="button"
                       className="button-quiet"
                       disabled={knowledgeBusy !== null}
-                      onClick={resetKnowledgeSourceForm}
+                      onClick={() => {
+                        resetKnowledgeSourceForm();
+                        setKnowledgeFormOpen(false);
+                      }}
                     >
                       取消编辑
                     </button>
@@ -1778,7 +1961,8 @@ export default function App() {
               <small>
                 编辑时会按需从 Windows 凭据库读取密码或令牌。显示和复制只发生在当前管理页面，数据库继续保存凭据引用。
               </small>
-            </form>
+              </form>
+            )}
 
             <div className="source-workspace">
               <section className="source-registry" aria-label="已登记知识来源">
@@ -1788,10 +1972,16 @@ export default function App() {
                 </div>
                 {knowledgeSources.length === 0 && (
                   <div className="compact-empty">
-                    <p>尚未登记知识来源。</p>
+                    <p>尚未登记知识来源，请使用“创建知识来源”。</p>
                   </div>
                 )}
-                {knowledgeSources.map((source) => (
+                {knowledgeSources.length > 0 &&
+                  filteredKnowledgeSources.length === 0 && (
+                    <div className="compact-empty">
+                      <p>没有符合当前搜索和筛选条件的来源。</p>
+                    </div>
+                  )}
+                {filteredKnowledgeSources.map((source) => (
                   <article className="source-card" key={source.id}>
                     <header>
                       <div>
@@ -1800,7 +1990,8 @@ export default function App() {
                       </div>
                       <span
                         className={`status status-${
-                          source.status === "approved"
+                          source.status === "approved" ||
+                          source.status === "ready"
                             ? "completed"
                             : source.status
                         }`}
@@ -1982,11 +2173,139 @@ export default function App() {
                                 {ingestion.changed_files} · 删除{" "}
                                 {ingestion.removed_files} · 未变化{" "}
                                 {ingestion.unchanged_files} · 复用向量{" "}
-                                {ingestion.vectors_reused}
+                                {ingestion.vectors_reused} · 拒绝{" "}
+                                {ingestion.rejected_files} · 跳过{" "}
+                                {ingestion.skipped_files}
                               </small>
                               {ingestion.error && (
                                 <p>{ingestion.error}</p>
                               )}
+                              {(ingestion.rejected_files > 0 ||
+                                ingestion.skipped_files > 0 ||
+                                ingestion.rejection_archive_name) && (
+                                <div className="rejection-audit-actions">
+                                  <button
+                                    type="button"
+                                    className="button-quiet"
+                                    disabled={knowledgeBusy !== null}
+                                    onClick={() =>
+                                      handleKnowledgeRejectionToggle(
+                                        ingestion.id,
+                                      )
+                                    }
+                                  >
+                                    {expandedRejectionIngestionId ===
+                                    ingestion.id
+                                      ? "收起文件审计"
+                                      : "查看文件审计"}
+                                  </button>
+                                  <a
+                                    href={knowledgeIngestionRejectionsExportUrl(
+                                      ingestion.id,
+                                    )}
+                                    download
+                                  >
+                                    导出 CSV
+                                  </a>
+                                  {ingestion.rejection_archive_name && (
+                                    <a
+                                      href={knowledgeIngestionRejectionsArchiveUrl(
+                                        ingestion.id,
+                                      )}
+                                      download
+                                    >
+                                      下载压缩归档
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                              {expandedRejectionIngestionId === ingestion.id &&
+                                knowledgeRejections[ingestion.id] && (
+                                  <section
+                                    className="rejection-audit"
+                                    aria-label={`${ingestion.id}文件处理审计`}
+                                  >
+                                    <div className="rejection-audit-summary">
+                                      <strong>
+                                        文件处理审计{" "}
+                                        {knowledgeRejections[
+                                          ingestion.id
+                                        ].total.toLocaleString()}{" "}
+                                        条
+                                      </strong>
+                                      {knowledgeRejections[
+                                        ingestion.id
+                                      ].summary.map((item) => (
+                                        <span
+                                          key={`${item.disposition}-${item.reason_code}`}
+                                        >
+                                          {item.disposition === "rejected"
+                                            ? "拒绝"
+                                            : "跳过"}{" "}
+                                          {rejectionReasonLabel(
+                                            item.reason_code,
+                                          )}{" "}
+                                          {item.count.toLocaleString()}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <div className="rejection-audit-table-wrap">
+                                      <table>
+                                        <thead>
+                                          <tr>
+                                            <th>处理</th>
+                                            <th>文件路径</th>
+                                            <th>原因</th>
+                                            <th>扩展名</th>
+                                            <th>错误</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {knowledgeRejections[
+                                            ingestion.id
+                                          ].items.map((item) => (
+                                            <tr key={item.id}>
+                                              <td>
+                                                {item.disposition ===
+                                                "rejected"
+                                                  ? "拒绝"
+                                                  : "跳过"}
+                                              </td>
+                                              <td>{item.relative_path}</td>
+                                              <td>
+                                                {rejectionReasonLabel(
+                                                  item.reason_code,
+                                                )}
+                                                <small>
+                                                  {item.reason_code}
+                                                </small>
+                                              </td>
+                                              <td>{item.extension || "无"}</td>
+                                              <td>
+                                                {item.error_type
+                                                  ? `${item.error_type}: ${
+                                                      item.error_message ?? ""
+                                                    }`
+                                                  : "无异常"}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    {knowledgeRejections[ingestion.id].total >
+                                      knowledgeRejections[ingestion.id].items
+                                        .length && (
+                                      <small>
+                                        页面显示前{" "}
+                                        {knowledgeRejections[
+                                          ingestion.id
+                                        ].items.length.toLocaleString()}{" "}
+                                        条，完整记录请导出 CSV。
+                                      </small>
+                                    )}
+                                  </section>
+                                )}
                             </article>
                           ),
                         )}
@@ -1995,9 +2314,9 @@ export default function App() {
                   </article>
                 ))}
               </section>
-              <section className="collection-events" aria-label="采集过程">
+              <section className="collection-events" aria-label="学习运行中心">
                 <div className="source-section-title">
-                  <h3>采集过程</h3>
+                  <h3>学习运行中心</h3>
                   <div className="collection-event-controls">
                     <span>
                       后端已反馈 {knowledgeReceivedCount.toLocaleString()} 条
@@ -2016,6 +2335,93 @@ export default function App() {
                       <option value="200">显示 200 条</option>
                     </select>
                   </div>
+                </div>
+                <div
+                  className={`learning-run-overview ${
+                    activeKnowledgeSource ? "is-running" : ""
+                  }`}
+                >
+                  <div>
+                    <span>
+                      {activeKnowledgeSource
+                        ? "当前正在学习"
+                        : "当前没有运行任务"}
+                    </span>
+                    <strong>
+                      {activeKnowledgeSource?.name ?? "等待学习任务"}
+                    </strong>
+                  </div>
+                  {activeKnowledgeSource?.last_ingestion && (
+                    <dl>
+                      <div>
+                        <dt>状态</dt>
+                        <dd>
+                          {INGESTION_STATUS_LABELS[
+                            activeKnowledgeSource.last_ingestion.status
+                          ] ??
+                            activeKnowledgeSource.last_ingestion.status}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>开始时间</dt>
+                        <dd>
+                          {activeKnowledgeSource.last_ingestion.started_at
+                            ? formatTime(
+                                activeKnowledgeSource.last_ingestion
+                                  .started_at,
+                              )
+                            : "等待启动"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>当前目录</dt>
+                        <dd>
+                          {String(
+                            latestCollectionProgress?.data.directory ?? "准备中",
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>文件进度</dt>
+                        <dd>
+                          {String(
+                            latestCollectionProgress?.data.files_processed ??
+                              0,
+                          )}
+                          /
+                          {String(
+                            latestCollectionProgress?.data.files_discovered ??
+                              0,
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>拒绝</dt>
+                        <dd>
+                          {String(
+                            latestCollectionProgress?.data.rejected_files ??
+                              activeKnowledgeSource.last_ingestion
+                                .rejected_files,
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>跳过</dt>
+                        <dd>
+                          {String(
+                            latestCollectionProgress?.data.skipped_files ??
+                              activeKnowledgeSource.last_ingestion
+                                .skipped_files,
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                  {!activeKnowledgeSource && (
+                    <p>
+                      在任一已启用来源上选择“采集并学习”，运行进度会持续显示在这里。
+                    </p>
+                  )}
                 </div>
                 {knowledgeEvents.length === 0 && (
                   <div className="compact-empty">

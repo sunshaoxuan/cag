@@ -120,6 +120,7 @@ export type KnowledgeIngestion = {
   files_seen: number;
   chunks_written: number;
   rejected_files: number;
+  skipped_files: number;
   duplicate_files: number;
   unchanged_files: number;
   vectors_reused: number;
@@ -130,6 +131,37 @@ export type KnowledgeIngestion = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  rejection_archive_name: string | null;
+  rejection_archive_sha256: string | null;
+  rejection_archive_created_at: string | null;
+};
+
+export type KnowledgeIngestionRejection = {
+  id: string;
+  ingestion_id: string;
+  relative_path: string;
+  entry_kind: "file" | "directory";
+  disposition: "rejected" | "skipped";
+  extension: string;
+  file_size: number | null;
+  reason_code: string;
+  extractor: string;
+  error_type: string | null;
+  error_message: string | null;
+  created_at: string;
+};
+
+export type KnowledgeIngestionRejectionPage = {
+  items: KnowledgeIngestionRejection[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: Array<{
+    disposition: "rejected" | "skipped";
+    reason_code: string;
+    count: number;
+  }>;
+  archive_available: boolean;
 };
 
 export type KnowledgeIngestionEvent = {
@@ -459,6 +491,32 @@ export function knowledgeIngestionEventsUrl(ingestionId: string): string {
     follow: "true",
   });
   return `${API_BASE_URL}/api/v1/knowledge/ingestions/${ingestionId}/events?${query}`;
+}
+
+export function listKnowledgeIngestionRejections(
+  ingestionId: string,
+  limit = 100,
+  offset = 0,
+): Promise<KnowledgeIngestionRejectionPage> {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request<KnowledgeIngestionRejectionPage>(
+    `/api/v1/knowledge/ingestions/${ingestionId}/rejections?${query}`,
+  );
+}
+
+export function knowledgeIngestionRejectionsExportUrl(
+  ingestionId: string,
+): string {
+  return `${API_BASE_URL}/api/v1/knowledge/ingestions/${ingestionId}/rejections/export`;
+}
+
+export function knowledgeIngestionRejectionsArchiveUrl(
+  ingestionId: string,
+): string {
+  return `${API_BASE_URL}/api/v1/knowledge/ingestions/${ingestionId}/rejections/archive`;
 }
 
 export function getCodeKnowledgeSummary(

@@ -327,7 +327,7 @@ class CodexAppServerRuntime:
                 {
                     "clientInfo": {
                         "name": "agent-gateway",
-                        "title": "Codex/ChatGPT Agent Gateway",
+                        "title": "One Agent Gateway",
                         "version": APP_VERSION,
                     },
                     "capabilities": {"experimentalApi": True},

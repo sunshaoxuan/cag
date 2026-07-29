@@ -109,6 +109,8 @@ knowledge.cleaning.started
 knowledge.cleaning.completed
 knowledge.indexing.started
 knowledge.indexing.completed
+knowledge.rejection.archive.created
+knowledge.rejection.archive.failed
 knowledge.memory.persisted
 knowledge.ingestion.completed
 knowledge.ingestion.failed
@@ -126,7 +128,8 @@ completion of every directory. The event data contains:
   "files_discovered": 120,
   "files_processed": 100,
   "current_directory_files": 24,
-  "rejected_files": 1
+  "rejected_files": 1,
+  "skipped_files": 3
 }
 ```
 
@@ -139,7 +142,8 @@ queued.
 
 An encrypted or unreadable PDF increments `rejected_files` and collection
 continues. Credentials discovered in adjacent files are never used to decrypt
-documents automatically.
+documents automatically. Unsupported extensions and files over the configured
+size limit increment `skipped_files`.
 
 If the ingest action is called while the same source already has a queued or
 running ingestion, the API returns that active ingestion and attaches the
@@ -151,9 +155,42 @@ memory and counts the complete received stream separately. Selecting 50, 100 or
 complete and resumable.
 
 The terminal ingestion record includes `files_seen`, `chunks_written`,
-`rejected_files`, `duplicate_files`, `unchanged_files`, `vectors_reused`,
-`changed_files`, `removed_files`, `trigger`, `started_at` and `completed_at`.
-The source ingestion list retains the latest fifty runs.
+`rejected_files`, `skipped_files`, `duplicate_files`, `unchanged_files`,
+`vectors_reused`, `changed_files`, `removed_files`, `trigger`, `started_at`,
+`completed_at` and compressed rejection archive metadata. The source ingestion
+list retains the latest fifty runs.
+
+## File processing audit
+
+Every rejected or skipped source entry creates one
+`KnowledgeIngestionRejection` row with an independent UUID physical ID and an
+ingestion foreign key. The row stores the source-relative path, entry kind,
+disposition, extension, size, stable reason code, extractor, exception type,
+sanitized error message and timestamp.
+
+```text
+GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections
+GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export
+GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive
+```
+
+The JSON endpoint supports `limit`, `offset`, `disposition`, `reason_code` and
+`extension`. It returns the filtered total and an unfiltered reason summary.
+The export endpoint returns UTF-8 BOM CSV. The archive endpoint returns the
+immutable gzip JSONL snapshot created for the run. Its first line is a header
+with schema version, ingestion ID, source ID, record count and creation time.
+
+Stable reason codes include `unsupported_extension`, `file_too_large`,
+`encoding_unsupported`, `empty_text`, `directory_read_error`,
+`file_stat_error`, `file_permission_denied`, `file_read_error`,
+`pdf_unreadable`, `office_archive_invalid`, `extractor_unavailable` and
+`extractor_rejected`.
+
+Database detail and compressed archives have separate retention settings.
+Default retention is 90 days for queryable rows and 365 days for gzip files.
+Pruning applies only after a terminal run has a completed archive. Relative
+paths and sanitized errors avoid placing the registered absolute source root
+in audit output.
 
 ## Scheduled lifecycle
 

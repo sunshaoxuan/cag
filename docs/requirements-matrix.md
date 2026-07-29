@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.13.0 | Evidence |
+| Requirement | Status for 0.14.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -42,10 +42,15 @@ Legend:
 | Truthful runtime feedback | Implemented | User-visible app-server deltas are durable CAG events; hidden reasoning and credentials remain excluded |
 | Enterprise knowledge plane | Implemented | `docs/enterprise-knowledge.md`, knowledge API tests |
 | Managed local, UNC, Git, GitLab and SVN knowledge sources | Implemented | Connector tests, `docs/knowledge-source-api.md`, Knowledge page browser evidence |
+| Visual knowledge source lifecycle management | Implemented | Source create, edit, enable, disable, search, filter, trigger, live run center and history controls |
 | Source credential isolation | Implemented | Credential store contract, Git environment header and SVN stdin tests; live authenticated UNC acceptance requires a target share |
 | Managed credential reveal and copy | Implemented | explicit no-store reveal API, Windows Credential Manager lookup, frontend display and copy tests |
 | Source collection stage SSE | Implemented | Durable collection, cleaning, indexing and Source Memory events |
 | Scalable folder traversal feedback | Implemented | Breadth-first directory queue, per-directory progress SSE, single-flight guard and browser evidence |
+| File-level ingestion rejection audit | Implemented | Durable path and reason records, paged API, CSV export, gzip JSONL archive and retention tests |
+| Resumable parallel knowledge work queue | Planned | `docs/adr/0015-resumable-path-complete-knowledge-ingestion.md`; work-item lease, pause, resume and checkpoint tests required |
+| Path-complete semantic indexing | Planned | ADR 0015; directory, file-name and zero-byte path retrieval tests required |
+| Managed PostgreSQL and pgvector host runtime | Partial | Compose pgvector exists; Windows managed runtime migration and verified cutover remain |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
 | Governed Modular RAG | Implemented | Ingestion, hybrid recall, citations and context isolation |

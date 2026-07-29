@@ -1,1 +1,1 @@
-"""Agent Gateway backend package."""
+"""One Agent Gateway backend package."""

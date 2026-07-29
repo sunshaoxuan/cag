@@ -128,7 +128,7 @@ def create_app(
             database.dispose()
 
     application = FastAPI(
-        title="Codex/ChatGPT Agent Gateway",
+        title="One Agent Gateway",
         version=APP_VERSION,
         description=(
             "Gateway for task execution through locally authenticated Codex runtimes."

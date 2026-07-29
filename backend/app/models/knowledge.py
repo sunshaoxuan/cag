@@ -165,6 +165,7 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     files_seen: Mapped[int] = mapped_column(Integer, default=0)
     chunks_written: Mapped[int] = mapped_column(Integer, default=0)
     rejected_files: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_files: Mapped[int] = mapped_column(Integer, default=0)
     unchanged_files: Mapped[int] = mapped_column(Integer, default=0)
     vectors_reused: Mapped[int] = mapped_column(Integer, default=0)
     duplicate_files: Mapped[int] = mapped_column(Integer, default=0)
@@ -181,11 +182,26 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    rejection_archive_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    rejection_archive_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    rejection_archive_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     events = relationship(
         "KnowledgeIngestionEvent",
         back_populates="ingestion",
         cascade="all, delete-orphan",
         order_by="KnowledgeIngestionEvent.sequence",
+    )
+    rejections = relationship(
+        "KnowledgeIngestionRejection",
+        back_populates="ingestion",
+        cascade="all, delete-orphan",
+        order_by="KnowledgeIngestionRejection.created_at",
     )
 
 
@@ -200,6 +216,40 @@ class KnowledgeIngestionEvent(PhysicalIdMixin, Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     ingestion = relationship("KnowledgeIngestion", back_populates="events")
+
+
+class KnowledgeIngestionRejection(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_ingestion_rejections"
+    __table_args__ = (
+        UniqueConstraint(
+            "ingestion_id",
+            "relative_path",
+            name="uq_knowledge_ingestion_rejections_ingestion_path",
+        ),
+    )
+
+    ingestion_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_ingestions.id", ondelete="CASCADE"), index=True
+    )
+    relative_path: Mapped[str] = mapped_column(Text)
+    entry_kind: Mapped[str] = mapped_column(
+        String(32), default="file", index=True
+    )
+    disposition: Mapped[str] = mapped_column(String(32), index=True)
+    extension: Mapped[str] = mapped_column(String(64), default="", index=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason_code: Mapped[str] = mapped_column(String(64), index=True)
+    extractor: Mapped[str] = mapped_column(String(64), default="filesystem")
+    error_type: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    ingestion = relationship(
+        "KnowledgeIngestion", back_populates="rejections"
+    )
 
 
 class KnowledgeDocument(PhysicalIdMixin, Base):
