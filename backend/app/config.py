@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.14.0"
+APP_VERSION = "0.15.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -19,13 +19,16 @@ class Settings(BaseSettings):
     )
 
     environment: str = "development"
-    database_url: str = "sqlite+pysqlite:///./agent_gateway.db"
+    database_url: str = (
+        "postgresql+psycopg://agent_gateway@127.0.0.1:5432/agent_gateway"
+    )
+    allow_sqlite_for_tests: bool = False
     redis_url: str = "redis://127.0.0.1:6379/0"
     runtime_provider: str = "fake"
     fake_runtime_delay_ms: int = Field(default=25, ge=0, le=60_000)
     sse_poll_interval_ms: int = Field(default=100, ge=10, le=10_000)
     log_level: str = "INFO"
-    auto_create_schema: bool = True
+    auto_create_schema: bool = False
     codex_executable: Path | None = None
     codex_startup_timeout_seconds: int = Field(default=30, ge=5, le=300)
     codex_turn_timeout_seconds: int = Field(default=900, ge=30, le=7_200)

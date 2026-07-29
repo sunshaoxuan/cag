@@ -30,7 +30,13 @@ def create_app(
     runtime: AgentRuntime | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
-    database = Database(active_settings.database_url)
+    database = Database(
+        active_settings.database_url,
+        allow_sqlite_for_tests=(
+            active_settings.environment == "test"
+            and active_settings.allow_sqlite_for_tests
+        ),
+    )
     project_registry = ProjectRegistry(active_settings.projects_dir)
     task_service = TaskService(project_registry)
     knowledge_service = KnowledgeService(

@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed for the release after 0.14.0. Version 0.14.0 implements durable
-rejection audit and the management surface. It does not claim resumable
-ingestion.
+Partially accepted in version 0.15.0. PostgreSQL with pgvector, native vector
+search and the controlled SQLite migration path are implemented. Durable work
+items, path-semantic indexing, parallel leases, pause and resume remain planned.
 
 ## Problem statement
 
@@ -24,9 +24,8 @@ Only extracted content becomes searchable knowledge. A zero-byte file, an
 unsupported file and a directory can carry business meaning in their names and
 relative paths, while the current semantic index excludes that information.
 
-The managed Windows host runner currently defaults to a SQLite file. PostgreSQL
-with pgvector exists in the Compose architecture. The enterprise managed
-runtime must converge on PostgreSQL and pgvector before resumable parallel
+The managed Windows host runner used to default to a SQLite file. Version
+0.15.0 makes PostgreSQL with pgvector mandatory before resumable parallel
 workers are enabled.
 
 ## Decision
@@ -141,9 +140,9 @@ evidence.
 
 ### Storage boundary
 
-The managed runtime uses PostgreSQL 16 plus pgvector. SQLite remains a unit-test
-and explicit development compatibility backend. The Windows launcher must not
-silently select SQLite for an enterprise managed run.
+The managed runtime uses PostgreSQL 16 plus pgvector. SQLite remains available
+only inside isolated automated tests and the one-time migration reader. The
+Windows launcher rejects a SQLite runtime.
 
 Migration from the current SQLite runtime requires a dry run, row and vector
 counts, foreign-key validation, sampled vector comparison and an operator

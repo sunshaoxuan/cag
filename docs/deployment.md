@@ -1,13 +1,13 @@
 # Deployment
 
-## 0.14.0 development deployment
+## 0.15.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
 Requirements:
 
 * Docker Desktop with Docker Compose.
-* Available ports 8000 and 5173.
+* Available ports 8000, 5173 and local-only 5432.
 * No OpenAI Platform API Key.
 
 Start:
@@ -25,7 +25,9 @@ The Compose deployment contains:
 * `redis`: Redis 7 with append-only persistence.
 * `agent_gateway_workspaces`: named volume for task Git clones.
 
-PostgreSQL and Redis are reachable only through the Compose network.
+PostgreSQL is also published at `127.0.0.1:5432` for the trusted Windows host
+Gateway. It is not published to the LAN. Redis remains reachable only through
+the Compose network.
 
 The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
@@ -57,7 +59,8 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-For local development:
+For local development, configure `backend/.env.local` with a PostgreSQL URL,
+then run:
 
 ```powershell
 cd backend
@@ -100,7 +103,7 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status and starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status, PostgreSQL connectivity and the pgvector extension, then starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
 For an interactive desktop test that must remain available after the launching shell exits, register and start the on-demand background task:
 
@@ -110,7 +113,10 @@ For an interactive desktop test that must remain available after the launching s
 
 Use the same script with `status`, `stop` or `uninstall` to inspect, stop or remove the background task. The task has no automatic trigger and runs only when explicitly started. Status and stop operations verify the actual port listener because the Windows virtual-environment launcher can leave the runtime Python child active after the scheduler action completes. Starting the task replaces a prior loopback-only managed listener and verifies that the resulting address is `0.0.0.0` or `::`.
 
-The host Gateway stores its SQLite runtime state under `workspaces/.gateway`, which is excluded from version control. An explicit `AGENT_GATEWAY_DATABASE_URL` value takes precedence.
+The host Gateway requires PostgreSQL with pgvector. Configure the connection in
+the ignored `backend/.env.local` file or the
+`AGENT_GATEWAY_DATABASE_URL` environment variable. The managed runtime rejects
+SQLite.
 
 When sibling directory `D:\workspace\codex-selfimp` exists, the script configures it as the self-improvement root. An explicit `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` value takes precedence.
 
@@ -120,6 +126,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 
 | Setting | Purpose |
 |---|---|
+| `AGENT_GATEWAY_DATABASE_URL` | PostgreSQL pgvector connection URL |
 | `AGENT_GATEWAY_RUNTIME_PROVIDER` | `fake` or `codex-app-server` |
 | `AGENT_GATEWAY_CODEX_EXECUTABLE` | Callable local Codex executable |
 | `AGENT_GATEWAY_CODEX_STARTUP_TIMEOUT_SECONDS` | Protocol initialization timeout |
@@ -132,6 +139,12 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_LEASE_SECONDS` | Database lease duration for one claimed source |
 | `AGENT_GATEWAY_SVN_EXECUTABLE` | SVN command line executable |
+| `AGENT_GATEWAY_KNOWLEDGE_ENABLED` | Enable the enterprise knowledge plane |
+| `AGENT_GATEWAY_OLLAMA_BASE_URL` | Private local Ollama endpoint |
+| `AGENT_GATEWAY_OLLAMA_EMBEDDING_MODEL` | Embedding model name |
+| `AGENT_GATEWAY_OLLAMA_MEMORY_MODEL` | Memory extraction and reranking model |
+| `AGENT_GATEWAY_OLLAMA_EMBEDDING_DIMENSIONS` | Stored vector dimensions, fixed at 1024 |
+| `AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS` | Semicolon separated source root allowlist |
 
 The self improvement root also contains `installation-receipts`. The Promotion
 Service writes one JSON receipt for each Gateway activation and rollback.
@@ -141,18 +154,57 @@ The startup path detects legacy local databases that were created before
 Alembic version tracking. A complete recognized schema is stamped at its exact
 historical revision and then upgraded. A partial or ambiguous core schema fails
 closed and requires operator review.
-| `AGENT_GATEWAY_KNOWLEDGE_ENABLED` | Enable the enterprise knowledge plane |
-| `AGENT_GATEWAY_OLLAMA_BASE_URL` | Private local Ollama endpoint |
-| `AGENT_GATEWAY_OLLAMA_EMBEDDING_MODEL` | Embedding model name |
-| `AGENT_GATEWAY_OLLAMA_MEMORY_MODEL` | Memory extraction and reranking model |
-| `AGENT_GATEWAY_OLLAMA_EMBEDDING_DIMENSIONS` | Stored vector dimensions, fixed at 1024 |
-| `AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS` | Semicolon separated source root allowlist |
 
 Alembic revision `20260728_0010` keeps existing sources in `manual` mode.
 Operators can enable scheduled synchronization per source through the Knowledge
 page or source PATCH API. New web registrations default to scheduled mode.
 The scheduler starts only when the knowledge plane and scheduler setting are
 both enabled.
+
+## SQLite to pgvector cutover
+
+The legacy SQLite source remains active until its current learning run reaches a
+terminal state. The migration command refuses `queued` and `running`
+ingestions.
+
+Create a fresh PostgreSQL database and set its target URL in the current
+PowerShell session:
+
+```powershell
+docker exec cag-postgres-1 createdb `
+  -U agent_gateway agent_gateway_pgvector
+$env:AGENT_GATEWAY_MIGRATION_TARGET_URL = `
+  "postgresql+psycopg://agent_gateway:<password>@127.0.0.1:5432/agent_gateway_pgvector"
+```
+
+Initialize the target schema, then run the migration in read-only preflight
+mode:
+
+```powershell
+$env:AGENT_GATEWAY_DATABASE_URL = `
+  $env:AGENT_GATEWAY_MIGRATION_TARGET_URL
+cd backend
+.\.venv\Scripts\python.exe -m alembic upgrade head
+cd ..
+.\scripts\migrate-sqlite-to-pgvector.ps1
+```
+
+Review `migration_report.json` and `migration_report.md`. The receipt must show
+SQLite integrity `ok`, zero active ingestions, matching table counts, matching
+physical ID digests, matching vector counts, dimension 1024 and an HNSW index.
+
+After the preflight passes, execute the same migration with explicit write
+authorization:
+
+```powershell
+.\scripts\migrate-sqlite-to-pgvector.ps1 -Apply
+```
+
+Point `backend/.env.local` at the verified PostgreSQL database and start the
+Gateway. `/health/ready` must report `backend` equal to `postgresql`,
+`native_vector_search` equal to `true` and a pgvector version. Keep the legacy
+SQLite source as an offline read-only rollback artifact. It is no longer a
+runtime database after cutover.
 
 Alembic revision `20260728_0011` adds code symbols, code relationships and
 code-document links. Existing indexed sources require one subsequent ingestion

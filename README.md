@@ -4,7 +4,7 @@ One Agent Gateway 让网站、内部平台和自动化系统通过自然语言 P
 
 ## 当前版本
 
-当前版本为 `0.14.0`。Gateway 默认监听全部 IPv4 网络接口。5173 端口提供统一的 CAG 可视化管理台，包含 API 测试、调用监控、企业知识、代码知识、长期记忆和能力治理。企业知识来源保留为持久注册表，可按计划重复扫描，只重新向量化变化内容，并保存每轮同步历史、租约、重试和来源状态。每个被拒绝或跳过的文件保存相对路径、原因和异常证据，支持管理画面查询、CSV 导出以及自动生成并定期清理的 gzip 归档。代码索引保存结构化符号、调用与依赖关系、文档关联证据、解析器和编码元数据。文件夹来源使用逐目录队列扫描，每次只打开一个目录，并通过 SSE 持续反馈当前相对目录、已扫描目录、待扫描目录和文件进度。编辑已配置来源时可以按需读取 Windows 凭据库中的密码或令牌，并在当前管理页面显示或复制。管理台通过同源反向代理连接本机订阅认证的 Codex Gateway。外部系统可以通过任务 API 和持续会话 API 调用 CAG。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。
+当前版本为 `0.15.0`。Gateway 默认监听全部 IPv4 网络接口。正式运行时使用 PostgreSQL 16 加 pgvector，向量召回由数据库内余弦距离算子和 HNSW 索引执行。5173 端口提供统一的 CAG 可视化管理台，包含 API 测试、调用监控、企业知识、代码知识、长期记忆和能力治理。企业知识来源保留为持久注册表，可按计划重复扫描，只重新向量化变化内容，并保存每轮同步历史、租约、重试和来源状态。每个被拒绝或跳过的文件保存相对路径、原因和异常证据，支持管理画面查询、CSV 导出以及自动生成并定期清理的 gzip 归档。代码索引保存结构化符号、调用与依赖关系、文档关联证据、解析器和编码元数据。文件夹来源使用逐目录队列扫描，每次只打开一个目录，并通过 SSE 持续反馈当前相对目录、已扫描目录、待扫描目录和文件进度。编辑已配置来源时可以按需读取 Windows 凭据库中的密码或令牌，并在当前管理页面显示或复制。管理台通过同源反向代理连接本机订阅认证的 Codex Gateway。外部系统可以通过任务 API 和持续会话 API 调用 CAG。每次任务返回 Trace ID，支持幂等提交，并将知识、Harness、Agent、命令、审批、验证和学习动作写入统一审计 SSE。
 
 CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划、命令输出和推理摘要反馈。前端可以独立选择关键、标准或完整反馈，并限制画面显示条数；这些显示设置不会删减后端事件历史。
 
@@ -23,7 +23,7 @@ CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划�
 * Conversation 到 Codex thread 的持久映射和多轮恢复。
 * 复用同一 CAG Conversation 的连续对话页面。
 * `self-improvement-candidate` 任务专属候选输出目录。
-* 本机 Ollama、pgvector、混合检索和经过批准的最小知识上下文注入。
+* 本机 Ollama、PostgreSQL pgvector 原生向量检索、混合检索和经过批准的最小知识上下文注入。
 * 客户私有知识、产品共享知识和记忆候选治理。
 * 内容哈希、来源指纹和路径约束驱动的幂等向量索引。
 * 本机目录、认证 UNC、Git、GitLab 和 SVN 的受管知识来源。
@@ -56,13 +56,19 @@ CAG 会持久化并通过 SSE 如实转发允许公开的 Agent 消息、计划�
 
 ## 启动本机订阅运行时
 
-先安装后端开发依赖并确认本机 Codex 已通过 ChatGPT 登录，然后运行：
+先启动 PostgreSQL pgvector，为 `backend/.env.local` 配置本机数据库连接，并确认本机 Codex 已通过 ChatGPT 登录：
+
+```powershell
+docker compose up -d postgres
+```
+
+随后运行：
 
 ```powershell
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-该脚本检查 `codex login status`，设置 `codex-app-server` 运行时并启动 Gateway。它不会读取 Codex 凭据文件，也不会要求 API Key。
+该脚本检查 `codex login status`、PostgreSQL 和 pgvector，设置 `codex-app-server` 运行时并启动 Gateway。它不会读取 Codex 凭据文件，也不会要求 API Key。数据库不可用或连接到 SQLite 时启动会关闭。
 
 ## 调用端接入
 
@@ -137,7 +143,7 @@ pnpm test
 pnpm build
 ```
 
-测试默认使用临时 SQLite 数据库和 Fake Runtime，不连接生产系统。
+常规单元测试使用隔离的临时 SQLite 数据库和 Fake Runtime。真实 pgvector 集成测试使用专属 PostgreSQL 测试库。正式运行路径拒绝 SQLite。
 
 ## 文档
 

@@ -46,11 +46,16 @@ text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies,
 binary executables and repository metadata are excluded. The default size limit
 is ten megabytes per file and can be reduced by deployment policy.
 
-Version 0.14.0 indexes successfully extracted content. Empty files, directory
+Version 0.15.0 indexes successfully extracted content. Empty files, directory
 names and unsupported file names are retained in file-level audit evidence and
 are not yet embedded as path-semantic knowledge. ADR 0015 defines the required
 path-complete and resumable worker architecture without claiming it is
 implemented in this version.
+
+The managed knowledge store is PostgreSQL 16 with pgvector. Embeddings use the
+native `vector(1024)` type and an HNSW cosine index. The vector channel executes
+distance ordering inside PostgreSQL. SQLite is accepted only by isolated tests
+and the one-time migration reader.
 
 The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE

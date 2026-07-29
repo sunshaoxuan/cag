@@ -8,7 +8,7 @@ def test_live_health_reports_version(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "agent-gateway",
-        "version": "0.14.0",
+        "version": "0.15.0",
     }
 
 
@@ -17,3 +17,6 @@ def test_ready_health_checks_database(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    assert response.json()["backend"] == "sqlite"
+    assert response.json()["native_vector_search"] is False
+    assert response.json()["pgvector_version"] is None

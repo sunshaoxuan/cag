@@ -2174,14 +2174,14 @@ export default function App() {
                                 {ingestion.removed_files} · 未变化{" "}
                                 {ingestion.unchanged_files} · 复用向量{" "}
                                 {ingestion.vectors_reused} · 拒绝{" "}
-                                {ingestion.rejected_files} · 跳过{" "}
-                                {ingestion.skipped_files}
+                                {ingestion.rejected_files ?? 0} · 跳过{" "}
+                                {ingestion.skipped_files ?? 0}
                               </small>
                               {ingestion.error && (
                                 <p>{ingestion.error}</p>
                               )}
-                              {(ingestion.rejected_files > 0 ||
-                                ingestion.skipped_files > 0 ||
+                              {((ingestion.rejected_files ?? 0) > 0 ||
+                                (ingestion.skipped_files ?? 0) > 0 ||
                                 ingestion.rejection_archive_name) && (
                                 <div className="rejection-audit-actions">
                                   <button
@@ -2401,7 +2401,8 @@ export default function App() {
                           {String(
                             latestCollectionProgress?.data.rejected_files ??
                               activeKnowledgeSource.last_ingestion
-                                .rejected_files,
+                                .rejected_files ??
+                              0,
                           )}
                         </dd>
                       </div>
@@ -2411,7 +2412,8 @@ export default function App() {
                           {String(
                             latestCollectionProgress?.data.skipped_files ??
                               activeKnowledgeSource.last_ingestion
-                                .skipped_files,
+                                .skipped_files ??
+                              0,
                           )}
                         </dd>
                       </div>

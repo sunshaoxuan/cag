@@ -1,10 +1,15 @@
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runScript = Join-Path $repositoryRoot "scripts\run-local-codex-gateway.ps1"
 $manageScript = Join-Path $repositoryRoot "scripts\manage-local-codex-gateway-task.ps1"
+$migrationScript = Join-Path $repositoryRoot "scripts\migrate-sqlite-to-pgvector.ps1"
 
 Describe "Local Codex Gateway PowerShell scripts" {
     It "parses both entrypoint scripts without errors" {
-        foreach ($scriptPath in @($runScript, $manageScript)) {
+        foreach ($scriptPath in @(
+            $runScript,
+            $manageScript,
+            $migrationScript
+        )) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -16,10 +21,19 @@ Describe "Local Codex Gateway PowerShell scripts" {
         }
     }
 
-    It "uses the ignored workspace state directory by default" {
+    It "requires PostgreSQL with pgvector for the managed runtime" {
         $content = Get-Content -Raw -LiteralPath $runScript
-        $content | Should Match 'workspaces\\\.gateway'
-        $content | Should Match 'AGENT_GATEWAY_DATABASE_URL'
+        $content | Should Match 'Database\(s\.database_url\)'
+        $content | Should Match 'storage_status'
+        $content | Should Not Match 'sqlite\+pysqlite'
+        $content | Should Not Match 'agent_gateway\.db'
+    }
+
+    It "keeps the old SQLite path inside the explicit migration tool" {
+        $content = Get-Content -Raw -LiteralPath $migrationScript
+        $content | Should Match 'agent_gateway\.db'
+        $content | Should Match 'AGENT_GATEWAY_MIGRATION_TARGET_URL'
+        $content | Should Match '\[switch\]\$Apply'
     }
 
     It "binds the Gateway to every IPv4 interface" {

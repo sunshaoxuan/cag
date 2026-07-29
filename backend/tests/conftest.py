@@ -101,6 +101,7 @@ def settings(tmp_path: Path, projects_dir: Path) -> Settings:
     return Settings(
         environment="test",
         database_url=sqlite_url(tmp_path / "gateway.sqlite"),
+        allow_sqlite_for_tests=True,
         fake_runtime_delay_ms=0,
         sse_poll_interval_ms=10,
         auto_create_schema=True,

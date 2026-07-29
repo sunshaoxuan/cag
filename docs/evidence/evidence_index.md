@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.15.0
+
+* `docs/evidence/pgvector-runtime-0.15.0/`
+* `docs/evidence/screenshots/pgvector-runtime-0.15.0.jpg`
+
 ## Version 0.14.0
 
 * `docs/evidence/knowledge-rejection-audit-0.14.0/`

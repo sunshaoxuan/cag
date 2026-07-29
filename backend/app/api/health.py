@@ -18,10 +18,13 @@ def live() -> dict[str, str]:
 
 
 @router.get("/health/ready")
-def ready(database: Database = Depends(get_database)) -> dict[str, str]:
+def ready(
+    database: Database = Depends(get_database),
+) -> dict[str, str | bool | None]:
     database.is_ready()
     return {
         "status": "ready",
         "service": APP_NAME,
         "version": APP_VERSION,
+        **database.storage_status(),
     }

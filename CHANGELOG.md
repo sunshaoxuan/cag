@@ -2,6 +2,31 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.15.0
+
+发布日期：2026-07-29
+
+### Changed
+
+* 正式运行时数据库统一为 PostgreSQL 16 加 pgvector，Windows 启动脚本取消 SQLite 自动回退。
+* PostgreSQL 启动就绪检查同时验证 `vector` 扩展，并在健康响应中公开数据库类型、原生向量检索状态和 pgvector 版本。
+* 向量召回使用 PostgreSQL `<=>` 余弦距离算子和 HNSW 索引完成前二十项排序，SQLite 余弦计算仅保留在隔离单元测试中。
+* PostgreSQL 容器将 5432 端口发布到本机回环地址，供本机 ChatGPT 订阅运行时使用。
+
+### Added
+
+* 新增 SQLite 到 PostgreSQL pgvector 的一次性整体迁移工具和 PowerShell 入口。
+* 迁移会在源库仍有排队或运行中的学习任务时关闭执行。
+* 迁移默认执行只读预检，写入必须显式指定 `Apply`。
+* 迁移回执保存来源 SHA 256、完整性检查、逐表行数、物理 ID 摘要、向量数量、向量维度和 HNSW 索引状态。
+* 新增真实 PostgreSQL pgvector 集成测试，覆盖原生向量检索和 SQLite 整体迁移。
+
+### Cutover boundary
+
+* 当前长时间学习任务继续使用原 SQLite 运行库直到自然结束。
+* 任务结束后执行整体迁移、核对回执，再把 8000 服务切换到 PostgreSQL。0.15.0 发布过程不重启当前学习进程。
+* 可接续并行作业和全路径语义学习继续按 ADR 0015 实现。
+
 ## 0.14.0
 
 发布日期：2026-07-29

@@ -1,0 +1,66 @@
+{
+  "status": "blocked",
+  "mode": "dry_run",
+  "generated_at": "2026-07-29T02:32:38.292165+00:00",
+  "source": {
+    "path": "D:\\workspace\\cag\\workspaces\\.gateway\\agent_gateway.db",
+    "sha256": "51f560715f0d8d62fcec5444da91a900159ae4380ed36a1bb1e7801478400fef",
+    "integrity": "ok",
+    "active_ingestions": [
+      {
+        "id": "6235639f-7ef3-4a9e-b369-b57aa1fce3d0",
+        "status": "running"
+      }
+    ],
+    "table_counts": {
+      "agent_artifacts": 9,
+      "agent_runs": 15,
+      "alembic_version": 1,
+      "approval_requests": 27,
+      "audit_cursors": 1,
+      "capability_assets": 18,
+      "capability_evaluations": 0,
+      "capability_promotions": 0,
+      "capability_rollbacks": 0,
+      "code_document_links": 4,
+      "code_relations": 3,
+      "code_symbols": 4,
+      "conversations": 9,
+      "data_quality_metrics": 89,
+      "gardener_runs": 0,
+      "harness_profiles": 0,
+      "harness_runs": 3,
+      "knowledge_chunks": 1875,
+      "knowledge_conflicts": 0,
+      "knowledge_documents": 11,
+      "knowledge_evaluations": 0,
+      "knowledge_ingestion_events": 27860,
+      "knowledge_ingestions": 93,
+      "knowledge_sources": 3,
+      "knowledge_usages": 0,
+      "learning_signals": 1,
+      "memory_candidates": 0,
+      "product_versions": 1,
+      "products": 1,
+      "projects": 1,
+      "quality_scores": 1,
+      "review_findings": 0,
+      "risk_records": 0,
+      "standard_controls": 7,
+      "task_events": 5484,
+      "task_graph_nodes": 21,
+      "tasks": 12,
+      "tenants": 1,
+      "verification_runs": 1
+    },
+    "vector_count": 1875,
+    "vector_dimensions": [
+      1024
+    ]
+  },
+  "target": {
+    "url": "postgresql+psycopg://agent_gateway:***@127.0.0.1:5432/unused"
+  },
+  "tables": [],
+  "error": "SQLite source still has active knowledge ingestions: 6235639f-7ef3-4a9e-b369-b57aa1fce3d0:running"
+}

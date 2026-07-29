@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import Float, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -1244,23 +1244,43 @@ class KnowledgeService:
             ),
         )
         with self._database.session_factory() as session:
-            chunks = list(
-                session.scalars(
-                    select(KnowledgeChunk)
-                    .join(KnowledgeDocument)
-                    .join(KnowledgeSource)
-                    .options(
-                        selectinload(KnowledgeChunk.document).selectinload(
-                            KnowledgeDocument.source
-                        )
-                    )
-                    .where(
-                        KnowledgeSource.approved_for_codex.is_(True),
-                        KnowledgeSource.status == KnowledgeStatus.APPROVED,
-                        access_filter,
+            chunk_query = (
+                select(KnowledgeChunk)
+                .join(KnowledgeDocument)
+                .join(KnowledgeSource)
+                .options(
+                    selectinload(KnowledgeChunk.document).selectinload(
+                        KnowledgeDocument.source
                     )
                 )
+                .where(
+                    KnowledgeSource.approved_for_codex.is_(True),
+                    KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                    access_filter,
+                )
             )
+            chunks = list(
+                session.scalars(chunk_query)
+            )
+            if self._database.native_vector_search:
+                vector_distance = KnowledgeChunk.embedding.op(
+                    "<=>",
+                    return_type=Float,
+                )(query_vector)
+                vector_ranked = list(
+                    session.scalars(
+                        chunk_query.order_by(vector_distance).limit(20)
+                    )
+                )
+            else:
+                vector_ranked = sorted(
+                    chunks,
+                    key=lambda item: self._cosine(
+                        query_vector,
+                        item.embedding,
+                    ),
+                    reverse=True,
+                )[:20]
             symbols = list(
                 session.scalars(
                     select(CodeSymbol)
@@ -1310,11 +1330,6 @@ class KnowledgeService:
                 else []
             )
         terms = japanese_search_terms(query)
-        vector_ranked = sorted(
-            chunks,
-            key=lambda item: self._cosine(query_vector, item.embedding),
-            reverse=True,
-        )[:20]
         keyword_ranked = sorted(
             chunks,
             key=lambda item: sum(

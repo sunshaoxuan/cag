@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.14.0`
+Current version: `0.15.0`
 
 ## Conventions
 
@@ -25,13 +25,14 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.14.0"
+    "version": "0.15.0"
 }
 ```
 
 ### `GET /health/ready`
 
-Checks database connectivity.
+Checks PostgreSQL connectivity and the pgvector extension. The response also
+returns `backend`, `native_vector_search` and `pgvector_version`.
 
 ## Projects
 

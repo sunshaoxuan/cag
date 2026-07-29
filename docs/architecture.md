@@ -123,16 +123,15 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 
 ### Persistence
 
-SQLAlchemy 2 models are used with PostgreSQL in containers and SQLite in tests.
-Alembic owns schema versioning through revision `20260729_0012`. Local
-development can create missing tables; container deployment runs Alembic before
-serving traffic.
+SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
+Alembic owns schema versioning through revision `20260729_0013`. SQLite is
+restricted to isolated automated tests and the one-time migration reader.
 
-The current Windows host launcher also falls back to SQLite when no database
-URL is configured. This compatibility behavior is not the target enterprise
-storage boundary. ADR 0015 requires a verified migration and PostgreSQL plus
-pgvector for the managed host runtime before resumable parallel ingestion is
-claimed.
+The Windows host launcher validates PostgreSQL and the pgvector extension
+before Alembic or the application starts. Vector recall orders candidates with
+the database `<=>` cosine-distance operator and the HNSW index. The current
+legacy runtime is cut over only after its active learning task completes and
+the complete migration receipt passes.
 
 ### Project registry
 
@@ -317,8 +316,8 @@ Phase 2 records task ID, project ID, workspace ID, workspace commit, event type,
 
 Noncritical defaults are controlled by settings and recorded in ADR 0002:
 
-* Development database: local SQLite file.
-* Container database: PostgreSQL 16.
+* Managed and development database: PostgreSQL 16 with pgvector.
+* Isolated unit-test database: temporary SQLite.
 * Redis: Redis 7.
 * Container runtime: Fake Runtime for deterministic tests.
 * Host runtime: `codex-app-server` when started through `scripts/run-local-codex-gateway.ps1`.

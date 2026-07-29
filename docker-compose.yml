@@ -30,7 +30,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       AGENT_GATEWAY_ENVIRONMENT: container
-      AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://agent_gateway:agent_gateway@postgres:5432/agent_gateway
+      AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_gateway}:${POSTGRES_PASSWORD:-agent_gateway}@postgres:5432/${POSTGRES_DB:-agent_gateway}
       AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
       AGENT_GATEWAY_RUNTIME_PROVIDER: fake
       AGENT_GATEWAY_KNOWLEDGE_ENABLED: "false"
@@ -67,6 +67,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_gateway}
     volumes:
       - agent_gateway_postgres:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test:
         - CMD-SHELL

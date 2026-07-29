@@ -4,6 +4,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.config import get_settings
 from app.models import Base
 
 
@@ -12,9 +13,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-environment_database_url = os.environ.get("AGENT_GATEWAY_DATABASE_URL")
-if environment_database_url:
-    config.set_main_option("sqlalchemy.url", environment_database_url)
+environment_database_url = (
+    os.environ.get("AGENT_GATEWAY_DATABASE_URL")
+    or config.get_main_option("sqlalchemy.url")
+    or get_settings().database_url
+)
+config.set_main_option("sqlalchemy.url", environment_database_url)
 target_metadata = Base.metadata
 
 
