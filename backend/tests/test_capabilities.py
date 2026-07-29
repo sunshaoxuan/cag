@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.capabilities.service import CapabilityService
+from tests.waiters import wait_for_task
 
 
 class RepeatedFailureRuntime:
@@ -216,7 +217,7 @@ def test_task_learning_proposes_candidate_after_three_successes(
             },
         )
         assert created.status_code == 202
-        task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+        task = wait_for_task(client, created.json()["id"])
         assert task["status"] == "completed"
 
     skills = client.get("/api/v1/capabilities/skills").json()
@@ -240,7 +241,7 @@ def test_task_learning_proposes_failure_candidate_after_two_failures(
                 },
             )
             assert created.status_code == 202
-            task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+            task = wait_for_task(client, created.json()["id"])
             assert task["status"] == "failed"
 
         learned = [

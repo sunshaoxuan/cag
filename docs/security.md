@@ -132,7 +132,7 @@ Phase 2 implements one Git clone per task under the configured workspace root an
 
 ## 8. Network and service exposure
 
-* PostgreSQL and Redis have no host ports in the default Compose file.
+* PostgreSQL and Redis bind only to host loopback ports in the default Compose file.
 * Gateway exposes port 8000 on every IPv4 host interface by default.
 * Frontend exposes the visual management console on port 5173.
 * Management API and SSE requests use the 5173 origin and are proxied to the

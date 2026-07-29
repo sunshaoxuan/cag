@@ -2,7 +2,11 @@
 
 Base path: `/api/v1`
 
-Current version: `0.16.0`
+Current version: `0.17.0`
+
+The visual online reference is available at `/api-docs`. FastAPI interactive
+OpenAPI remains available at `/docs`, and the machine-readable contract is
+available at `/openapi.json`.
 
 ## Conventions
 
@@ -25,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.16.0"
+    "version": "0.17.0"
 }
 ```
 
@@ -88,6 +92,30 @@ knowledge plaintext.
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}`
+
+## Durable queue
+
+PostgreSQL is authoritative for queue state. Redis Pub/Sub only wakes workers
+across processes. A Redis outage increases pickup latency to the configured
+poll interval and does not lose accepted jobs.
+
+* `GET /api/v1/queue/status`
+* `GET /api/v1/queue/items?queue_name=interactive&status=queued`
+* `POST /api/v1/queue/items/{item_id}/cancel`
+
+Interactive Agent tasks and knowledge ingestions use separate worker pools.
+Tasks in the same Conversation are claimed in creation order. Tasks belonging
+to different Conversations can run concurrently.
+
+Example:
+
+```powershell
+$status = Invoke-RestMethod `
+  -Uri "http://gateway-host:8000/api/v1/queue/status"
+$status.queues
+$status.workers
+$status.redis
+```
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
 * `POST /api/v1/knowledge/search`
 * `GET /api/v1/memory-candidates`

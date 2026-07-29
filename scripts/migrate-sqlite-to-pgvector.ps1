@@ -1,7 +1,8 @@
 param(
     [string]$Source = "",
     [string]$OutputDirectory = "",
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$ReplaceTarget
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,6 +70,9 @@ try {
     )
     if ($Apply) {
         $arguments += "--apply"
+    }
+    if ($ReplaceTarget) {
+        $arguments += "--replace-target"
     }
     & $pythonExecutable @arguments
     if ($LASTEXITCODE -ne 0) {

@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.16.0 development deployment
+## 0.17.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -25,9 +25,9 @@ The Compose deployment contains:
 * `redis`: Redis 7 with append-only persistence.
 * `agent_gateway_workspaces`: named volume for task Git clones.
 
-PostgreSQL is also published at `127.0.0.1:5432` for the trusted Windows host
-Gateway. It is not published to the LAN. Redis remains reachable only through
-the Compose network.
+PostgreSQL and Redis are published at `127.0.0.1:5432` and
+`127.0.0.1:6379` for the trusted Windows host Gateway. Neither service is
+published to the LAN.
 
 The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
@@ -167,8 +167,19 @@ both enabled.
 ## SQLite to pgvector cutover
 
 The legacy SQLite source remains active until its current learning run reaches a
-terminal state. The migration command refuses `queued` and `running`
-ingestions.
+terminal state. The migration command refuses active knowledge ingestions and
+active Agent tasks.
+
+The normal Windows launcher applies Alembic revision `20260729_0014` and then
+runs the guarded automatic cutover. When the legacy source has no active work,
+the launcher creates a consistent snapshot, replaces application tables inside
+one PostgreSQL transaction, validates row counts, UUID digests, vectors and the
+HNSW index, then writes `data_migration_receipts`. A matching receipt makes
+later starts idempotent. The SQLite source is retained.
+
+After the cutover and Redis readiness check, the launcher rebuilds and refreshes
+the frontend container with `docker compose up -d --no-deps frontend`. This
+updates port `5173` without starting or replacing the Compose Gateway service.
 
 Create a fresh PostgreSQL database and set its target URL in the current
 PowerShell session:
@@ -201,6 +212,13 @@ authorization:
 
 ```powershell
 .\scripts\migrate-sqlite-to-pgvector.ps1 -Apply
+```
+
+To intentionally replace an already initialized target with the final legacy
+snapshot, use the same transactional mode as automatic startup:
+
+```powershell
+.\scripts\migrate-sqlite-to-pgvector.ps1 -Apply -ReplaceTarget
 ```
 
 Point `backend/.env.local` at the verified PostgreSQL database and start the

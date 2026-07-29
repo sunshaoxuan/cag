@@ -78,6 +78,30 @@ export type KnowledgeStatus = {
   dimensions?: number;
 };
 
+export type QueueStatus = {
+  running: boolean;
+  configured_workers: Record<string, number>;
+  redis: {
+    enabled: boolean;
+    connected: boolean;
+    last_error?: string | null;
+  };
+  queues: Array<{
+    name: string;
+    counts: Record<string, number>;
+    oldest_queued_at: string | null;
+    oldest_wait_seconds: number;
+  }>;
+  workers: Array<{
+    id: string;
+    worker_key: string;
+    queue_name: string;
+    status: string;
+    current_item_id: string | null;
+    heartbeat_at: string;
+  }>;
+};
+
 export type KnowledgeSource = {
   id: string;
   project_id: string;
@@ -343,6 +367,10 @@ const API_BASE_URL = resolveApiBaseUrl(
   import.meta.env.VITE_API_BASE_URL,
 );
 
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init);
   if (!response.ok) {
@@ -415,6 +443,10 @@ export function auditEventsUrl(afterSequence = 0): string {
 
 export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
   return request<KnowledgeStatus>("/api/v1/knowledge/status");
+}
+
+export function getQueueStatus(): Promise<QueueStatus> {
+  return request<QueueStatus>("/api/v1/queue/status");
 }
 
 export function listKnowledgeSources(): Promise<KnowledgeSource[]> {

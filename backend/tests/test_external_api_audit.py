@@ -1,6 +1,7 @@
 import json
 
 from fastapi.testclient import TestClient
+from tests.waiters import wait_for_task
 
 
 def parse_sse(response_text: str) -> list[dict[str, object]]:
@@ -47,6 +48,7 @@ def test_external_submission_returns_trace_and_audit_links(
 
     assert response.status_code == 202
     task = response.json()
+    wait_for_task(client, task["id"])
     assert task["trace_id"] == task["id"]
     assert task["trigger_source"] == "external_api"
     assert task["client_id"] == "erp-integration"
@@ -113,6 +115,8 @@ def test_global_audit_sse_tracks_every_task_action_in_one_sequence(
         client_id="cag-web-test",
         request_id="web-request-001",
     )
+    wait_for_task(client, external.json()["id"])
+    wait_for_task(client, console.json()["id"])
 
     response = client.get(
         "/api/v1/audit/events",
@@ -150,7 +154,8 @@ def test_global_audit_sse_tracks_every_task_action_in_one_sequence(
 def test_global_audit_sse_resumes_from_last_event_id(
     client: TestClient,
 ) -> None:
-    submit_external_task(client)
+    submitted = submit_external_task(client)
+    wait_for_task(client, submitted.json()["id"])
 
     response = client.get(
         "/api/v1/audit/events",

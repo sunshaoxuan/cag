@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
+from tests.waiters import wait_for_task
 
 
 def create_task(
@@ -38,10 +39,7 @@ def test_create_and_get_completed_task(client: TestClient) -> None:
     assert created["project_id"] == "f10d23c0-2d10-4cab-a1fa-f43df90b6c3f"
     assert created["final_report"] is None
 
-    response = client.get(f"/api/v1/tasks/{created['id']}")
-
-    assert response.status_code == 200
-    completed = response.json()
+    completed = wait_for_task(client, str(created["id"]))
     assert completed["status"] == "completed"
     assert completed["started_at"] is not None
     assert completed["completed_at"] is not None
@@ -125,6 +123,7 @@ def test_task_events_are_ordered_sse(client: TestClient) -> None:
 
 def test_task_events_can_resume_after_sequence(client: TestClient) -> None:
     task = create_task(client)
+    wait_for_task(client, str(task["id"]))
 
     response = client.get(
         f"/api/v1/tasks/{task['id']}/events",
@@ -195,7 +194,7 @@ class CapturingRuntime:
 def test_runtime_failure_is_persisted(app_factory) -> None:
     with TestClient(app_factory(FailingRuntime())) as client:
         created = create_task(client)
-        task = client.get(f"/api/v1/tasks/{created['id']}").json()
+        task = wait_for_task(client, str(created["id"]))
         events = parse_sse(
             client.get(f"/api/v1/tasks/{created['id']}/events").text
         )
@@ -231,26 +230,31 @@ def test_disallowed_runtime_profile_returns_422(client: TestClient) -> None:
     )
 
 
-def test_gateway_restart_marks_interrupted_task_failed(app_factory) -> None:
+def test_gateway_restart_requeues_interrupted_task(app_factory) -> None:
     app = app_factory()
     with TestClient(app) as client:
         task = create_task(client)
-        with app.state.database.session_factory() as session:
-            stored = app.state.task_service.get_task(session, task["id"])
-            stored.status = "running"
-            stored.error = None
-            stored.completed_at = None
-            session.commit()
+        wait_for_task(client, str(task["id"]))
+    with app.state.database.session_factory() as session:
+        stored = app.state.task_service.get_task(session, task["id"])
+        stored.status = "running"
+        stored.error = None
+        stored.completed_at = None
+        session.commit()
 
     with TestClient(app_factory()) as restarted:
-        recovered = restarted.get(f"/api/v1/tasks/{task['id']}").json()
+        recovered = wait_for_task(restarted, str(task["id"]))
         events = parse_sse(
             restarted.get(f"/api/v1/tasks/{task['id']}/events").text
         )
 
-    assert recovered["status"] == "failed"
-    assert recovered["error"] == "Gateway restarted before task completion"
-    assert events[-1]["data"]["reason"] == "gateway_restart"
+    assert recovered["status"] == "completed"
+    assert recovered["error"] is None
+    assert any(
+        event["type"] == "task.requeued"
+        and event["data"]["reason"] == "durable_queue_bootstrap"
+        for event in events
+    )
 
 
 def test_self_improvement_profile_gets_task_scoped_candidate_root(
@@ -271,7 +275,7 @@ def test_self_improvement_profile_gets_task_scoped_candidate_root(
             },
         )
         assert created.status_code == 202
-        task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+        task = wait_for_task(client, created.json()["id"])
 
     assert task["status"] == "completed"
     assert len(runtime.additional_workspace_roots) == 1
@@ -288,8 +292,8 @@ def test_each_task_receives_a_distinct_workspace(app_factory) -> None:
     with TestClient(app) as client:
         first = create_task(client)
         second = create_task(client)
-        first_task = client.get(f"/api/v1/tasks/{first['id']}").json()
-        second_task = client.get(f"/api/v1/tasks/{second['id']}").json()
+        first_task = wait_for_task(client, str(first["id"]))
+        second_task = wait_for_task(client, str(second["id"]))
 
     assert first_task["workspace_id"] != second_task["workspace_id"]
     with app.state.database.session_factory() as session:

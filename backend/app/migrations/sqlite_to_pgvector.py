@@ -26,8 +26,14 @@ from sqlalchemy.engine import Connection, Engine, make_url
 from app.models import Base
 
 
-TARGET_ALEMBIC_REVISION = "20260729_0013"
+TARGET_ALEMBIC_REVISION = "20260729_0014"
 ACTIVE_INGESTION_STATUSES = ("queued", "running")
+ACTIVE_TASK_STATUSES = (
+    "queued",
+    "preparing",
+    "running",
+    "waiting_approval",
+)
 ALEMBIC_BOOTSTRAP_TABLES = {"audit_cursors"}
 
 
@@ -87,6 +93,17 @@ def inspect_sqlite_source(path: Path) -> dict[str, Any]:
             active_ingestions = [
                 {"id": str(row[0]), "status": str(row[1])} for row in rows
             ]
+        active_tasks: list[dict[str, str]] = []
+        if "tasks" in tables:
+            placeholders = ",".join("?" for _ in ACTIVE_TASK_STATUSES)
+            rows = connection.execute(
+                "SELECT id, status FROM tasks "
+                f"WHERE status IN ({placeholders}) ORDER BY created_at",
+                ACTIVE_TASK_STATUSES,
+            )
+            active_tasks = [
+                {"id": str(row[0]), "status": str(row[1])} for row in rows
+            ]
         table_counts = {
             table: int(
                 connection.execute(
@@ -123,6 +140,7 @@ def inspect_sqlite_source(path: Path) -> dict[str, Any]:
         return {
             "integrity": integrity,
             "active_ingestions": active_ingestions,
+            "active_tasks": active_tasks,
             "table_counts": table_counts,
             "vector_count": vector_count,
             "vector_dimensions": vector_dimensions,
@@ -218,6 +236,7 @@ def _copy_tables(
     target_engine: Engine,
     *,
     batch_size: int,
+    replace_target: bool = False,
 ) -> list[TableReceipt]:
     source_metadata = MetaData()
     source_metadata.reflect(bind=source_engine)
@@ -225,6 +244,9 @@ def _copy_tables(
     receipts: list[TableReceipt] = []
     with source_engine.connect() as source_connection:
         with target_engine.begin() as target_connection:
+            if replace_target:
+                for target_table in reversed(Base.metadata.sorted_tables):
+                    target_connection.execute(delete(target_table))
             for target_table in Base.metadata.sorted_tables:
                 source_table = source_tables.get(target_table.name)
                 target_count = int(
@@ -417,12 +439,19 @@ def migrate(
     output_dir: Path,
     apply: bool,
     batch_size: int = 500,
+    replace_target: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
     source = inspect_sqlite_source(source_path)
     report: dict[str, Any] = {
         "status": "preflight_passed",
-        "mode": "apply" if apply else "dry_run",
+        "mode": (
+            "replace_target"
+            if apply and replace_target
+            else "apply"
+            if apply
+            else "dry_run"
+        ),
         "generated_at": datetime.now(UTC).isoformat(),
         "source": {
             "path": str(source_path),
@@ -446,6 +475,16 @@ def migrate(
         report["error"] = error
         _write_report(output_dir, report)
         raise MigrationBlockedError(error)
+    if source["active_tasks"]:
+        active = ", ".join(
+            f"{item['id']}:{item['status']}"
+            for item in source["active_tasks"]
+        )
+        error = "SQLite source still has active tasks: " + active
+        report["status"] = "blocked"
+        report["error"] = error
+        _write_report(output_dir, report)
+        raise MigrationBlockedError(error)
     target_engine = create_engine(target_url, pool_pre_ping=True)
     snapshot_path = output_dir / ".source-snapshot.sqlite"
     try:
@@ -461,6 +500,7 @@ def migrate(
                     snapshot_engine,
                     target_engine,
                     batch_size=batch_size,
+                    replace_target=replace_target,
                 )
             finally:
                 snapshot_engine.dispose()
@@ -497,6 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--replace-target", action="store_true")
     parser.add_argument("--batch-size", type=int, default=500)
     return parser
 
@@ -515,6 +556,7 @@ def main() -> int:
             output_dir=arguments.output_dir,
             apply=arguments.apply,
             batch_size=arguments.batch_size,
+            replace_target=arguments.replace_target,
         )
     except MigrationBlockedError as error:
         print(f"Migration blocked: {error}", file=sys.stderr)

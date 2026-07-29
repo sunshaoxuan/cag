@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.16.0"
+APP_VERSION = "0.17.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -24,6 +24,25 @@ class Settings(BaseSettings):
     )
     allow_sqlite_for_tests: bool = False
     redis_url: str = "redis://127.0.0.1:6379/0"
+    queue_enabled: bool = True
+    queue_redis_enabled: bool = True
+    queue_redis_channel_prefix: str = "cag:queue"
+    queue_interactive_workers: int = Field(default=2, ge=1, le=32)
+    queue_knowledge_workers: int = Field(default=1, ge=1, le=8)
+    queue_poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
+    queue_lease_seconds: int = Field(default=120, ge=30, le=3_600)
+    queue_heartbeat_seconds: int = Field(default=10, ge=1, le=300)
+    queue_shutdown_seconds: int = Field(default=30, ge=1, le=300)
+    auto_migrate_legacy_sqlite: bool = True
+    legacy_sqlite_path: Path = (
+        DEFAULT_REPOSITORY_ROOT
+        / "workspaces"
+        / ".gateway"
+        / "agent_gateway.db"
+    )
+    migration_receipt_root: Path = (
+        DEFAULT_REPOSITORY_ROOT / "backups" / "knowledge-migrations"
+    )
     runtime_provider: str = "fake"
     fake_runtime_delay_ms: int = Field(default=25, ge=0, le=60_000)
     sse_poll_interval_ms: int = Field(default=100, ge=10, le=10_000)

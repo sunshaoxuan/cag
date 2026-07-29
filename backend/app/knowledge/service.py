@@ -53,6 +53,7 @@ from app.models import (
     MemoryCandidate,
     MemoryStatus,
     Project,
+    QueueItem,
     Task,
 )
 from app.models.base import utc_now
@@ -480,6 +481,21 @@ class KnowledgeService:
                 ingestion,
                 "knowledge.ingestion.queued",
                 {"source_id": source_id, "trigger": trigger},
+            )
+            session.add(
+                QueueItem(
+                    queue_name="knowledge",
+                    job_type="knowledge_ingestion",
+                    ingestion_id=ingestion.id,
+                    project_id=source.project_id,
+                    client_id=(
+                        "knowledge-scheduler"
+                        if trigger == "scheduled"
+                        else "knowledge-console"
+                    ),
+                    priority=20 if trigger == "scheduled" else 40,
+                    max_attempts=2,
+                )
             )
             session.commit()
             return ingestion, True

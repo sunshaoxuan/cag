@@ -4,6 +4,7 @@ import json
 from fastapi.testclient import TestClient
 
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
+from tests.waiters import wait_for_task
 
 
 def create_conversation(client: TestClient) -> dict[str, object]:
@@ -166,7 +167,7 @@ def test_tasks_reuse_persisted_codex_thread(app_factory) -> None:
             },
         )
         assert first.status_code == 202
-        first_task = client.get(f"/api/v1/tasks/{first.json()['id']}").json()
+        first_task = wait_for_task(client, first.json()["id"])
         assert first_task["status"] == "completed"
 
         stored = client.get(
@@ -183,7 +184,7 @@ def test_tasks_reuse_persisted_codex_thread(app_factory) -> None:
             },
         )
         assert second.status_code == 202
-        second_task = client.get(f"/api/v1/tasks/{second.json()['id']}").json()
+        second_task = wait_for_task(client, second.json()["id"])
         assert second_task["status"] == "completed"
 
         tasks = client.get(
@@ -232,7 +233,7 @@ def test_conversation_sse_preserves_every_feedback_delta(app_factory) -> None:
             },
         )
         assert created.status_code == 202
-        task = client.get(f"/api/v1/tasks/{created.json()['id']}").json()
+        task = wait_for_task(client, created.json()["id"])
         assert task["status"] == "completed"
 
         response = client.get(
@@ -281,7 +282,7 @@ def test_conversation_event_stream_resumes_from_header(app_factory) -> None:
     runtime = PersistentThreadRuntime()
     with TestClient(app_factory(runtime)) as client:
         conversation = create_conversation(client)
-        client.post(
+        created = client.post(
             "/api/v1/tasks",
             json={
                 "project_id": "test-project",
@@ -289,6 +290,8 @@ def test_conversation_event_stream_resumes_from_header(app_factory) -> None:
                 "prompt": "单轮",
             },
         )
+        assert created.status_code == 202
+        wait_for_task(client, created.json()["id"])
         response = client.get(
             f"/api/v1/conversations/{conversation['id']}/events",
             params={"follow": "false"},
@@ -299,7 +302,9 @@ def test_conversation_event_stream_resumes_from_header(app_factory) -> None:
     assert [event["sequence"] for event in events] == [4, 5, 6, 7, 8]
 
 
-def test_conversation_rejects_a_second_active_task(app_factory) -> None:
+def test_conversation_accepts_a_second_task_for_serial_queue(
+    app_factory,
+) -> None:
     app = app_factory()
     with TestClient(app) as client:
         conversation = create_conversation(client)
@@ -323,5 +328,5 @@ def test_conversation_rejects_a_second_active_task(app_factory) -> None:
             },
         )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "Conversation already has an active task"
+    assert response.status_code == 202
+    assert response.json()["conversation_id"] == conversation["id"]

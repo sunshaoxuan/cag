@@ -57,6 +57,7 @@ import {
   validateKnowledgeSource,
 } from "./api";
 import packageMetadata from "../package.json";
+import ApiDocsPage from "./ApiDocsPage";
 import "./styles.css";
 
 const EVENT_TYPES = [
@@ -256,7 +257,8 @@ type AppPage =
   | "knowledge"
   | "codeKnowledge"
   | "memory"
-  | "capabilities";
+  | "capabilities"
+  | "apiDocs";
 
 const PAGE_PATHS: Record<AppPage, string> = {
   overview: "/",
@@ -266,6 +268,7 @@ const PAGE_PATHS: Record<AppPage, string> = {
   codeKnowledge: "/code-knowledge",
   memory: "/memory",
   capabilities: "/capabilities",
+  apiDocs: "/api-docs",
 };
 
 function pageFromPath(pathname: string): AppPage {
@@ -275,6 +278,7 @@ function pageFromPath(pathname: string): AppPage {
   if (pathname.startsWith("/code-knowledge")) return "codeKnowledge";
   if (pathname.startsWith("/memory")) return "memory";
   if (pathname.startsWith("/capabilities")) return "capabilities";
+  if (pathname.startsWith("/api-docs")) return "apiDocs";
   return "overview";
 }
 
@@ -1336,6 +1340,13 @@ export default function App() {
             长期记忆
           </a>
           <a
+            href="/api-docs"
+            aria-current={page === "apiDocs" ? "page" : undefined}
+            onClick={(event) => navigateTo("apiDocs", event)}
+          >
+            API 文档
+          </a>
+          <a
             href="/capabilities"
             aria-current={page === "capabilities" ? "page" : undefined}
             onClick={(event) => navigateTo("capabilities", event)}
@@ -1463,6 +1474,8 @@ export default function App() {
           </section>
         </>
       )}
+
+      {page === "apiDocs" && <ApiDocsPage />}
 
       {page === "audit" && (
         <>

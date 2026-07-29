@@ -12,7 +12,7 @@ from app.migrations.sqlite_to_pgvector import (
     migrate,
     redact_database_url,
 )
-from app.models import Base, KnowledgeIngestion, Tenant
+from app.models import Base, KnowledgeIngestion, Project, Task, Tenant
 
 
 def sqlite_engine(path: Path):
@@ -85,6 +85,86 @@ def test_copy_preserves_rows_and_physical_ids(tmp_path: Path) -> None:
         assert connection.scalar(select(Tenant.id)) == tenant_id
     source_engine.dispose()
     target_engine.dispose()
+
+
+def test_replace_target_atomically_replaces_existing_rows(
+    tmp_path: Path,
+) -> None:
+    source_engine = sqlite_engine(tmp_path / "source-replace.sqlite")
+    target_engine = sqlite_engine(tmp_path / "target-replace.sqlite")
+    Base.metadata.create_all(source_engine)
+    Base.metadata.create_all(target_engine)
+    source_id = "2fe3bd68-6b19-4ab2-a394-67c1a9ce71a3"
+    with source_engine.begin() as connection:
+        connection.execute(
+            insert(Tenant).values(
+                id=source_id,
+                code="source",
+                name="Source",
+            )
+        )
+    with target_engine.begin() as connection:
+        connection.execute(
+            insert(Tenant).values(
+                id="7895e1ad-79cf-4f5e-841d-08e8ebdff3ca",
+                code="stale",
+                name="Stale",
+            )
+        )
+
+    _copy_tables(
+        source_engine,
+        target_engine,
+        batch_size=10,
+        replace_target=True,
+    )
+
+    with target_engine.connect() as connection:
+        assert list(connection.scalars(select(Tenant.id))) == [source_id]
+    source_engine.dispose()
+    target_engine.dispose()
+
+
+def test_inspection_blocks_active_agent_task(tmp_path: Path) -> None:
+    source_path = tmp_path / "active-task.sqlite"
+    engine = sqlite_engine(source_path)
+    Base.metadata.create_all(engine)
+    project_id = "7a2789a8-7216-4622-af7b-63a071793446"
+    task_id = "21303979-8b98-41bf-874c-10bb720f9f89"
+    with engine.begin() as connection:
+        connection.execute(
+            insert(Project).values(
+                id=project_id,
+                code="project",
+                name="Project",
+            )
+        )
+        connection.execute(
+            insert(Task).values(
+                id=task_id,
+                project_id=project_id,
+                client_request_id="active-task",
+                request_hash="a" * 64,
+                prompt="active",
+                status="running",
+            )
+        )
+    engine.dispose()
+
+    inspection = inspect_sqlite_source(source_path)
+    assert inspection["active_tasks"] == [
+        {"id": task_id, "status": "running"}
+    ]
+    with pytest.raises(MigrationBlockedError, match="active tasks"):
+        migrate(
+            source_path=source_path,
+            target_url=(
+                "postgresql+psycopg://agent_gateway@127.0.0.1/"
+                "agent_gateway"
+            ),
+            output_dir=tmp_path / "task-evidence",
+            apply=False,
+        )
 
 
 def test_target_url_redacts_password() -> None:

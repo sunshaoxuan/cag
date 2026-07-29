@@ -8,7 +8,6 @@ from collections.abc import AsyncIterator, Iterator
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -22,10 +21,12 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
     get_knowledge_service,
+    get_queue_coordinator,
     get_session,
     get_task_service,
 )
 from app.knowledge.service import KnowledgeService, KnowledgeUnavailableError
+from app.queue.coordinator import QueueCoordinator
 from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
@@ -322,10 +323,10 @@ async def validate_source(
     "/knowledge/sources/{source_id}/ingest",
     status_code=status.HTTP_202_ACCEPTED,
 )
-def ingest_source(
+async def ingest_source(
     source_id: str,
-    background_tasks: BackgroundTasks,
     service: KnowledgeService = Depends(get_knowledge_service),
+    queue_coordinator: QueueCoordinator = Depends(get_queue_coordinator),
 ) -> dict[str, Any]:
     try:
         ingestion, created = service.create_ingestion(source_id)
@@ -334,7 +335,7 @@ def ingest_source(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if created:
-        background_tasks.add_task(service.ingest, ingestion.id)
+        await queue_coordinator.notify("knowledge")
     return ingestion_response(ingestion)
 
 

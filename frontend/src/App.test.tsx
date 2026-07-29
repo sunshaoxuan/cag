@@ -159,6 +159,44 @@ describe("One Agent Gateway conversation page", () => {
             scheduler_poll_seconds: 10,
           });
         }
+        if (url.endsWith("/api/v1/queue/status")) {
+          return jsonResponse({
+            running: true,
+            configured_workers: {
+              interactive: 2,
+              knowledge: 1,
+            },
+            redis: {
+              enabled: true,
+              connected: true,
+              last_error: null,
+            },
+            queues: [
+              {
+                name: "interactive",
+                counts: { queued: 3, leased: 1 },
+                oldest_queued_at: "2026-07-29T01:00:00Z",
+                oldest_wait_seconds: 8,
+              },
+              {
+                name: "knowledge",
+                counts: { queued: 1, leased: 1 },
+                oldest_queued_at: "2026-07-29T01:00:00Z",
+                oldest_wait_seconds: 12,
+              },
+            ],
+            workers: [
+              {
+                id: "worker-1",
+                worker_key: "test:interactive:1",
+                queue_name: "interactive",
+                status: "working",
+                current_item_id: "item-1",
+                heartbeat_at: "2026-07-29T01:00:00Z",
+              },
+            ],
+          });
+        }
         if (url.includes("/api/v1/knowledge/code/summary?")) {
           return jsonResponse({
             symbols: 4,
@@ -602,9 +640,38 @@ describe("One Agent Gateway conversation page", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows live queue state and copyable API examples", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("link", { name: "API 文档" }));
+
+    expect(window.location.pathname).toBe("/api-docs");
+    expect(
+      await screen.findByRole("heading", {
+        name: "API 在线文档",
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("region", { name: "队列实时状态" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Redis 唤醒")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "交互式 OpenAPI" }),
+    ).toHaveAttribute("href", "/docs");
+
+    const copyButtons = screen.getAllByRole("button", { name: "复制" });
+    fireEvent.click(copyButtons[0]);
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalled());
+    expect(clipboardWrite.mock.calls[0][0]).toContain(
+      "/api/v1/conversations",
+    );
+  });
+
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.16.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.17.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();

@@ -66,22 +66,41 @@ Write-Host "Starting One Agent Gateway with the local ChatGPT-authenticated Code
 Write-Host "Gateway listener: http://0.0.0.0:$Port"
 Write-Host "Local access: http://127.0.0.1:$Port"
 
+$dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
+if ($null -ne $dockerCommand) {
+    Push-Location $repositoryRoot
+    try {
+        & $dockerCommand.Source compose up -d postgres redis
+        if ($LASTEXITCODE -ne 0) {
+            throw "PostgreSQL and Redis startup failed."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 Push-Location $backendRoot
 try {
-    & $pythonExecutable -c (
-        "from app.config import get_settings; " +
-        "from app.database import Database; " +
-        "s=get_settings(); " +
-        "d=Database(s.database_url); " +
-        "d.is_ready(); " +
-        "print(d.storage_status()); " +
-        "d.dispose()"
-    )
-    if ($LASTEXITCODE -ne 0) {
-        throw (
-            "PostgreSQL with pgvector is not ready. Configure " +
-            "AGENT_GATEWAY_DATABASE_URL or backend/.env.local."
+    $databaseReady = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        & $pythonExecutable -c (
+            "from app.config import get_settings; " +
+            "from app.database import Database; " +
+            "s=get_settings(); " +
+            "d=Database(s.database_url); " +
+            "d.is_ready(); " +
+            "print(d.storage_status()); " +
+            "d.dispose()"
         )
+        if ($LASTEXITCODE -eq 0) {
+            $databaseReady = $true
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $databaseReady) {
+        throw "PostgreSQL with pgvector did not become ready."
     }
     & $pythonExecutable -m app.migrations.legacy_baseline
     if ($LASTEXITCODE -ne 0) {
@@ -90,6 +109,35 @@ try {
     & $pythonExecutable -m alembic upgrade head
     if ($LASTEXITCODE -ne 0) {
         throw "One Agent Gateway database migration failed."
+    }
+    & $pythonExecutable -m app.migrations.auto_cutover
+    if ($LASTEXITCODE -ne 0) {
+        throw "Legacy SQLite cutover did not complete safely."
+    }
+    & $pythonExecutable -c (
+        "from redis import Redis; " +
+        "from app.config import get_settings; " +
+        "client=Redis.from_url(get_settings().redis_url); " +
+        "assert client.ping(); client.close()"
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Redis did not become ready."
+    }
+    if ($null -ne $dockerCommand) {
+        Push-Location $repositoryRoot
+        try {
+            & $dockerCommand.Source compose build frontend
+            if ($LASTEXITCODE -ne 0) {
+                throw "One Agent Gateway management UI build failed."
+            }
+            & $dockerCommand.Source compose up -d --no-deps frontend
+            if ($LASTEXITCODE -ne 0) {
+                throw "One Agent Gateway management UI refresh failed."
+            }
+        }
+        finally {
+            Pop-Location
+        }
     }
     & $pythonExecutable -m uvicorn app.main:app --host 0.0.0.0 --port $Port
 }

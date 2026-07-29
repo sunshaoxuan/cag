@@ -36,6 +36,7 @@ from app.models import (
     KnowledgeIngestionRejection,
     KnowledgeSource,
 )
+from tests.waiters import wait_for_ingestion, wait_for_task
 from app.models.base import utc_now
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
 from app.tasks.executor import TaskExecutor
@@ -153,6 +154,7 @@ def install_fake_knowledge(
         credential_store=credential_store,
     )
     app.state.knowledge_service = service
+    app.state.queue_coordinator._knowledge_service = service
     executor: TaskExecutor = app.state.task_executor
     executor._knowledge_service = service
     return service
@@ -345,11 +347,12 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         )
         assert ingestion_response.status_code == 202
-        ingestion = client.get(
-            f"/api/v1/knowledge/ingestions/{ingestion_response.json()['id']}"
+        ingestion = wait_for_ingestion(
+            client,
+            ingestion_response.json()["id"],
         )
-        assert ingestion.json()["status"] == "completed"
-        assert ingestion.json()["chunks_written"] == 1
+        assert ingestion["status"] == "completed"
+        assert ingestion["chunks_written"] == 1
         embedded_after_first_ingestion = len(
             service._provider.embedded_texts
         )
@@ -357,9 +360,10 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         repeated_response = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         )
-        repeated = client.get(
-            f"/api/v1/knowledge/ingestions/{repeated_response.json()['id']}"
-        ).json()
+        repeated = wait_for_ingestion(
+            client,
+            repeated_response.json()["id"],
+        )
         assert repeated["status"] == "completed"
         assert repeated["chunks_written"] == 0
         assert repeated["unchanged_files"] == 1
@@ -402,7 +406,7 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         )
         assert created.status_code == 202
         task_id = created.json()["id"]
-        task = client.get(f"/api/v1/tasks/{task_id}").json()
+        task = wait_for_task(client, task_id)
         assert task["status"] == "completed"
         assert task["knowledge_usage"]["citation_count"] == 1
         citation = task["knowledge_usage"]["citations"][0]
@@ -486,9 +490,7 @@ class CustomerService:
         first = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        assert client.get(
-            f"/api/v1/knowledge/ingestions/{first['id']}"
-        ).json()["status"] == "completed"
+        assert wait_for_ingestion(client, first["id"])["status"] == "completed"
 
         summary = client.get(
             "/api/v1/knowledge/code/summary",
@@ -537,9 +539,9 @@ class CustomerService:
         second = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        assert client.get(
-            f"/api/v1/knowledge/ingestions/{second['id']}"
-        ).json()["unchanged_files"] == 3
+        assert wait_for_ingestion(client, second["id"])[
+            "unchanged_files"
+        ] == 3
         with app.state.database.session_factory() as session:
             symbol_count = session.scalar(select(func.count(CodeSymbol.id)))
             relation_count = session.scalar(select(func.count(CodeRelation.id)))
@@ -612,9 +614,7 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         )
         assert started.status_code == 202
-        ingestion = client.get(
-            f"/api/v1/knowledge/ingestions/{started.json()['id']}"
-        ).json()
+        ingestion = wait_for_ingestion(client, started.json()["id"])
         assert ingestion["status"] == "completed"
         assert ingestion["files_seen"] == 2
         assert ingestion["duplicate_files"] == 1
@@ -901,9 +901,7 @@ def test_git_source_is_validated_materialized_and_indexed(
         ingestion = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        completed = client.get(
-            f"/api/v1/knowledge/ingestions/{ingestion['id']}"
-        ).json()
+        completed = wait_for_ingestion(client, ingestion["id"])
         assert completed["status"] == "completed", completed["error"]
         assert completed["chunks_written"] == 1
         assert any(active_settings.knowledge_sources_dir.iterdir())
@@ -966,9 +964,7 @@ def test_svn_source_is_materialized_and_indexed(
         ingestion = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        completed = client.get(
-            f"/api/v1/knowledge/ingestions/{ingestion['id']}"
-        ).json()
+        completed = wait_for_ingestion(client, ingestion["id"])
         assert completed["status"] == "completed"
         assert completed["files_seen"] == 1
 
@@ -1082,9 +1078,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
         )
         assert started.status_code == 202
         ingestion_id = started.json()["id"]
-        ingestion = client.get(
-            f"/api/v1/knowledge/ingestions/{ingestion_id}"
-        ).json()
+        ingestion = wait_for_ingestion(client, ingestion_id)
 
         assert ingestion["status"] == "completed"
         assert ingestion["rejected_files"] == 2

@@ -11,6 +11,8 @@ from app.tasks.executor import TaskExecutor
 from app.knowledge.service import KnowledgeService
 from app.approvals.service import ApprovalService
 from app.capabilities.service import CapabilityService
+from app.queue.coordinator import QueueCoordinator
+from app.queue.service import QueueService
 
 
 def get_database(request: Request) -> Database:
@@ -48,3 +50,11 @@ def get_approval_service(request: Request) -> ApprovalService:
 
 def get_capability_service(request: Request) -> CapabilityService:
     return request.app.state.capability_service
+
+
+def get_queue_coordinator(request: Request) -> QueueCoordinator:
+    return request.app.state.queue_coordinator
+
+
+def get_queue_service(request: Request) -> QueueService:
+    return request.app.state.queue_service

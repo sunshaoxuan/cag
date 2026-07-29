@@ -69,6 +69,9 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "code_relations",
         "code_document_links",
         "knowledge_ingestion_rejections",
+        "queue_items",
+        "queue_workers",
+        "data_migration_receipts",
     } <= tables
 
     command.downgrade(config, "20260728_0011")

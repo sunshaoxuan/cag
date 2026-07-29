@@ -23,6 +23,9 @@ from app.harness.service import AgentHarness
 from app.policies.command_policy import CommandPolicyService
 from app.capabilities.service import CapabilityService
 from app.learning.service import LearningService
+from app.queue.coordinator import QueueCoordinator
+from app.queue.notifier import QueueNotifier
+from app.queue.service import QueueService
 
 
 def create_app(
@@ -108,10 +111,42 @@ def create_app(
         database=database,
         capabilities=capability_service,
     )
+    task_executor = TaskExecutor(
+        database=database,
+        runtime=active_runtime,
+        task_service=task_service,
+        workspace_manager=workspace_manager,
+        self_improvement_root=active_settings.self_improvement_root,
+        knowledge_service=knowledge_service,
+        harness=harness,
+        learning_service=learning_service,
+    )
+    queue_service = QueueService(
+        database=database,
+        task_service=task_service,
+        lease_seconds=active_settings.queue_lease_seconds,
+    )
+    queue_notifier = QueueNotifier(
+        redis_url=active_settings.redis_url,
+        channel_prefix=active_settings.queue_redis_channel_prefix,
+        enabled=active_settings.queue_redis_enabled,
+    )
+    queue_coordinator = QueueCoordinator(
+        service=queue_service,
+        notifier=queue_notifier,
+        task_executor=task_executor,
+        knowledge_service=knowledge_service,
+        interactive_workers=active_settings.queue_interactive_workers,
+        knowledge_workers=active_settings.queue_knowledge_workers,
+        poll_seconds=active_settings.queue_poll_seconds,
+        heartbeat_seconds=active_settings.queue_heartbeat_seconds,
+        shutdown_seconds=active_settings.queue_shutdown_seconds,
+    )
     knowledge_scheduler = KnowledgeScheduler(
         service=knowledge_service,
         poll_seconds=active_settings.knowledge_scheduler_poll_seconds,
         lease_seconds=active_settings.knowledge_scheduler_lease_seconds,
+        notify_ingestion=queue_coordinator.notify,
     )
 
     @asynccontextmanager
@@ -120,8 +155,9 @@ def create_app(
             database.create_schema()
         with database.session_factory() as recovery_session:
             task_service.ensure_audit_cursor(recovery_session)
-            task_service.recover_interrupted_tasks(recovery_session)
         capability_service.seed_defaults()
+        if active_settings.queue_enabled:
+            await queue_coordinator.start()
         if (
             active_settings.knowledge_scheduler_enabled
             and knowledge_service.configured
@@ -131,6 +167,7 @@ def create_app(
             yield
         finally:
             await knowledge_scheduler.stop()
+            await queue_coordinator.stop()
             database.dispose()
 
     application = FastAPI(
@@ -151,16 +188,10 @@ def create_app(
     application.state.harness = harness
     application.state.capability_service = capability_service
     application.state.learning_service = learning_service
-    application.state.task_executor = TaskExecutor(
-        database=database,
-        runtime=active_runtime,
-        task_service=task_service,
-        workspace_manager=workspace_manager,
-        self_improvement_root=active_settings.self_improvement_root,
-        knowledge_service=knowledge_service,
-        harness=harness,
-        learning_service=learning_service,
-    )
+    application.state.task_executor = task_executor
+    application.state.queue_service = queue_service
+    application.state.queue_notifier = queue_notifier
+    application.state.queue_coordinator = queue_coordinator
     application.add_middleware(
         CORSMiddleware,
         allow_origins=[

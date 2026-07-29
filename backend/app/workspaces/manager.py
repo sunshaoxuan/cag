@@ -45,8 +45,19 @@ class WorkspaceManager:
         if not resolved_parent.is_relative_to(expected_root):
             raise WorkspaceError("Workspace path escaped the configured root")
         if workspace_path.exists():
-            raise WorkspaceError(
-                f"Workspace already exists for task {task_id}"
+            resolved_workspace = workspace_path.resolve()
+            if not resolved_workspace.is_relative_to(expected_root):
+                raise WorkspaceError(
+                    "Existing workspace escaped the configured root"
+                )
+            if not (resolved_workspace / ".git").exists():
+                raise WorkspaceError(
+                    f"Existing workspace is not a Git checkout for task {task_id}"
+                )
+            return self._resolve_workspace(
+                workspace_path=resolved_workspace,
+                project=project,
+                task_id=task_id,
             )
 
         clone_command = [
@@ -73,6 +84,19 @@ class WorkspaceManager:
             detail = (result.stderr or result.stdout).strip()
             raise WorkspaceError(f"Git clone failed: {detail[-2000:]}")
 
+        return self._resolve_workspace(
+            workspace_path=workspace_path.resolve(),
+            project=project,
+            task_id=task_id,
+        )
+
+    def _resolve_workspace(
+        self,
+        *,
+        workspace_path: Path,
+        project: ProjectConfig,
+        task_id: str,
+    ) -> WorkspaceInfo:
         commit_result = subprocess.run(
             [self._git_executable, "-C", str(workspace_path), "rev-parse", "HEAD"],
             capture_output=True,
@@ -86,7 +110,7 @@ class WorkspaceManager:
         workspace_id = f"{project.physical_id_string}/{task_id}"
         return WorkspaceInfo(
             workspace_id=workspace_id,
-            path=workspace_path.resolve(),
+            path=workspace_path,
             commit_sha=commit_result.stdout.strip(),
             branch=project.repository.default_branch,
         )

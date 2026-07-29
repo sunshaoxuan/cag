@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.models import AgentArtifact, AgentRun, ApprovalRequest, HarnessRun, QualityScore
 from app.policies.command_policy import CommandPolicyService
+from tests.waiters import wait_for_task
 
 
 class TimeoutRuntime:
@@ -40,7 +41,7 @@ def test_balanced_harness_persists_runs_artifacts_quality_and_unified_events(
             },
         )
         assert response.status_code == 202
-        task = client.get(f"/api/v1/tasks/{response.json()['id']}").json()
+        task = wait_for_task(client, response.json()["id"])
         harness_runs = client.get("/api/v1/harness-runs").json()
         run = harness_runs[0]
         agents = client.get(
@@ -90,6 +91,7 @@ def test_fast_harness_agent_and_artifact_endpoints(app_factory) -> None:
                 "knowledge_mode": "off",
             },
         ).json()
+        task = wait_for_task(client, task["id"])
         run = client.get("/api/v1/harness-runs").json()[0]
         agents = client.get(
             f"/api/v1/harness-runs/{run['id']}/agent-runs"
@@ -106,7 +108,7 @@ def test_fast_harness_agent_and_artifact_endpoints(app_factory) -> None:
         )
         assert client.get("/api/v1/agent-runs/missing").status_code == 404
 
-    assert task["status"] == "queued"
+    assert task["status"] == "completed"
     assert len(agents) == 3
     assert agent["access_mode"] == "read_only"
     assert artifacts[0]["artifact_type"] == "structured-report"

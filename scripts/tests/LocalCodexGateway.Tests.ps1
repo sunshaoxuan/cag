@@ -25,6 +25,10 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content = Get-Content -Raw -LiteralPath $runScript
         $content | Should Match 'Database\(s\.database_url\)'
         $content | Should Match 'storage_status'
+        $content | Should Match 'app\.migrations\.auto_cutover'
+        $content | Should Match 'Redis\.from_url'
+        $content | Should Match 'compose build frontend'
+        $content | Should Match 'compose up -d --no-deps frontend'
         $content | Should Not Match 'sqlite\+pysqlite'
         $content | Should Not Match 'agent_gateway\.db'
     }
@@ -34,6 +38,7 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'agent_gateway\.db'
         $content | Should Match 'AGENT_GATEWAY_MIGRATION_TARGET_URL'
         $content | Should Match '\[switch\]\$Apply'
+        $content | Should Match '\[switch\]\$ReplaceTarget'
     }
 
     It "binds the Gateway to every IPv4 interface" {

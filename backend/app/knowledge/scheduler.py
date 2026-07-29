@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from app.knowledge.service import KnowledgeService
@@ -16,10 +17,12 @@ class KnowledgeScheduler:
         service: KnowledgeService,
         poll_seconds: int,
         lease_seconds: int,
+        notify_ingestion: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._service = service
         self._poll_seconds = poll_seconds
         self._lease_seconds = lease_seconds
+        self._notify_ingestion = notify_ingestion
         self._worker_id = f"knowledge-scheduler:{uuid.uuid4()}"
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -32,7 +35,6 @@ class KnowledgeScheduler:
         if self.running:
             return
         self._stop_event.clear()
-        self._service.recover_interrupted_ingestions()
         self._task = asyncio.create_task(
             self._run(),
             name="cag-knowledge-scheduler",
@@ -68,7 +70,10 @@ class KnowledgeScheduler:
                 trigger="scheduled",
             )
             if created:
-                await self._service.ingest(ingestion.id)
+                if self._notify_ingestion is None:
+                    await self._service.ingest(ingestion.id)
+                else:
+                    await self._notify_ingestion("knowledge")
         finally:
             await asyncio.to_thread(
                 self._service.release_sync_lease,

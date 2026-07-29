@@ -9,6 +9,7 @@ from app.models import (
     Product,
     ProductVersion,
     Project,
+    QueueItem,
     Task,
     TaskEvent,
     TaskStatus,
@@ -27,10 +28,6 @@ class RuntimeProfileNotAllowedError(Exception):
 
 
 class ConversationNotFoundError(Exception):
-    pass
-
-
-class ConversationBusyError(Exception):
     pass
 
 
@@ -139,14 +136,6 @@ class TaskService:
             conversation = session.get(Conversation, conversation_id)
             if conversation is None or conversation.project_id != project.id:
                 raise ConversationNotFoundError(conversation_id)
-            active_task_id = session.scalar(
-                select(Task.id).where(
-                    Task.conversation_id == conversation_id,
-                    ~Task.status.in_(TaskStatus.TERMINAL),
-                )
-            )
-            if active_task_id is not None:
-                raise ConversationBusyError(conversation_id)
 
         task = Task(
             project_id=project.id,
@@ -180,6 +169,17 @@ class TaskService:
                 "harness_profile": harness_profile,
                 "learning_mode": learning_mode,
             },
+        )
+        session.add(
+            QueueItem(
+                queue_name="interactive",
+                job_type="agent_task",
+                task_id=task.id,
+                project_id=task.project_id,
+                conversation_id=task.conversation_id,
+                client_id=task.client_id,
+                priority=100,
+            )
         )
         session.commit()
         return self.get_task(session, task.id)

@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.17.0
+
+* `docs/evidence/durable-queue-0.17.0/`
+* `docs/evidence/screenshots/durable-queue-api-docs-0.17.0.png`
+
 ## Version 0.16.0
 
 * `docs/evidence/conversation-knowledge-loop-0.16.0/`

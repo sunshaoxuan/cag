@@ -31,6 +31,8 @@ from app.models.knowledge import (
     Tenant,
 )
 from app.models.project import Project
+from app.models.queue import QueueItem, QueueItemStatus, QueueWorker
+from app.models.migration import DataMigrationReceipt
 from app.models.harness import (
     AgentArtifact,
     AgentRun,
@@ -80,6 +82,10 @@ __all__ = [
     "Product",
     "ProductVersion",
     "Project",
+    "QueueItem",
+    "QueueItemStatus",
+    "QueueWorker",
+    "DataMigrationReceipt",
     "QualityScore",
     "ReviewFinding",
     "RiskRecord",

@@ -10,10 +10,10 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.16.0 | Evidence |
+| Requirement | Status for 0.17.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
-| API documentation | Implemented | `docs/api.md` |
+| API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
 | Security documentation | Implemented | `docs/security.md` |
 | Phase 1 backend skeleton | Implemented | `backend/app` |
 | Database and migrations | Implemented | `backend/app/models`, `backend/alembic` |
@@ -33,6 +33,9 @@ Legend:
 | Routed frontend information architecture | Implemented | `/`, `/conversation`, `/audit`, `/knowledge`, `/code-knowledge`, `/memory`, `/capabilities`, route isolation tests and browser evidence |
 | External task API trace contract | Implemented | Trace ID, client request ID, request hash, source and idempotency tests |
 | Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
+| PostgreSQL plus Redis durable gateway queue | Implemented | QueueItem, QueueWorker, `FOR UPDATE SKIP LOCKED`, Redis wake, lease recovery and queue API tests |
+| Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API and recovery tests |
+| Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
@@ -50,9 +53,10 @@ Legend:
 | Source collection stage SSE | Implemented | Durable collection, cleaning, indexing and Source Memory events |
 | Scalable folder traversal feedback | Implemented | Breadth-first directory queue, per-directory progress SSE, single-flight guard and browser evidence |
 | File-level ingestion rejection audit | Implemented | Durable path and reason records, paged API, CSV export, gzip JSONL archive and retention tests |
-| Resumable parallel knowledge work queue | Planned | `docs/adr/0015-resumable-path-complete-knowledge-ingestion.md`; work-item lease, pause, resume and checkpoint tests required |
+| Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |
+| Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
 | Path-complete semantic indexing | Planned | ADR 0015; directory, file-name and zero-byte path retrieval tests required |
-| Managed PostgreSQL and pgvector host runtime | Partial | Runtime gate, native vector query, migration tool and live PostgreSQL tests implemented; current long-running job must finish before verified cutover |
+| Managed PostgreSQL and pgvector host runtime | Partial | Runtime gate, native vector query, guarded automatic cutover and live PostgreSQL tests implemented; current long-running job must finish before verified cutover |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
 | Governed Modular RAG | Implemented | Ingestion, hybrid recall, resource-linked citations and context isolation |

@@ -85,6 +85,8 @@ services:
       - "yes"
     volumes:
       - agent_gateway_redis:/data
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test:
         - CMD

@@ -124,7 +124,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
-Alembic owns schema versioning through revision `20260729_0013`. SQLite is
+Alembic owns schema versioning through revision `20260729_0014`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension
@@ -132,6 +132,22 @@ before Alembic or the application starts. Vector recall orders candidates with
 the database `<=>` cosine-distance operator and the HNSW index. The current
 legacy runtime is cut over only after its active learning task completes and
 the complete migration receipt passes.
+
+### Durable work queue
+
+`QueueItem` rows in PostgreSQL are the authoritative record for accepted Agent
+tasks and knowledge ingestions. Workers claim rows with row locking and
+`SKIP LOCKED`, renew bounded leases with heartbeats and requeue expired leases
+at startup. `QueueWorker` records expose active capacity and current ownership.
+
+Interactive and knowledge jobs use separate worker pools. A correlated
+Conversation ordering guard prevents a later task from being claimed while an
+earlier task in the same Conversation remains queued or leased. Independent
+Conversations can run in parallel.
+
+Redis 7 Pub/Sub carries wake notifications only. Every worker also polls
+PostgreSQL, so Redis connection loss affects pickup latency without changing
+the durable job record.
 
 ### Project registry
 
@@ -146,7 +162,9 @@ The manager creates `workspaces/{project_physical_id}/{task_id}`, clones only th
 The React application on port 5173 is the unified visual management console.
 Its overview, API audit, enterprise knowledge and capability routes provide
 management functions, while the Conversation route provides the API test
-console. Production browser traffic uses same-origin `/api` and SSE URLs.
+console. `/api-docs` provides the queue dashboard, request contract, SSE
+reconnection rules and copyable client examples. Production browser traffic
+uses same-origin `/api` and SSE URLs.
 Frontend Nginx proxies those requests to the host Gateway.
 
 The React test console loads configured projects, submits a Prompt through the

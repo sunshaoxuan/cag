@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient
 from app.knowledge.security import KnowledgeCipher, load_knowledge_cipher
 from app.knowledge.service import KnowledgeService
 from app.main import create_app
-from app.migrations.sqlite_to_pgvector import migrate
+from app.migrations.auto_cutover import run_auto_cutover
 from app.models import (
     Base,
     KnowledgeChunk,
@@ -20,9 +20,11 @@ from app.models import (
     ProductVersion,
     Project,
     Tenant,
+    DataMigrationReceipt,
 )
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from tests.waiters import wait_for_ingestion
 
 
 POSTGRES_URL = os.environ.get("AGENT_GATEWAY_TEST_POSTGRES_URL")
@@ -63,6 +65,7 @@ def test_pgvector_storage_and_native_search(
     )
     app.state.knowledge_service = service
     app.state.task_executor._knowledge_service = service
+    app.state.queue_coordinator._knowledge_service = service
 
     with TestClient(app) as client:
         ready = client.get("/health/ready")
@@ -87,6 +90,8 @@ def test_pgvector_storage_and_native_search(
             f"/api/v1/knowledge/sources/{source_id}/ingest"
         )
         assert ingestion.status_code == 202
+        completed = wait_for_ingestion(client, ingestion.json()["id"])
+        assert completed["status"] == "completed"
 
         search = client.post(
             "/api/v1/knowledge/search",
@@ -212,18 +217,22 @@ def test_completed_sqlite_database_migrates_to_pgvector(
         session.commit()
     source_engine.dispose()
 
-    report = migrate(
-        source_path=source_path,
-        target_url=MIGRATION_POSTGRES_URL,
-        output_dir=tmp_path / "migration-evidence",
-        apply=True,
-        batch_size=10,
+    cutover_settings = Settings(
+        environment="test",
+        database_url=MIGRATION_POSTGRES_URL,
+        auto_create_schema=False,
+        legacy_sqlite_path=source_path,
+        migration_receipt_root=tmp_path / "migration-evidence",
+        projects_dir=tmp_path / "projects",
+        workspace_root=tmp_path / "workspaces",
     )
+    report = run_auto_cutover(cutover_settings)
+    repeated = run_auto_cutover(cutover_settings)
 
     assert report["status"] == "completed"
-    assert report["source"]["vector_count"] == 1
-    assert report["target"]["vector_count"] == 1
-    assert report["target"]["vector_dimensions"] == [1024]
+    assert report["verification"]["source_vector_count"] == 1
+    assert report["verification"]["target_vector_count"] == 1
+    assert repeated["status"] == "already_completed"
     target_engine = create_engine(MIGRATION_POSTGRES_URL)
     with target_engine.connect() as connection:
         assert connection.scalar(
@@ -233,4 +242,7 @@ def test_completed_sqlite_database_migrates_to_pgvector(
             ),
             {"id": chunk_id},
         ) == "vector"
+        assert connection.scalar(
+            select(DataMigrationReceipt.source_sha256)
+        ) == report["source_sha256"]
     target_engine.dispose()

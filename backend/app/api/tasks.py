@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     Header,
     HTTPException,
@@ -22,23 +21,22 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import (
     get_app_settings,
     get_database,
+    get_queue_coordinator,
     get_session,
-    get_task_executor,
     get_task_service,
 )
 from app.config import Settings
 from app.database import Database
 from app.events.sse import stream_task_events
 from app.models import Task
+from app.queue.coordinator import QueueCoordinator
 from app.services.task_service import (
-    ConversationBusyError,
     ConversationNotFoundError,
     ProjectNotFoundError,
     RuntimeProfileNotAllowedError,
     TaskNotFoundError,
     TaskService,
 )
-from app.tasks.executor import TaskExecutor
 
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
@@ -146,7 +144,6 @@ def to_response(task: Task) -> TaskResponse:
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_task(
     request: TaskCreate,
-    background_tasks: BackgroundTasks,
     http_request: Request,
     http_response: Response,
     trigger_source: Annotated[
@@ -187,7 +184,7 @@ async def create_task(
     ] = None,
     session: Session = Depends(get_session),
     task_service: TaskService = Depends(get_task_service),
-    task_executor: TaskExecutor = Depends(get_task_executor),
+    queue_coordinator: QueueCoordinator = Depends(get_queue_coordinator),
 ) -> TaskResponse:
     normalized_request = json.dumps(
         request.model_dump(mode="json"),
@@ -257,17 +254,11 @@ async def create_task(
         ) from exc
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Conversation not found") from exc
-    except ConversationBusyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Conversation already has an active task",
-        ) from exc
-
     response_payload = to_response(task)
     http_response.headers["X-CAG-Trace-ID"] = task.id
     http_response.headers["X-CAG-Idempotent-Replay"] = "false"
     http_response.headers["Location"] = f"/api/v1/audit/tasks/{task.id}"
-    background_tasks.add_task(task_executor.execute, task.id)
+    await queue_coordinator.notify("interactive")
     return response_payload
 
 
