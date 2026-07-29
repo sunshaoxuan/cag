@@ -40,6 +40,12 @@ for raw_line in sys.stdin:
             and message.get("params", {}).get("ephemeral") is not True
         ):
             raise RuntimeError("thread was not ephemeral")
+        if mode == "expect-knowledge-context":
+            instructions = str(
+                message.get("params", {}).get("developerInstructions", "")
+            )
+            if "<knowledge" not in instructions or "resource_uri=" not in instructions:
+                raise RuntimeError("knowledge resource context was not supplied")
         thread_id = (
             message.get("params", {}).get("threadId")
             if method == "thread/resume"

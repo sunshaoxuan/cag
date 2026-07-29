@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.16.0
+
+* `docs/evidence/conversation-knowledge-loop-0.16.0/`
+* `docs/evidence/screenshots/conversation-knowledge-loop-0.16.0.png`
+
 ## Version 0.15.0
 
 * `docs/evidence/pgvector-runtime-0.15.0/`

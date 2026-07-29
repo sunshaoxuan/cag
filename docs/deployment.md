@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.15.0 development deployment
+## 0.16.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -48,7 +48,10 @@ one gzip JSONL archive per run. Configure
 queryable database detail for 90 days and compressed archives for 365 days.
 The archive directory must use persistent host or volume storage in production.
 
-The console creates a CAG Conversation and keeps one Conversation SSE connection open across turns.
+The console creates a CAG Conversation and keeps one Conversation SSE
+connection open across turns. Each turn performs governed knowledge retrieval
+before Codex app-server execution. Resource URIs stay inside the same approved
+knowledge and Task audit boundary.
 
 ## Database migration
 

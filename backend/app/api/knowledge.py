@@ -684,7 +684,10 @@ async def search_knowledge(
             {
                 "chunk_id": item.id,
                 "source_id": item.source_id,
+                "source_name": item.source_name,
+                "source_type": item.source_type,
                 "path": item.path,
+                "resource_uri": item.resource_uri,
                 "text": item.text,
                 "score": item.score,
                 "scope": item.scope,

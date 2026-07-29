@@ -111,6 +111,7 @@ class TaskExecutor:
 
         additional_workspace_roots = ()
         developer_instructions = None
+        knowledge_citations: list[dict[str, Any]] = []
         if (
             knowledge_mode != "off"
             and self._knowledge_service is not None
@@ -131,6 +132,7 @@ class TaskExecutor:
                         query=knowledge_prompt,
                     )
                 )
+                knowledge_citations = citations
                 await self._emit(
                     task_id,
                     "knowledge.retrieval.completed",
@@ -222,7 +224,10 @@ class TaskExecutor:
 
         with self._database.session_factory() as session:
             task = self._task_service.get_task(session, task_id)
-            task.final_report = result.to_report()
+            task.final_report = {
+                **result.to_report(),
+                "knowledge_citations": knowledge_citations,
+            }
             if conversation_id is not None and result.runtime_thread_id is not None:
                 conversation = task.conversation
                 if conversation is not None:
@@ -242,6 +247,7 @@ class TaskExecutor:
                     project=task.project,
                     prompt=task.prompt,
                     final_report=task.final_report or {},
+                    citations=knowledge_citations,
                 )
                 for candidate_id in candidate_ids:
                     await self._emit(

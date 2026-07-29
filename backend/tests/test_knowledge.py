@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
+from app.knowledge.resources import build_resource_uri
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
 from app.knowledge.connectors import SourceConfig, SourceConnectorManager
@@ -36,6 +37,7 @@ from app.models import (
     KnowledgeSource,
 )
 from app.models.base import utc_now
+from app.runtimes.base import RuntimeEventCallback, RuntimeResult
 from app.tasks.executor import TaskExecutor
 
 
@@ -100,6 +102,44 @@ class CompleteRerankFakeOllama(FakeOllamaClient):
         }
 
 
+class CapturingKnowledgeRuntime:
+    def __init__(self) -> None:
+        self.developer_instructions: str | None = None
+
+    async def execute(
+        self,
+        *,
+        task_id: str,
+        project_code: str,
+        prompt: str,
+        runtime_profile: str,
+        persistent_conversation: bool,
+        conversation_thread_id: str | None,
+        workspace_path: Path,
+        additional_workspace_roots: tuple[Path, ...],
+        developer_instructions: str | None,
+        emit: RuntimeEventCallback,
+    ) -> RuntimeResult:
+        self.developer_instructions = developer_instructions
+        await emit(
+            "agent.message",
+            {
+                "text": "已根据企业知识完成调查",
+                "item_id": "knowledge-answer",
+            },
+        )
+        return RuntimeResult(
+            summary="已根据企业知识完成调查",
+            root_cause=None,
+            changes=[],
+            validation=[],
+            approvals=[],
+            warnings=[],
+            next_actions=[],
+            runtime_thread_id="knowledge-thread",
+        )
+
+
 def install_fake_knowledge(
     app,
     active_settings: Settings,
@@ -160,12 +200,122 @@ def test_fake_ollama_embeddings_and_memory() -> None:
     assert output["memories"][0]["kind"] == "procedural"
 
 
+def test_resource_uris_preserve_origin_revision_and_path(tmp_path: Path) -> None:
+    local = build_resource_uri(
+        source_type="local_directory",
+        location=str(tmp_path),
+        reference=None,
+        subpath="manuals",
+        source_commit=None,
+        document_path="運用/警告.txt",
+    )
+    gitlab = build_resource_uri(
+        source_type="gitlab",
+        location="https://gitlab.example.com/platform/ops.git",
+        reference="main",
+        subpath="docs",
+        source_commit="abc123",
+        document_path="runbook.md",
+    )
+
+    assert local.startswith("file:")
+    assert local.endswith(
+        "manuals/%E9%81%8B%E7%94%A8/%E8%AD%A6%E5%91%8A.txt"
+    )
+    assert gitlab == (
+        "https://gitlab.example.com/platform/ops/-/blob/"
+        "abc123/docs/runbook.md"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_type", "location", "reference", "commit", "expected"),
+    [
+        (
+            "git",
+            "https://github.com/example/platform.git",
+            "main",
+            "deadbeef",
+            "https://github.com/example/platform/blob/deadbeef/src/app.py",
+        ),
+        (
+            "git",
+            "git@example.internal:platform/ops.git",
+            "main",
+            None,
+            (
+                "git@example.internal:platform/ops.git"
+                "#revision=main&path=src/app.py"
+            ),
+        ),
+        (
+            "gitlab",
+            "git@gitlab.example.com:platform/ops.git",
+            "release/1",
+            None,
+            (
+                "https://gitlab.example.com/platform/ops/-/blob/"
+                "release%2F1/src/app.py"
+            ),
+        ),
+        (
+            "git",
+            "file:///D:/repositories/platform",
+            "main",
+            "deadbeef",
+            "file:///D:/repositories/platform/src/app.py",
+        ),
+        (
+            "svn",
+            "https://svn.example.com/repos/platform",
+            "42",
+            None,
+            "https://svn.example.com/repos/platform/src/app.py",
+        ),
+        (
+            "custom",
+            "https://files.example.com/platform",
+            None,
+            None,
+            "https://files.example.com/platform/src/app.py",
+        ),
+    ],
+)
+def test_repository_resource_uri_variants(
+    source_type: str,
+    location: str,
+    reference: str | None,
+    commit: str | None,
+    expected: str,
+) -> None:
+    assert build_resource_uri(
+        source_type=source_type,
+        location=location,
+        reference=reference,
+        subpath=None,
+        source_commit=commit,
+        document_path="src/app.py",
+    ) == expected
+
+
+def test_unc_resource_uri_uses_file_scheme() -> None:
+    assert build_resource_uri(
+        source_type="network_share",
+        location=r"\\fileserver\knowledge",
+        reference=None,
+        subpath="manuals",
+        source_commit=None,
+        document_path="runbook.txt",
+    ) == "file://fileserver/knowledge/manuals/runbook.txt"
+
+
 def test_knowledge_api_ingests_searches_and_governs_memory(
     settings: Settings,
     project_repository: Path,
 ) -> None:
     active_settings = knowledge_settings(settings, project_repository.parent)
-    app = create_app(settings=active_settings)
+    runtime = CapturingKnowledgeRuntime()
+    app = create_app(settings=active_settings, runtime=runtime)
     service = install_fake_knowledge(app, active_settings)
     with TestClient(app) as client:
         status = client.get("/api/v1/knowledge/status")
@@ -229,11 +379,23 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         )
         assert search.status_code == 200
         assert search.json()["results"][0]["path"] == "README.md"
+        resource_uri = search.json()["results"][0]["resource_uri"]
+        assert resource_uri.startswith("file:")
+        assert resource_uri.endswith("/README.md")
+
+        conversation = client.post(
+            "/api/v1/conversations",
+            json={
+                "project_id": "test-project",
+                "title": "知识闭环",
+            },
+        ).json()
 
         created = client.post(
             "/api/v1/tasks",
             json={
                 "project_id": "test-project",
+                "conversation_id": conversation["id"],
                 "prompt": "Investigate the test project",
                 "knowledge_mode": "assist",
             },
@@ -243,15 +405,25 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         task = client.get(f"/api/v1/tasks/{task_id}").json()
         assert task["status"] == "completed"
         assert task["knowledge_usage"]["citation_count"] == 1
+        citation = task["knowledge_usage"]["citations"][0]
+        assert citation["resource_uri"] == resource_uri
+        assert task["final_report"]["knowledge_citations"] == [citation]
+        assert runtime.developer_instructions is not None
+        assert "Investigate the learned enterprise knowledge" in (
+            runtime.developer_instructions
+        )
+        assert f'resource_uri="{resource_uri}"' in runtime.developer_instructions
         events = client.get(
-            f"/api/v1/tasks/{task_id}/events",
+            f"/api/v1/conversations/{conversation['id']}/events",
             params={"follow": "false"},
         ).text
         assert "knowledge.context.injected" in events
+        assert resource_uri in events
         assert "memory.candidate.created" in events
 
         candidates = client.get("/api/v1/memory-candidates").json()
         assert candidates[0]["status"] == "proposed"
+        assert candidates[0]["evidence"]["knowledge_citations"] == [citation]
         candidate_id = candidates[0]["id"]
         approved = client.post(
             f"/api/v1/memory-candidates/{candidate_id}/approve"

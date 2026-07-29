@@ -2,6 +2,28 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.16.0
+
+发布日期：2026-07-29
+
+### Added
+
+* Conversation 每轮在启动或恢复 Codex app-server turn 之前执行已批准知识检索。
+* 注入 Codex 的知识片段增加来源名称、来源类型、规范路径、commit 和 `resource_uri`。
+* 本地目录和 UNC 来源生成 `file:` URI，GitLab 和可识别 Git Web 来源生成 revision 固定链接，其他仓库保留仓库 URI、revision 和文件路径。
+* Task 最终报告和 MemoryCandidate evidence 保存与 SSE 相同的结构化知识引用。
+
+### Changed
+
+* Codex developer instructions 明确要求先分析已学习知识，必要时通过资源 URI 定位原始材料，并在回答中引用相关资源。
+* 知识搜索 API 和 `knowledge.context.injected` SSE 返回可追溯资源链接。
+* 长期记忆提取使用本轮最终报告和知识引用共同生成候选，形成来源、分析、回答和记忆的闭环。
+
+### Runtime boundary
+
+* 0.16.0 不重启仍在执行旧版长时间学习任务的 8000 进程。
+* 发布验证使用隔离测试数据库、Fake Runtime 和独立前端端口，不消耗 Codex 订阅额度。
+
 ## 0.15.0
 
 发布日期：2026-07-29

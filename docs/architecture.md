@@ -218,7 +218,17 @@ processed. An ingestion-state gate provides single-flight execution for each
 source, so repeated API calls follow the active ingestion without launching a
 second collector.
 
-Task retrieval uses tenant and product version filters before reciprocal rank fusion. CAG injects only approved, non-instructional evidence blocks into Codex developer instructions and records citation IDs without logging their plaintext. Completed Tasks can create encrypted MemoryCandidates through the local memory model.
+Task retrieval uses tenant and product version filters before reciprocal rank
+fusion. Every Conversation turn completes this retrieval before Codex
+app-server execution. CAG injects only approved, non-instructional evidence
+blocks into Codex developer instructions. Each block includes the source
+identity, canonical path, revision and a source-specific resource URI. Plaintext
+is excluded from SSE and audit records.
+
+KnowledgeUsage, `knowledge.context.injected`, the Task final report and
+MemoryCandidate evidence retain the same citation objects. Completed Tasks can
+create encrypted MemoryCandidates through the local memory model, with chunk
+and source references preserving the grounding chain.
 
 Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect to Ollama or Codex app-server directly.
 

@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.15.0 | Evidence |
+| Requirement | Status for 0.16.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `docs/api.md` |
@@ -38,6 +38,8 @@ Legend:
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
 | CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
+| Knowledge-first Conversation execution | Implemented | pre-runtime retrieval, bounded fragments, resource URI injection and Conversation SSE tests |
+| Traceable knowledge learning loop | Implemented | citations shared by context injection, final report and MemoryCandidate evidence |
 | Continuous conversation frontend | Implemented | Component, build and browser evidence |
 | Truthful runtime feedback | Implemented | User-visible app-server deltas are durable CAG events; hidden reasoning and credentials remain excluded |
 | Enterprise knowledge plane | Implemented | `docs/enterprise-knowledge.md`, knowledge API tests |
@@ -53,7 +55,7 @@ Legend:
 | Managed PostgreSQL and pgvector host runtime | Partial | Runtime gate, native vector query, migration tool and live PostgreSQL tests implemented; current long-running job must finish before verified cutover |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
-| Governed Modular RAG | Implemented | Ingestion, hybrid recall, citations and context isolation |
+| Governed Modular RAG | Implemented | Ingestion, hybrid recall, resource-linked citations and context isolation |
 | Japanese enterprise text encoding | Implemented | UTF-8, UTF-16, CP932 and Shift-JIS extraction tests |
 | Structure-aware code indexing | Implemented | AST and Tree-sitter adapter, language fallback, symbol-boundary chunks and code intelligence tests |
 | Code symbol and relationship graph | Implemented | CodeSymbol, CodeRelation, CodeDocumentLink, migration and idempotency tests |

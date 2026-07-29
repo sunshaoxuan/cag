@@ -46,7 +46,7 @@ text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies,
 binary executables and repository metadata are excluded. The default size limit
 is ten megabytes per file and can be reduced by deployment policy.
 
-Version 0.15.0 indexes successfully extracted content. Empty files, directory
+Version 0.16.0 indexes successfully extracted content. Empty files, directory
 names and unsupported file names are retained in file-level audit evidence and
 are not yet embedded as path-semantic knowledge. ADR 0015 defines the required
 path-complete and resumable worker architecture without claiming it is
@@ -175,6 +175,21 @@ Tenant chunks match only the current Project Tenant physical ID. Product chunks 
 
 Task memories begin as encrypted tenant scoped candidates. Approval makes the record accepted for governance. Product promotion removes the tenant reference only after approval.
 
+## Conversation knowledge loop
+
+Every Conversation turn defaults to governed knowledge assistance. The Gateway
+finishes retrieval before starting or resuming the Codex app-server turn.
+Selected evidence is supplied through developer instructions with the encrypted
+chunk plaintext opened only for the bounded runtime context. Each block carries
+the source name, source type, canonical path, revision and `resource_uri`.
+
+The same citation objects are written to `KnowledgeUsage`, emitted by
+`knowledge.context.injected`, attached to the Task final report and stored in
+MemoryCandidate evidence. This gives the answer, the learned memory candidate
+and the original source one traceable chain. Source authorization, prompt
+injection exclusion and context-size limits are applied before any evidence
+reaches Codex.
+
 ## Models
 
 `qwen3-embedding:8b` produces 1024 dimensional vectors. Query embeddings use an
@@ -191,4 +206,7 @@ request executes at a time on the current 16GB GPU.
 
 ## Evidence and evaluation
 
-Every injected chunk creates a KnowledgeUsage record with Task, rank and score. Source commit and canonical path remain in the citation. DataQualityMetric records accepted file ratio. Later Harness releases add answer groundedness and conflict evaluation.
+Every injected chunk creates a KnowledgeUsage record with Task, rank and score.
+Source identity, commit, canonical path and resource URI remain in the
+citation. DataQualityMetric records accepted file ratio. Later Harness releases
+add answer groundedness and conflict evaluation.

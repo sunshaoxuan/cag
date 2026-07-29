@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.15.0`
+Current version: `0.16.0`
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.15.0"
+    "version": "0.16.0"
 }
 ```
 
@@ -67,6 +67,11 @@ Accepts a Project physical UUID or business Code. Unknown references return HTTP
 Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 `assist` records an explicit warning and continues when knowledge is unavailable.
 `required` ends before Codex execution when approved knowledge retrieval cannot run.
+The default `assist` mode applies to every Conversation turn. Retrieval finishes
+before Codex app-server starts the turn. The injected evidence contains bounded
+knowledge fragments, source identity, canonical path, revision and
+`resource_uri`. Task SSE records the citation metadata without publishing the
+knowledge plaintext.
 
 ## Enterprise knowledge
 
@@ -90,6 +95,12 @@ Task creation accepts `knowledge_mode` with `off`, `assist` or `required`.
 
 Memory actions are `approve`, `reject`, `promote` and `deprecate`.
 Product promotion is accepted only for an approved candidate.
+
+Knowledge search results and injected citations include `source_name`,
+`source_type`, canonical `path`, `source_commit` and `resource_uri`. Local and
+UNC resources use `file:` URIs. GitLab and recognized Git web origins use
+revision-pinned file links. Other repository origins retain their repository
+URI together with revision and path metadata.
 
 Source create accepts local directory, Windows network share, Git, GitLab and
 SVN locations. Credential secrets are write only. The complete source schema,
@@ -231,6 +242,13 @@ The response headers expose `X-CAG-Trace-ID`,
 `X-CAG-Idempotent-Replay` and `Location`. Replaying the same request with
 the same client and idempotency key returns the existing Task. Reusing the key
 for a different request returns HTTP 409.
+
+When knowledge is injected, a completed `final_report` adds
+`knowledge_citations`. Each citation contains `chunk_id`, `source_id`,
+`source_name`, `source_type`, `path`, `resource_uri`, `scope`, `commit` and
+retrieval `score`. The preceding `knowledge.context.injected` SSE event carries
+the same citation objects, so an SSE client can associate the answer with its
+original resources without receiving the knowledge plaintext.
 
 The supported CAG runtime profiles currently include:
 

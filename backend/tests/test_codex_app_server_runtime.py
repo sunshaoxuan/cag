@@ -20,6 +20,7 @@ def execute_runtime(
     mode: str = "normal",
     persistent_conversation: bool = True,
     conversation_thread_id: str | None = None,
+    developer_instructions: str | None = None,
 ) -> tuple[object, list[tuple[str, dict[str, object]]]]:
     command = [sys.executable, str(FIXTURE_SERVER), account_type]
     command.append(mode)
@@ -43,7 +44,7 @@ def execute_runtime(
             conversation_thread_id=conversation_thread_id,
             workspace_path=tmp_path,
             additional_workspace_roots=(),
-            developer_instructions=None,
+            developer_instructions=developer_instructions,
             emit=emit,
         )
     )
@@ -140,6 +141,21 @@ def test_codex_app_server_resumes_persisted_thread(tmp_path: Path) -> None:
         "thread_id": "thread-existing",
         "action": "resumed",
     }
+
+
+def test_codex_app_server_receives_resource_linked_knowledge(
+    tmp_path: Path,
+) -> None:
+    result, _ = execute_runtime(
+        tmp_path,
+        mode="expect-knowledge-context",
+        developer_instructions=(
+            '<knowledge resource_uri="file:///D:/knowledge/runbook.md">'
+            "verified evidence</knowledge>"
+        ),
+    )
+
+    assert result.summary == "LOCAL_CODEX_FIXTURE_OK"
 
 
 def test_codex_app_server_uses_ephemeral_thread_without_conversation(
