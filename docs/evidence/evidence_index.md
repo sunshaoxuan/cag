@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.17.1
+
+* `docs/evidence/continuous-supervision-0.17.1/`
+* `docs/evidence/screenshots/continuous-supervision-0.17.1.png`
+
 ## Version 0.17.0
 
 * `docs/evidence/durable-queue-0.17.0/`

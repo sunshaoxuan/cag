@@ -7,10 +7,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$gatewayScript = Join-Path $PSScriptRoot "run-local-codex-gateway.ps1"
-$powerShellExecutable = (
-    Get-Process -Id $PID
-).Path
+$supervisorScript = Join-Path $PSScriptRoot "supervise-local-codex-gateway.ps1"
+$powerShellExecutable = (Get-Process -Id $PID).Path
+$currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
 function Get-GatewayTask {
     Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -63,8 +62,8 @@ function Stop-GatewayListener {
 }
 
 function Wait-GatewayReady {
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        Start-Sleep -Milliseconds 500
+    for ($attempt = 0; $attempt -lt 900; $attempt++) {
+        Start-Sleep -Seconds 1
         try {
             $health = Invoke-RestMethod `
                 -Uri "http://127.0.0.1:$Port/health/ready" `
@@ -98,7 +97,10 @@ if ($Action -eq "status") {
         else {
             "$($listener.LocalAddress):$Port"
         }
-        TaskState = $task.State
+        SupervisorState = $task.State
+        AutoStart = @($task.Triggers).Count -gt 0
+        RestartCount = $task.Settings.RestartCount
+        RestartInterval = $task.Settings.RestartInterval
         LastRunTime = $taskInfo.LastRunTime
         LastTaskResult = $taskInfo.LastTaskResult
     }
@@ -130,28 +132,11 @@ if ($Action -eq "uninstall") {
     exit 0
 }
 
-$existingTask = Get-GatewayTask
 $existingListener = Get-GatewayListener
-if ($null -ne $existingListener) {
-    if ($null -eq $existingTask) {
-        throw (
-            "One Agent Gateway is already listening on port $Port without the " +
-            "managed background task."
-        )
-    }
-    if (Test-GatewayListenerIsAllInterfaces -Listener $existingListener) {
-        $health = Wait-GatewayReady
-        [pscustomobject]@{
-            TaskName = $TaskName
-            GatewayState = "running"
-            ListenAddress = "$($existingListener.LocalAddress):$Port"
-            Gateway = "http://127.0.0.1:$Port"
-            Health = $health.status
-            Version = $health.version
-        }
-        exit 0
-    }
-
+if (
+    $null -ne $existingListener -and
+    -not (Test-GatewayListenerIsAllInterfaces -Listener $existingListener)
+) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Stop-GatewayListener
 }
@@ -161,7 +146,7 @@ $arguments = @(
     "-ExecutionPolicy"
     "Bypass"
     "-File"
-    "`"$gatewayScript`""
+    "`"$supervisorScript`""
     "-Port"
     $Port
 ) -join " "
@@ -169,21 +154,32 @@ $taskAction = New-ScheduledTaskAction `
     -Execute $powerShellExecutable `
     -Argument $arguments `
     -WorkingDirectory $repositoryRoot
+$startupTrigger = New-ScheduledTaskTrigger -AtStartup
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentIdentity
 $taskPrincipal = New-ScheduledTaskPrincipal `
-    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -UserId $currentIdentity `
     -LogonType Interactive `
     -RunLevel Limited
 $taskSettings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit ([TimeSpan]::Zero)
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -StartWhenAvailable `
+    -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -MultipleInstances IgnoreNew `
+    -WakeToRun
 
 Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $taskAction `
+    -Trigger @($startupTrigger, $logonTrigger) `
     -Principal $taskPrincipal `
     -Settings $taskSettings `
-    -Description "Runs CAG with the local ChatGPT-authenticated Codex app-server." `
+    -Description (
+        "Keeps One Agent Gateway running with automatic startup, health " +
+        "supervision and delayed recovery."
+    ) `
     -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 $health = Wait-GatewayReady
@@ -199,7 +195,9 @@ if (
     TaskName = $TaskName
     GatewayState = "running"
     ListenAddress = "$($listener.LocalAddress):$Port"
-    TaskState = (Get-GatewayTask).State
+    SupervisorState = (Get-GatewayTask).State
+    AutoStart = $true
+    RestartCount = (Get-GatewayTask).Settings.RestartCount
     Gateway = "http://127.0.0.1:$Port"
     Health = $health.status
     Version = $health.version

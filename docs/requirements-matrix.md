@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.17.0 | Evidence |
+| Requirement | Status for 0.17.1 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -23,6 +23,7 @@ Legend:
 | Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events` |
 | Docker Compose | Implemented | `docker-compose.yml` |
 | Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
+| Continuous Windows supervision | Implemented | Startup and sign-in triggers, health monitor, failure retry and rotating supervisor log |
 | Unit and API tests | Implemented | `backend/tests` |
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
@@ -56,7 +57,7 @@ Legend:
 | Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |
 | Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
 | Path-complete semantic indexing | Planned | ADR 0015; directory, file-name and zero-byte path retrieval tests required |
-| Managed PostgreSQL and pgvector host runtime | Partial | Runtime gate, native vector query, guarded automatic cutover and live PostgreSQL tests implemented; current long-running job must finish before verified cutover |
+| Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
 | Governed Modular RAG | Implemented | Ingestion, hybrid recall, resource-linked citations and context isolation |

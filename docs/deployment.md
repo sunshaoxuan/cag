@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.17.0 development deployment
+## 0.17.1 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -108,13 +108,29 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 
 The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status, PostgreSQL connectivity and the pgvector extension, then starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
-For an interactive desktop test that must remain available after the launching shell exits, register and start the on-demand background task:
+For a continuously supervised host deployment, register and start the Windows
+background task:
 
 ```powershell
 .\scripts\manage-local-codex-gateway-task.ps1 start
 ```
 
-Use the same script with `status`, `stop` or `uninstall` to inspect, stop or remove the background task. The task has no automatic trigger and runs only when explicitly started. Status and stop operations verify the actual port listener because the Windows virtual-environment launcher can leave the runtime Python child active after the scheduler action completes. Starting the task replaces a prior loopback-only managed listener and verifies that the resulting address is `0.0.0.0` or `::`.
+Use the same script with `status`, `stop` or `uninstall` to inspect, stop or
+remove the background task. The task starts at Windows startup and at sign-in
+under the current interactive user identity so the local ChatGPT
+authentication remains available. Task Scheduler retries the supervisor up to
+999 times at one-minute intervals. The supervisor checks `/health/ready` every
+15 seconds, restarts a recognized Gateway after four consecutive failures, and
+starts it again when the listener exits. It never terminates an unexpected
+port owner.
+
+Supervisor logs are stored under
+`workspaces\.gateway\logs\gateway-supervisor.log`. Each file is limited to
+10 MiB and five rotated files are retained. Status and stop operations verify
+the actual port listener because the Windows virtual-environment launcher can
+leave the runtime Python child active after the scheduler action completes.
+Starting the task replaces a prior loopback-only managed listener and verifies
+that the resulting address is `0.0.0.0` or `::`.
 
 The host Gateway requires PostgreSQL with pgvector. Configure the connection in
 the ignored `backend/.env.local` file or the

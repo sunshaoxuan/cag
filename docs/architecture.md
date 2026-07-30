@@ -149,6 +149,12 @@ Redis 7 Pub/Sub carries wake notifications only. Every worker also polls
 PostgreSQL, so Redis connection loss affects pickup latency without changing
 the durable job record.
 
+The Windows host uses a long-running Task Scheduler supervisor under the
+interactive ChatGPT-authenticated user. It starts at system startup and
+sign-in, checks the all-interface listener and `/health/ready`, starts a missing
+Gateway, and restarts a recognized unhealthy Gateway after a bounded failure
+threshold. Unexpected port owners are logged and left untouched.
+
 ### Project registry
 
 Each YAML file declares a stable physical ID, business Code, repository, default branch, workspace mode, instruction files and permitted runtime profiles. Repository metadata is synchronized into PostgreSQL while strong references continue to use the physical ID.

@@ -1,6 +1,7 @@
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runScript = Join-Path $repositoryRoot "scripts\run-local-codex-gateway.ps1"
 $manageScript = Join-Path $repositoryRoot "scripts\manage-local-codex-gateway-task.ps1"
+$supervisorScript = Join-Path $repositoryRoot "scripts\supervise-local-codex-gateway.ps1"
 $migrationScript = Join-Path $repositoryRoot "scripts\migrate-sqlite-to-pgvector.ps1"
 
 Describe "Local Codex Gateway PowerShell scripts" {
@@ -8,6 +9,7 @@ Describe "Local Codex Gateway PowerShell scripts" {
         foreach ($scriptPath in @(
             $runScript,
             $manageScript,
+            $supervisorScript,
             $migrationScript
         )) {
             $tokens = $null
@@ -54,14 +56,37 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Not Match '-LocalAddress "127\.0\.0\.1"'
     }
 
+    It "installs automatic startup and failure recovery" {
+        $content = Get-Content -Raw -LiteralPath $manageScript
+        $content | Should Match 'New-ScheduledTaskTrigger -AtStartup'
+        $content | Should Match 'New-ScheduledTaskTrigger -AtLogOn'
+        $content | Should Match '-RestartCount 999'
+        $content | Should Match '-RestartInterval \(New-TimeSpan -Minutes 1\)'
+        $content | Should Match '-MultipleInstances IgnoreNew'
+        $content | Should Match 'supervise-local-codex-gateway\.ps1'
+    }
+
+    It "supervises health and rotates persistent logs" {
+        $content = Get-Content -Raw -LiteralPath $supervisorScript
+        $content | Should Match '/health/ready'
+        $content | Should Match 'UnhealthyThreshold'
+        $content | Should Match 'gateway\.restarting'
+        $content | Should Match 'gateway-supervisor\.log'
+        $content | Should Match 'retainedLogFiles = 5'
+    }
+
     It "reports the persistent Gateway as running" {
         $status = & $manageScript status
         $status.GatewayState | Should Be "running"
+        $status.AutoStart | Should Be $true
+        $status.RestartCount | Should Be 999
     }
 
     It "starts idempotently while the Gateway is already healthy" {
         $result = & $manageScript start
         $result.GatewayState | Should Be "running"
         $result.Health | Should Be "ready"
+        $result.AutoStart | Should Be $true
+        $result.RestartCount | Should Be 999
     }
 }
