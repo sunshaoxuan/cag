@@ -42,15 +42,22 @@ GitLab project wiki can be registered through its wiki Git URL. Each remote
 source is materialized as a managed revision snapshot before extraction.
 
 Supported input includes source code, scripts, configuration, Markdown, common
-text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies,
-binary executables and repository metadata are excluded. The default size limit
-is ten megabytes per file and can be reduced by deployment policy.
+text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies
+and repository metadata are excluded.
 
-Version 0.16.0 indexes successfully extracted content. Empty files, directory
-names and unsupported file names are retained in file-level audit evidence and
-are not yet embedded as path-semantic knowledge. ADR 0015 defines the required
-path-complete and resumable worker architecture without claiming it is
-implemented in this version.
+Version 0.18.0 records every discovered entry in a durable source asset
+inventory. ZIP, DUMP, backup, binary and files above the default ten-megabyte
+policy limit keep file presence, relative path, 64-bit size and processing
+reason without content extraction or content vectors. Empty files create
+path-only knowledge from the file name and relative path. Source code enters
+the structural code analyzer. Supported non-code files enter the document
+extractor.
+
+Each successful document stores a processor fingerprint. The fingerprint
+includes the routing policy, processing mode, processor version, embedding
+model and vector dimensions. A changed fingerprint gives an unchanged file a
+new processing opportunity. A matching content hash and fingerprint reuses the
+existing chunks and vectors.
 
 The managed knowledge store is PostgreSQL 16 with pgvector. Embeddings use the
 native `vector(1024)` type and an HNSW cosine index. The vector channel executes
@@ -107,8 +114,10 @@ duplicate work when more than one Gateway Worker polls the same database.
 
 Every scheduled run scans the current source snapshot. The idempotent comparison
 then separates unchanged, changed, added and removed paths. Only changed and
-added files require new embeddings. Unchanged chunks retain their physical IDs
-and vectors. Removed paths delete their documents and dependent chunks. Each
+added files, plus files with changed processor fingerprints, require new
+embeddings. Unchanged chunks retain their physical IDs and vectors. Removed
+paths delete their documents and dependent chunks while their source inventory
+entry remains marked absent. Each
 run remains available as ingestion history with its trigger, status, counts,
 timestamps, error and rejection archive receipt. The management page exposes
 the file-level audit, CSV export and compressed archive from this history.

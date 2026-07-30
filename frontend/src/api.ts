@@ -134,6 +134,7 @@ export type KnowledgeSource = {
   last_content_change_at: string | null;
   consecutive_failures: number;
   scheduler_claimed: boolean;
+  entry_summary: KnowledgeSourceEntrySummary;
   last_ingestion: KnowledgeIngestion | null;
 };
 
@@ -152,12 +153,51 @@ export type KnowledgeIngestion = {
   removed_files: number;
   trigger: "manual" | "scheduled";
   error: string | null;
+  error_summary: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
   rejection_archive_name: string | null;
   rejection_archive_sha256: string | null;
   rejection_archive_created_at: string | null;
+};
+
+export type KnowledgeSourceEntrySummary = {
+  total: number;
+  code: number;
+  document: number;
+  metadata_only: number;
+  path_only: number;
+  removed: number;
+};
+
+export type KnowledgeSourceEntry = {
+  id: string;
+  source_id: string;
+  relative_path: string;
+  entry_kind: "file" | "directory";
+  extension: string;
+  file_size: number | null;
+  modified_at: string | null;
+  processing_mode: "code" | "document" | "metadata_only" | "path_only";
+  processing_status: string;
+  reason_code: string | null;
+  present: boolean;
+  last_seen_ingestion_id: string | null;
+  processor_fingerprint: string | null;
+  content_hash: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  processed_at: string | null;
+  removed_at: string | null;
+};
+
+export type KnowledgeSourceEntryPage = {
+  items: KnowledgeSourceEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: KnowledgeSourceEntrySummary;
 };
 
 export type KnowledgeIngestionRejection = {
@@ -514,6 +554,21 @@ export function listKnowledgeSourceIngestions(
 ): Promise<KnowledgeIngestion[]> {
   return request<KnowledgeIngestion[]>(
     `/api/v1/knowledge/sources/${sourceId}/ingestions`,
+  );
+}
+
+export function listKnowledgeSourceEntries(
+  sourceId: string,
+  limit = 100,
+  offset = 0,
+): Promise<KnowledgeSourceEntryPage> {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    present: "true",
+  });
+  return request<KnowledgeSourceEntryPage>(
+    `/api/v1/knowledge/sources/${sourceId}/entries?${query}`,
   );
 }
 

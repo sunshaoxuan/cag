@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.17.1 | Evidence |
+| Requirement | Status for 0.18.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -54,9 +54,13 @@ Legend:
 | Source collection stage SSE | Implemented | Durable collection, cleaning, indexing and Source Memory events |
 | Scalable folder traversal feedback | Implemented | Breadth-first directory queue, per-directory progress SSE, single-flight guard and browser evidence |
 | File-level ingestion rejection audit | Implemented | Durable path and reason records, paged API, CSV export, gzip JSONL archive and retention tests |
+| Durable knowledge source entry inventory | Implemented | `KnowledgeSourceEntry`, source entry API, management table and migration tests |
+| Policy-routed knowledge processing | Implemented | Metadata-only archive and dump routing, path-only empty files, document extraction and structural code routing tests |
+| Processor policy reprocessing | Implemented | Processor fingerprints, legacy code backfill and unchanged document vector reuse tests |
+| 64-bit knowledge file sizes | Implemented | PostgreSQL `BIGINT` migration and sparse large-file ingestion test |
 | Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |
 | Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
-| Path-complete semantic indexing | Planned | ADR 0015; directory, file-name and zero-byte path retrieval tests required |
+| Path-complete semantic indexing | Partial | Zero-byte file path knowledge is implemented; directory and every-file independent path vectors remain planned in ADR 0015 |
 | Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |

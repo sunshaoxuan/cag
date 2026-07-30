@@ -10,13 +10,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Float, delete, or_, select
+from sqlalchemy import Float, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.database import Database
 from app.knowledge.connectors import (
+    CollectionObservation,
     CollectionRejection,
     CollectionResult,
     SourceConfig,
@@ -35,6 +36,7 @@ from app.knowledge.credentials import (
     SourceCredential,
 )
 from app.knowledge.ollama import OllamaProvider
+from app.knowledge.processing_policy import processor_fingerprint
 from app.knowledge.resources import build_resource_uri
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
@@ -48,6 +50,7 @@ from app.models import (
     KnowledgeIngestionEvent,
     KnowledgeIngestionRejection,
     KnowledgeSource,
+    KnowledgeSourceEntry,
     KnowledgeStatus,
     KnowledgeUsage,
     MemoryCandidate,
@@ -61,6 +64,22 @@ from app.policies.command_policy import CommandPolicyService
 
 class KnowledgeUnavailableError(RuntimeError):
     pass
+
+
+def summarize_knowledge_error(error: str) -> str:
+    if "NumericValueOutOfRange" in error or "integer out of range" in error:
+        return (
+            "文件元数据大小超出数据库字段范围，完整技术日志已保留。"
+        )
+    first_line = next(
+        (
+            line.strip()
+            for line in error.replace("\r", "\n").split("\n")
+            if line.strip()
+        ),
+        "知识学习失败",
+    )
+    return first_line[:300]
 
 
 @dataclass(frozen=True)
@@ -337,6 +356,11 @@ class KnowledgeService:
                         KnowledgeDocument.source_id == source.id
                     )
                 )
+                session.execute(
+                    delete(KnowledgeSourceEntry).where(
+                        KnowledgeSourceEntry.source_id == source.id
+                    )
+                )
                 source.status = KnowledgeStatus.DRAFT
                 source.index_fingerprint = None
                 source.source_commit = None
@@ -505,6 +529,7 @@ class KnowledgeService:
             self._fail_ingestion(ingestion_id, "Knowledge encryption key is unavailable")
             return
         rejection_buffer: list[CollectionRejection] = []
+        observation_buffer: list[CollectionObservation] = []
 
         def flush_rejections() -> None:
             if not rejection_buffer:
@@ -512,6 +537,13 @@ class KnowledgeService:
             pending = tuple(rejection_buffer)
             self._persist_ingestion_rejections(ingestion_id, pending)
             rejection_buffer.clear()
+
+        def flush_observations() -> None:
+            if not observation_buffer:
+                return
+            pending = tuple(observation_buffer)
+            self._persist_source_observations(ingestion_id, pending)
+            observation_buffer.clear()
 
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
@@ -544,6 +576,7 @@ class KnowledgeService:
             def report_collection_progress(
                 data: dict[str, int | str],
             ) -> None:
+                flush_observations()
                 flush_rejections()
                 self._record_ingestion_event(
                     ingestion_id,
@@ -558,13 +591,23 @@ class KnowledgeService:
                 if len(rejection_buffer) >= 100:
                     flush_rejections()
 
+            def report_collection_observation(
+                item: CollectionObservation,
+            ) -> None:
+                observation_buffer.append(item)
+                if len(observation_buffer) >= 500:
+                    flush_observations()
+
             collected = await asyncio.to_thread(
                 self._connectors.collect,
                 source_config,
                 report_collection_progress,
                 report_collection_rejection,
+                report_collection_observation,
             )
+            flush_observations()
             flush_rejections()
+            self._finalize_source_observations(ingestion_id)
             archive = self._archive_ingestion_rejections(ingestion_id)
             self._record_ingestion_event(
                 ingestion_id,
@@ -592,6 +635,8 @@ class KnowledgeService:
             code_analysis_by_path: dict[str, CodeAnalysis] = {}
             cleaned_hashes: set[str] = set()
             duplicate_files = collected.duplicate_files
+            document_fingerprints: dict[str, str] = {}
+            document_modes: dict[str, str] = {}
             for document in collected.documents:
                 scan = scan_knowledge_text(document.text)
                 safe_text = scan.safe_text
@@ -604,22 +649,44 @@ class KnowledgeService:
                     duplicate_files += 1
                     continue
                 cleaned_hashes.add(safe_hash)
-                analysis = analyze_code(document.path, safe_text)
-                if is_code_path(document.path):
+                processing_mode = document.processing_mode
+                fingerprint = processor_fingerprint(
+                    processing_mode,
+                    embedding_model=(
+                        self._settings.ollama_embedding_model
+                    ),
+                    embedding_dimensions=(
+                        self._settings.ollama_embedding_dimensions
+                    ),
+                )
+                document_fingerprints[document.path] = fingerprint
+                document_modes[document.path] = processing_mode
+                if processing_mode == "code":
+                    analysis = analyze_code(document.path, safe_text)
                     code_analysis_by_path[document.path] = analysis
-                prepared_parts = (
-                    analysis.chunks
-                    if analysis.chunks
-                    else tuple(
+                    prepared_parts = analysis.chunks
+                else:
+                    analysis = CodeAnalysis(
+                        language=(
+                            "path"
+                            if processing_mode == "path_only"
+                            else "text"
+                        ),
+                        parser=(
+                            "path-semantic"
+                            if processing_mode == "path_only"
+                            else "document-text"
+                        ),
+                    )
+                    prepared_parts = tuple(
                         CodeChunkFact(
                             text=chunk_text,
                             start_line=1,
                             end_line=max(1, chunk_text.count("\n") + 1),
-                            parser="text",
+                            parser=analysis.parser,
                         )
                         for chunk_text in self._chunk_text(safe_text)
                     )
-                )
                 for ordinal, part in enumerate(prepared_parts):
                     chunks.append(
                         PreparedChunk(
@@ -632,7 +699,7 @@ class KnowledgeService:
                             document_hash=safe_hash,
                             language=(
                                 analysis.language
-                                if analysis.language != "text"
+                                if processing_mode == "code"
                                 else document.language
                             ),
                             encoding=document.encoding,
@@ -682,6 +749,15 @@ class KnowledgeService:
                     for path, content_hash in document_hashes.items()
                     if path in existing_by_path
                     and existing_by_path[path].content_hash == content_hash
+                    and (
+                        existing_by_path[path].processor_fingerprint
+                        == document_fingerprints[path]
+                        or (
+                            existing_by_path[path].processor_fingerprint
+                            is None
+                            and document_modes[path] != "code"
+                        )
+                    )
                 }
                 changed_paths = set(document_hashes) - unchanged_paths
                 removed_paths = set(existing_by_path) - set(document_hashes)
@@ -753,6 +829,10 @@ class KnowledgeService:
                             canonical_path=relative_path,
                             content_hash=chunk_data.document_hash,
                             language=chunk_data.language,
+                            processing_mode=document_modes[relative_path],
+                            processor_fingerprint=(
+                                document_fingerprints[relative_path]
+                            ),
                         )
                         session.add(document)
                         session.flush()
@@ -788,6 +868,54 @@ class KnowledgeService:
                         )
                     )
                 session.flush()
+                unchanged_documents: list[KnowledgeDocument] = []
+                sorted_unchanged_paths = sorted(unchanged_paths)
+                for start in range(
+                    0,
+                    len(sorted_unchanged_paths),
+                    500,
+                ):
+                    unchanged_documents.extend(
+                        session.scalars(
+                            select(KnowledgeDocument).where(
+                                KnowledgeDocument.source_id == source.id,
+                                KnowledgeDocument.canonical_path.in_(
+                                    sorted_unchanged_paths[
+                                        start : start + 500
+                                    ]
+                                ),
+                            )
+                        )
+                    )
+                for existing in unchanged_documents:
+                    relative_path = existing.canonical_path
+                    existing.processing_mode = document_modes[relative_path]
+                    existing.processor_fingerprint = (
+                        document_fingerprints[relative_path]
+                    )
+                processed_entries: list[KnowledgeSourceEntry] = []
+                processed_paths = sorted(document_hashes)
+                for start in range(0, len(processed_paths), 500):
+                    processed_entries.extend(
+                        session.scalars(
+                            select(KnowledgeSourceEntry).where(
+                                KnowledgeSourceEntry.source_id == source.id,
+                                KnowledgeSourceEntry.relative_path.in_(
+                                    processed_paths[start : start + 500]
+                                ),
+                            )
+                        )
+                    )
+                processed_at = utc_now()
+                for entry in processed_entries:
+                    entry.processing_status = "indexed"
+                    entry.content_hash = document_hashes[
+                        entry.relative_path
+                    ]
+                    entry.processor_fingerprint = document_fingerprints[
+                        entry.relative_path
+                    ]
+                    entry.processed_at = processed_at
                 for relative_path in sorted(changed_code_paths):
                     document = document_by_path.get(relative_path)
                     if document is None:
@@ -896,6 +1024,7 @@ class KnowledgeService:
                         value=(
                             collected.files_seen
                             - collected.rejected_files
+                            - collected.skipped_files
                             - duplicate_files
                         )
                         / max(1, collected.files_seen),
@@ -904,6 +1033,7 @@ class KnowledgeService:
                 session.commit()
         except Exception as exc:
             try:
+                flush_observations()
                 flush_rejections()
                 archive = self._archive_ingestion_rejections(ingestion_id)
                 self._record_ingestion_event(
@@ -921,6 +1051,92 @@ class KnowledgeService:
                     },
                 )
             self._fail_ingestion(ingestion_id, str(exc))
+
+    def _persist_source_observations(
+        self,
+        ingestion_id: str,
+        items: tuple[CollectionObservation, ...],
+    ) -> None:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                raise KeyError(ingestion_id)
+            paths = [item.relative_path for item in items]
+            existing = {
+                item.relative_path: item
+                for item in session.scalars(
+                    select(KnowledgeSourceEntry).where(
+                        KnowledgeSourceEntry.source_id
+                        == ingestion.source_id,
+                        KnowledgeSourceEntry.relative_path.in_(paths),
+                    )
+                )
+            }
+            observed_at = utc_now()
+            for item in items:
+                record = existing.get(item.relative_path)
+                if record is None:
+                    record = KnowledgeSourceEntry(
+                        source_id=ingestion.source_id,
+                        relative_path=item.relative_path,
+                        first_seen_at=observed_at,
+                    )
+                    session.add(record)
+                changed = (
+                    record.file_size != item.file_size
+                    or record.modified_at != item.modified_at
+                    or record.processing_mode != item.processing_mode
+                )
+                record.entry_kind = item.entry_kind
+                record.extension = item.extension
+                record.file_size = item.file_size
+                record.modified_at = item.modified_at
+                record.processing_mode = item.processing_mode
+                if (
+                    changed
+                    or record.processing_status
+                    in {"removed", "rejected"}
+                ):
+                    record.processing_status = item.processing_status
+                if item.processing_mode == "metadata_only":
+                    record.processing_status = "metadata_only"
+                    record.processed_at = observed_at
+                    record.processor_fingerprint = None
+                    record.content_hash = None
+                record.reason_code = item.reason_code
+                record.present = True
+                record.last_seen_ingestion_id = ingestion_id
+                record.last_seen_at = observed_at
+                record.removed_at = None
+            session.commit()
+
+    def _finalize_source_observations(self, ingestion_id: str) -> None:
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                raise KeyError(ingestion_id)
+            removed_at = utc_now()
+            session.execute(
+                update(KnowledgeSourceEntry)
+                .where(
+                    KnowledgeSourceEntry.source_id
+                    == ingestion.source_id,
+                    KnowledgeSourceEntry.present.is_(True),
+                    or_(
+                        KnowledgeSourceEntry.last_seen_ingestion_id.is_(
+                            None
+                        ),
+                        KnowledgeSourceEntry.last_seen_ingestion_id
+                        != ingestion_id,
+                    ),
+                )
+                .values(
+                    present=False,
+                    processing_status="removed",
+                    removed_at=removed_at,
+                )
+            )
+            session.commit()
 
     def _persist_ingestion_rejections(
         self,
@@ -952,6 +1168,24 @@ class KnowledgeService:
             ingestion.skipped_files += sum(
                 item.disposition == "skipped" for item in items
             )
+            paths = [item.relative_path for item in items]
+            entries = {
+                item.relative_path: item
+                for item in session.scalars(
+                    select(KnowledgeSourceEntry).where(
+                        KnowledgeSourceEntry.source_id
+                        == ingestion.source_id,
+                        KnowledgeSourceEntry.relative_path.in_(paths),
+                    )
+                )
+            }
+            for item in items:
+                entry = entries.get(item.relative_path)
+                if entry is None:
+                    continue
+                if item.disposition == "rejected":
+                    entry.processing_status = "rejected"
+                entry.reason_code = item.reason_code
             session.commit()
 
     def _archive_ingestion_rejections(
@@ -2084,15 +2318,20 @@ class KnowledgeService:
             ingestion.status = "failed"
             ingestion.error = error
             ingestion.completed_at = utc_now()
+            error_summary = summarize_knowledge_error(error)
             self._append_ingestion_event(
                 session,
                 ingestion,
                 "knowledge.ingestion.failed",
-                {"error": error},
+                {
+                    "error_summary": error_summary,
+                    "error_length": len(error),
+                    "raw_error_available": True,
+                },
             )
             if source is not None:
                 source.status = KnowledgeStatus.FAILED
-                source.error = error
+                source.error = error_summary
                 source.consecutive_failures += 1
                 source.sync_lease_owner = None
                 source.sync_lease_expires_at = None

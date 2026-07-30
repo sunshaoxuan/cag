@@ -94,6 +94,18 @@ progress.addEventListener("knowledge.collection.progress", (message) => {
   console.log(JSON.parse(message.data));
 });`,
   },
+  {
+    title: "查询知识文件资产",
+    description: "检查每个条目的处理模式、状态、大小和策略原因。",
+    language: "PowerShell",
+    code: [
+      "$assets = Invoke-RestMethod `",
+      "  -Method Get `",
+      '  -Uri "$baseUrl/api/v1/knowledge/sources/$sourceId/entries?limit=100"',
+      "$assets.items | Select-Object `",
+      "  relative_path, processing_mode, status, file_size, reason_code",
+    ].join("\n"),
+  },
 ];
 
 function countFor(

@@ -69,10 +69,27 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         "code_relations",
         "code_document_links",
         "knowledge_ingestion_rejections",
+        "knowledge_source_entries",
         "queue_items",
         "queue_workers",
         "data_migration_receipts",
     } <= tables
+    document_columns = {
+        column["name"]
+        for column in inspector.get_columns("knowledge_documents")
+    }
+    assert {
+        "processing_mode",
+        "processor_fingerprint",
+    } <= document_columns
+    rejection_file_size = next(
+        column
+        for column in inspector.get_columns(
+            "knowledge_ingestion_rejections"
+        )
+        if column["name"] == "file_size"
+    )
+    assert str(rejection_file_size["type"]).upper() == "BIGINT"
 
     command.downgrade(config, "20260728_0011")
     audit_downgraded = inspect(create_engine(database_url))

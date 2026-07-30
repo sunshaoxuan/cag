@@ -10,6 +10,7 @@ import zipfile
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterator
 from urllib.parse import urlsplit
@@ -22,6 +23,10 @@ from app.knowledge.extractors import (
     SUPPORTED_EXTENSIONS,
     extract_text_with_metadata,
     normalize_text,
+)
+from app.knowledge.processing_policy import (
+    classify_file,
+    path_semantic_text,
 )
 from app.policies.command_policy import CommandPolicyService
 
@@ -65,6 +70,7 @@ class CollectedDocument:
     content_hash: str
     language: str
     encoding: str
+    processing_mode: str
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,18 @@ class CollectionRejection:
 
 
 @dataclass(frozen=True)
+class CollectionObservation:
+    relative_path: str
+    entry_kind: str
+    extension: str
+    file_size: int | None
+    modified_at: datetime | None
+    processing_mode: str
+    processing_status: str
+    reason_code: str | None
+
+
+@dataclass(frozen=True)
 class ValidationResult:
     ok: bool
     revision: str | None
@@ -99,6 +117,7 @@ class ValidationResult:
 
 CollectionProgress = Callable[[dict[str, int | str]], None]
 CollectionRejectionSink = Callable[[CollectionRejection], None]
+CollectionObservationSink = Callable[[CollectionObservation], None]
 
 
 class SourceConnectorManager:
@@ -208,6 +227,7 @@ class SourceConnectorManager:
         source: SourceConfig,
         progress: CollectionProgress | None = None,
         rejection: CollectionRejectionSink | None = None,
+        observation: CollectionObservationSink | None = None,
     ) -> CollectionResult:
         credential = self._credentials.get(source.credential_ref)
         if source.source_type == "local_directory":
@@ -220,11 +240,18 @@ class SourceConnectorManager:
                 self._git_revision(root),
                 progress,
                 rejection,
+                observation,
             )
         if source.source_type == "network_share":
             with self._network_connection(source.location, credential):
                 root = self._selected_root(Path(source.location), source.subpath)
-                return self._read_documents(root, None, progress, rejection)
+                return self._read_documents(
+                    root,
+                    None,
+                    progress,
+                    rejection,
+                    observation,
+                )
         if source.source_type in {"git", "gitlab"}:
             root, revision = self._materialize_git(source, credential)
         else:
@@ -234,6 +261,7 @@ class SourceConnectorManager:
             revision,
             progress,
             rejection,
+            observation,
         )
 
     def purge(self, source_id: str) -> None:
@@ -262,6 +290,7 @@ class SourceConnectorManager:
         revision: str | None,
         progress: CollectionProgress | None = None,
         rejection: CollectionRejectionSink | None = None,
+        observation: CollectionObservationSink | None = None,
     ) -> CollectionResult:
         if not root.is_dir():
             raise ValueError("Selected source subpath does not exist")
@@ -329,17 +358,37 @@ class SourceConnectorManager:
                 report("failed", directory, error=str(exc))
                 continue
 
-            directory_files: list[Path] = []
+            directory_files: list[tuple[Path, str]] = []
             for entry in entries:
                 path = Path(entry.path)
                 try:
                     if entry.is_dir(follow_symlinks=False):
+                        directory_stat = entry.stat(follow_symlinks=False)
+                        self._report_observation(
+                            observation,
+                            root=root,
+                            path=path,
+                            entry_kind="directory",
+                            file_size=None,
+                            modified_at=datetime.fromtimestamp(
+                                directory_stat.st_mtime,
+                                tz=timezone.utc,
+                            ),
+                            processing_mode="metadata_only",
+                            processing_status="observed",
+                            reason_code="directory_entry",
+                        )
                         if entry.name not in EXCLUDED_PARTS:
                             pending_directories.append(Path(entry.path))
                         continue
                     if not entry.is_file(follow_symlinks=False):
                         continue
-                    file_size = entry.stat(follow_symlinks=False).st_size
+                    file_stat = entry.stat(follow_symlinks=False)
+                    file_size = file_stat.st_size
+                    modified_at = datetime.fromtimestamp(
+                        file_stat.st_mtime,
+                        tz=timezone.utc,
+                    )
                 except OSError as exc:
                     rejected += 1
                     self._report_rejection(
@@ -353,35 +402,69 @@ class SourceConnectorManager:
                         error=exc,
                     )
                     continue
-                suffix = path.suffix.lower()
-                if suffix not in SUPPORTED_EXTENSIONS:
-                    skipped += 1
-                    self._report_rejection(
-                        rejection,
-                        root=root,
-                        path=path,
-                        entry_kind="file",
-                        disposition="skipped",
-                        file_size=file_size,
-                        reason_code="unsupported_extension",
-                    )
-                    continue
-                if file_size > self._max_file_bytes:
-                    skipped += 1
-                    self._report_rejection(
-                        rejection,
-                        root=root,
-                        path=path,
-                        entry_kind="file",
-                        disposition="skipped",
-                        file_size=file_size,
-                        reason_code="file_too_large",
-                    )
-                    continue
-                directory_files.append(path)
+                relative_path = path.relative_to(root).as_posix()
                 files_discovered += 1
+                decision = classify_file(
+                    relative_path,
+                    file_size=file_size,
+                    max_file_bytes=self._max_file_bytes,
+                )
+                self._report_observation(
+                    observation,
+                    root=root,
+                    path=path,
+                    entry_kind="file",
+                    file_size=file_size,
+                    modified_at=modified_at,
+                    processing_mode=decision.mode,
+                    processing_status=(
+                        "metadata_only"
+                        if decision.mode == "metadata_only"
+                        else "observed"
+                    ),
+                    reason_code=decision.reason_code,
+                )
+                if decision.mode == "metadata_only":
+                    skipped += 1
+                    files_processed += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="skipped",
+                        file_size=file_size,
+                        reason_code=(
+                            decision.reason_code
+                            or "metadata_only_policy"
+                        ),
+                    )
+                    continue
+                if decision.mode == "path_only":
+                    files_processed += 1
+                    text = path_semantic_text(
+                        relative_path,
+                        reason_code=(
+                            decision.reason_code
+                            or "path_only"
+                        ),
+                    )
+                    documents.append(
+                        CollectedDocument(
+                            path=relative_path,
+                            text=text,
+                            content_hash=hashlib.sha256(
+                                text.encode("utf-8")
+                            ).hexdigest(),
+                            language="path",
+                            encoding="path-metadata",
+                            processing_mode="path_only",
+                        )
+                    )
+                    continue
+                directory_files.append((path, decision.mode))
 
-            for path in directory_files:
+            for path, processing_mode in directory_files:
                 file_size: int | None = None
                 try:
                     file_size = path.stat().st_size
@@ -434,6 +517,7 @@ class SourceConnectorManager:
                         content_hash=content_hash,
                         language=path.suffix.lstrip(".").lower() or "text",
                         encoding=extracted.encoding,
+                        processing_mode=processing_mode,
                     )
                 )
             directories_scanned += 1
@@ -518,6 +602,39 @@ class SourceConnectorManager:
                 extractor=cls._extractor_name(path),
                 error_type=type(error).__name__ if error is not None else None,
                 error_message=error_message,
+            )
+        )
+
+    @staticmethod
+    def _report_observation(
+        sink: CollectionObservationSink | None,
+        *,
+        root: Path,
+        path: Path,
+        entry_kind: str,
+        file_size: int | None,
+        modified_at: datetime | None,
+        processing_mode: str,
+        processing_status: str,
+        reason_code: str | None,
+    ) -> None:
+        if sink is None:
+            return
+        relative_path = (
+            "."
+            if path == root
+            else path.relative_to(root).as_posix()
+        )
+        sink(
+            CollectionObservation(
+                relative_path=relative_path,
+                entry_kind=entry_kind,
+                extension=path.suffix.lower(),
+                file_size=file_size,
+                modified_at=modified_at,
+                processing_mode=processing_mode,
+                processing_status=processing_status,
+                reason_code=reason_code,
             )
         )
 

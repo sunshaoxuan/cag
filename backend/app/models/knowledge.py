@@ -3,6 +3,7 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     JSON,
     Boolean,
     DateTime,
@@ -152,6 +153,11 @@ class KnowledgeSource(PhysicalIdMixin, Base):
     documents = relationship(
         "KnowledgeDocument", back_populates="source", cascade="all, delete-orphan"
     )
+    entries = relationship(
+        "KnowledgeSourceEntry",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
 
 
 class KnowledgeIngestion(PhysicalIdMixin, Base):
@@ -237,7 +243,7 @@ class KnowledgeIngestionRejection(PhysicalIdMixin, Base):
     )
     disposition: Mapped[str] = mapped_column(String(32), index=True)
     extension: Mapped[str] = mapped_column(String(64), default="", index=True)
-    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reason_code: Mapped[str] = mapped_column(String(64), index=True)
     extractor: Mapped[str] = mapped_column(String(64), default="filesystem")
     error_type: Mapped[str | None] = mapped_column(
@@ -250,6 +256,70 @@ class KnowledgeIngestionRejection(PhysicalIdMixin, Base):
     ingestion = relationship(
         "KnowledgeIngestion", back_populates="rejections"
     )
+
+
+class KnowledgeSourceEntry(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_source_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "relative_path",
+            name="uq_knowledge_source_entries_source_path",
+        ),
+    )
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_sources.id", ondelete="CASCADE"),
+        index=True,
+    )
+    relative_path: Mapped[str] = mapped_column(Text)
+    entry_kind: Mapped[str] = mapped_column(
+        String(32), default="file", index=True
+    )
+    extension: Mapped[str] = mapped_column(
+        String(64), default="", index=True
+    )
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    modified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    processing_mode: Mapped[str] = mapped_column(
+        String(32), default="metadata_only", index=True
+    )
+    processing_status: Mapped[str] = mapped_column(
+        String(32), default="observed", index=True
+    )
+    reason_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    present: Mapped[bool] = mapped_column(
+        Boolean, default=True, index=True
+    )
+    last_seen_ingestion_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_ingestions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    processor_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    removed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source = relationship("KnowledgeSource", back_populates="entries")
+    last_seen_ingestion = relationship("KnowledgeIngestion")
 
 
 class KnowledgeDocument(PhysicalIdMixin, Base):
@@ -268,6 +338,12 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
     canonical_path: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     language: Mapped[str] = mapped_column(String(32), default="text")
+    processing_mode: Mapped[str] = mapped_column(
+        String(32), default="legacy", index=True
+    )
+    processor_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     source = relationship("KnowledgeSource", back_populates="documents")
     chunks = relationship(

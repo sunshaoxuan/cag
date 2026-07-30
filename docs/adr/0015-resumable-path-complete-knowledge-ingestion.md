@@ -2,9 +2,11 @@
 
 ## Status
 
-Partially accepted in version 0.15.0. PostgreSQL with pgvector, native vector
-search and the controlled SQLite migration path are implemented. Durable work
-items, path-semantic indexing, parallel leases, pause and resume remain planned.
+Partially accepted through version 0.18.0. PostgreSQL with pgvector, native
+vector search, controlled SQLite migration, durable source-entry inventory,
+processor fingerprints and zero-byte file path knowledge are implemented.
+Per-file work items, independent path vectors for every entry, parallel leases,
+pause and resume remain planned.
 
 ## Problem statement
 
@@ -162,6 +164,17 @@ receipt before switching the managed task.
 * Pause during embedding, resume and complete without duplicate chunks.
 * Compare SQLite migration source counts with PostgreSQL destination counts and
   pgvector dimensions before cutover.
+
+## Version 0.18.0 implementation boundary
+
+Completed acceptance evidence covers source-entry observation, metadata-only
+archive and dump routing, 64-bit sizes, zero-byte filename knowledge, hard code
+routing, legacy code fingerprint backfill and unchanged document vector reuse.
+
+The current ingestion transaction still commits the run as one compatibility
+unit. Durable per-file work items, independently committed active versions,
+multi-worker file claims, pause and resume require a later release and their
+remaining acceptance tests above.
 
 ## Rollback
 

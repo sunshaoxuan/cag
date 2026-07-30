@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
@@ -35,6 +35,7 @@ from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionRejection,
     KnowledgeSource,
+    KnowledgeSourceEntry,
 )
 from tests.waiters import wait_for_ingestion, wait_for_task
 from app.models.base import utc_now
@@ -1081,7 +1082,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
         ingestion = wait_for_ingestion(client, ingestion_id)
 
         assert ingestion["status"] == "completed"
-        assert ingestion["rejected_files"] == 2
+        assert ingestion["rejected_files"] == 1
         assert ingestion["skipped_files"] == 2
         assert ingestion["rejection_archive_sha256"]
         audit = client.get(
@@ -1089,14 +1090,13 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
         )
         assert audit.status_code == 200
         payload = audit.json()
-        assert payload["total"] == 4
+        assert payload["total"] == 3
         assert payload["archive_available"] is True
         by_path = {
             item["relative_path"]: item for item in payload["items"]
         }
         assert by_path["legacy.sql"]["reason_code"] == "encoding_unsupported"
         assert by_path["legacy.sql"]["disposition"] == "rejected"
-        assert by_path["empty.sql"]["reason_code"] == "empty_text"
         assert (
             by_path["legacy.doc"]["reason_code"]
             == "unsupported_extension"
@@ -1109,7 +1109,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
             f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections",
             params={"disposition": "rejected", "limit": 1},
         ).json()
-        assert filtered["total"] == 2
+        assert filtered["total"] == 1
         assert len(filtered["items"]) == 1
         assert {item["count"] for item in filtered["summary"]} == {1}
 
@@ -1131,14 +1131,13 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
             "utf-8"
         ).splitlines()
         archive_header = json.loads(archive_lines[0])
-        assert archive_header["record_count"] == 4
-        assert len(archive_lines) == 5
+        assert archive_header["record_count"] == 3
+        assert len(archive_lines) == 4
         assert {
             json.loads(line)["relative_path"]
             for line in archive_lines[1:]
         } == {
             "legacy.sql",
-            "empty.sql",
             "legacy.doc",
             "oversized.txt",
         }
@@ -1148,7 +1147,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
             session.scalar(
                 select(func.count(KnowledgeIngestionRejection.id))
             )
-            == 4
+            == 3
         )
         stored_ingestion = session.get(KnowledgeIngestion, ingestion_id)
         assert stored_ingestion is not None
@@ -1174,6 +1173,139 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
     os.utime(archive_path, (expired_timestamp, expired_timestamp))
     service._prune_rejection_audit()
     assert not archive_path.exists()
+
+
+def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "routed-source"
+    source_root.mkdir()
+    (source_root / "guide.md").write_text(
+        "# Operations guide",
+        encoding="utf-8",
+    )
+    (source_root / "service.py").write_text(
+        "def answer() -> str:\n    return 'ready'\n",
+        encoding="utf-8",
+    )
+    (source_root / "warning.txt").write_text("", encoding="utf-8")
+    (source_root / "database-dump.sql").write_text(
+        "INSERT INTO audit VALUES (1);",
+        encoding="utf-8",
+    )
+    archive = source_root / "historical.zip"
+    with archive.open("wb") as stream:
+        stream.truncate(3_337_986_743)
+
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    install_fake_knowledge(app, active_settings)
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Routed enterprise files",
+                "root_path": str(source_root),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        first = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        first_result = wait_for_ingestion(client, first["id"])
+        assert first_result["status"] == "completed"
+        assert first_result["skipped_files"] == 2
+
+        inventory = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/entries"
+        )
+        assert inventory.status_code == 200
+        inventory_payload = inventory.json()
+        assert inventory_payload["total"] == 5
+        assert inventory_payload["summary"] == {
+            "total": 5,
+            "code": 1,
+            "document": 1,
+            "metadata_only": 2,
+            "path_only": 1,
+            "removed": 0,
+        }
+        entries = {
+            item["relative_path"]: item
+            for item in inventory_payload["items"]
+        }
+        assert entries["historical.zip"]["processing_mode"] == (
+            "metadata_only"
+        )
+        assert entries["historical.zip"]["file_size"] == 3_337_986_743
+        assert entries["database-dump.sql"]["reason_code"] == (
+            "database_dump_policy"
+        )
+        assert entries["service.py"]["processing_mode"] == "code"
+        assert entries["guide.md"]["processing_mode"] == "document"
+        assert entries["warning.txt"]["processing_mode"] == "path_only"
+
+        with app.state.database.session_factory() as session:
+            documents = list(
+                session.scalars(
+                    select(KnowledgeDocument).where(
+                        KnowledgeDocument.source_id == source["id"]
+                    )
+                )
+            )
+            code_document = next(
+                item
+                for item in documents
+                if item.canonical_path == "service.py"
+            )
+            assert code_document.processing_mode == "code"
+            assert code_document.processor_fingerprint
+            session.execute(
+                delete(CodeSymbol).where(
+                    CodeSymbol.document_id == code_document.id
+                )
+            )
+            for document in documents:
+                document.processing_mode = "legacy"
+                document.processor_fingerprint = None
+            session.commit()
+
+        second = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        second_result = wait_for_ingestion(client, second["id"])
+        assert second_result["status"] == "completed"
+        assert second_result["changed_files"] == 1
+        assert second_result["unchanged_files"] == 2
+        assert second_result["vectors_reused"] >= 2
+
+    with app.state.database.session_factory() as session:
+        code_document = session.scalar(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.source_id == source["id"],
+                KnowledgeDocument.canonical_path == "service.py",
+            )
+        )
+        assert code_document is not None
+        assert code_document.processing_mode == "code"
+        assert code_document.processor_fingerprint
+        assert session.scalar(
+            select(func.count(CodeSymbol.id)).where(
+                CodeSymbol.document_id == code_document.id
+            )
+        ) >= 2
+        archive_entry = session.scalar(
+            select(KnowledgeSourceEntry).where(
+                KnowledgeSourceEntry.source_id == source["id"],
+                KnowledgeSourceEntry.relative_path == "historical.zip",
+            )
+        )
+        assert archive_entry is not None
+        assert archive_entry.file_size == 3_337_986_743
 
 
 def test_connector_scans_directories_breadth_first_with_progress(

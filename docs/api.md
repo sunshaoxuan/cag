@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.17.1`
+Current version: `0.18.0`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.17.1"
+    "version": "0.18.0"
 }
 ```
 
@@ -88,6 +88,7 @@ knowledge plaintext.
 * `POST /api/v1/knowledge/sources/{source_id}/validate`
 * `POST /api/v1/knowledge/sources/{source_id}/ingest`
 * `GET /api/v1/knowledge/sources/{source_id}/ingestions`
+* `GET /api/v1/knowledge/sources/{source_id}/entries`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive`
@@ -141,6 +142,23 @@ manual or scheduled trigger, changed and removed file counts, and timestamps.
 Credential reveal is a separate explicit POST response with private no-store
 headers. Source list, source update and ingestion responses never include the
 secret.
+
+Source responses include `entry_summary`, grouped by `processing_mode` and
+status. The entries endpoint accepts `limit`, `offset`, `processing_mode`,
+`present` and `query`. File sizes are 64-bit integers.
+
+```powershell
+$entries = Invoke-RestMethod `
+  -Uri "$baseUrl/api/v1/knowledge/sources/$sourceId/entries?limit=100"
+$entries.items |
+  Select-Object relative_path, processing_mode, status, file_size, reason_code
+```
+
+Processing modes are `metadata_only`, `path_only`, `document` and `code`.
+Archive, dump, backup, binary and policy-sized files use `metadata_only`.
+Their content is not extracted or embedded. Zero-byte files use `path_only`.
+Code uses the structural analyzer and does not enter the ordinary document
+extraction branch.
 
 ## Conversations
 

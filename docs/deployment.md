@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.17.1 development deployment
+## 0.18.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -47,6 +47,12 @@ one gzip JSONL archive per run. Configure
 `AGENT_GATEWAY_KNOWLEDGE_REJECTION_ARCHIVE_RETENTION_DAYS`. Defaults retain
 queryable database detail for 90 days and compressed archives for 365 days.
 The archive directory must use persistent host or volume storage in production.
+
+Knowledge source entries and rejection records store file sizes as PostgreSQL
+`BIGINT`. ZIP, DUMP, backup, binary and files above
+`AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` are recorded as metadata-only assets.
+Their content is not opened for extraction. The source entries API and
+Knowledge management page expose the processing decision and reason.
 
 The console creates a CAG Conversation and keeps one Conversation SSE
 connection open across turns. Each turn performs governed knowledge retrieval
@@ -186,7 +192,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260729_0014` and then
+The normal Windows launcher applies Alembic revision `20260730_0015` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

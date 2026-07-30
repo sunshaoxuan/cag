@@ -62,6 +62,9 @@ The source response includes `next_sync_at`, `last_sync_attempt_at`,
 These fields allow API clients and the management page to monitor persistent
 source health without reconstructing state from transient logs.
 
+It also includes `entry_summary` with total, present, absent, processing-mode
+and status counts from the durable source inventory.
+
 ## Reveal a saved credential
 
 ```http
@@ -161,6 +164,32 @@ The terminal ingestion record includes `files_seen`, `chunks_written`,
 list retains the latest fifty runs.
 
 ## File processing audit
+
+Every discovered filesystem entry is upserted into `KnowledgeSourceEntry`.
+This inventory remains available independently from a successful document or a
+rejection record.
+
+```text
+GET /api/v1/knowledge/sources/{source_id}/entries
+```
+
+The endpoint supports `limit`, `offset`, `processing_mode`, `present` and
+`query`. Each item includes relative path, entry kind, extension, 64-bit file
+size, modified time, processing mode, status, reason, current presence,
+fingerprints and first, last, processed or removed timestamps.
+
+Processing modes are:
+
+| Mode | Behavior |
+|---|---|
+| `metadata_only` | Record path and filesystem metadata without content extraction |
+| `path_only` | Create path knowledge for a zero-byte file |
+| `document` | Use the supported document extraction and text chunking flow |
+| `code` | Use structural code parsing, symbols and relationship analysis |
+
+ZIP, DUMP, backup, binary and files over the configured size limit use
+`metadata_only`. A processor-policy change updates the fingerprint so unchanged
+bytes can be reconsidered on a later ingestion.
 
 Every rejected or skipped source entry creates one
 `KnowledgeIngestionRejection` row with an independent UUID physical ID and an

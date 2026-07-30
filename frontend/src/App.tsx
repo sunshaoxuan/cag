@@ -28,6 +28,7 @@ import {
   KnowledgeIngestionEvent,
   KnowledgeIngestionRejectionPage,
   KnowledgeSource,
+  KnowledgeSourceEntryPage,
   KnowledgeStatus,
   CodeKnowledgeSummary,
   CodeSymbol,
@@ -37,6 +38,7 @@ import {
   listKnowledgeSources,
   listCodeSymbols,
   listKnowledgeSourceIngestions,
+  listKnowledgeSourceEntries,
   listKnowledgeIngestionRejections,
   listMemoryCandidates,
   MemoryCandidate,
@@ -222,6 +224,9 @@ const INGESTION_STATUS_LABELS: Record<string, string> = {
 };
 
 const REJECTION_REASON_LABELS: Record<string, string> = {
+  metadata_only_policy: "仅登记文件元数据",
+  database_dump_policy: "数据库转储仅登记元数据",
+  empty_file_path_only: "空文件仅索引路径信息",
   unsupported_extension: "不支持的文件类型",
   file_too_large: "文件超过大小限制",
   encoding_unsupported: "无法识别文本编码",
@@ -236,8 +241,33 @@ const REJECTION_REASON_LABELS: Record<string, string> = {
   extractor_rejected: "内容提取失败",
 };
 
+const PROCESSING_MODE_LABELS: Record<string, string> = {
+  code: "代码分析",
+  document: "文档知识",
+  metadata_only: "仅登记元数据",
+  path_only: "仅路径知识",
+};
+
+const PROCESSING_STATUS_LABELS: Record<string, string> = {
+  observed: "已发现",
+  indexed: "已建立索引",
+  metadata_only: "已登记元数据",
+  rejected: "处理失败",
+  removed: "已移除",
+};
+
 function rejectionReasonLabel(reasonCode: string): string {
   return REJECTION_REASON_LABELS[reasonCode] ?? reasonCode;
+}
+
+function formatFileSize(value: number | null): string {
+  if (value === null) return "未知";
+  if (value < 1_000) return `${value} B`;
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)} KB`;
+  if (value < 1_000_000_000) {
+    return `${(value / 1_000_000).toFixed(1)} MB`;
+  }
+  return `${(value / 1_000_000_000).toFixed(2)} GB`;
 }
 
 type ChatTurn = {
@@ -463,6 +493,11 @@ export default function App() {
     useState<string | null>(null);
   const [knowledgeRejections, setKnowledgeRejections] = useState<
     Record<string, KnowledgeIngestionRejectionPage>
+  >({});
+  const [expandedInventorySourceId, setExpandedInventorySourceId] =
+    useState<string | null>(null);
+  const [knowledgeInventories, setKnowledgeInventories] = useState<
+    Record<string, KnowledgeSourceEntryPage>
   >({});
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
@@ -1148,6 +1183,26 @@ export default function App() {
       setExpandedHistorySourceId(sourceId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "运行历史加载失败");
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
+  async function handleKnowledgeInventoryToggle(sourceId: string) {
+    if (expandedInventorySourceId === sourceId) {
+      setExpandedInventorySourceId(null);
+      return;
+    }
+    setKnowledgeBusy(sourceId);
+    try {
+      const inventory = await listKnowledgeSourceEntries(sourceId);
+      setKnowledgeInventories((current) => ({
+        ...current,
+        [sourceId]: inventory,
+      }));
+      setExpandedInventorySourceId(sourceId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setKnowledgeBusy(null);
     }
@@ -2063,6 +2118,37 @@ export default function App() {
                       {source.subpath && <span>{source.subpath}</span>}
                       {source.credential_configured && <span>凭据已配置</span>}
                     </div>
+                    {(source.entry_summary?.total ?? 0) > 0 && (
+                      <div
+                        className="source-inventory-summary"
+                        aria-label="文件资产处理分类"
+                      >
+                        <span>
+                          文件资产{" "}
+                          {(source.entry_summary?.total ?? 0).toLocaleString()}
+                        </span>
+                        <span>
+                          代码{" "}
+                          {(source.entry_summary?.code ?? 0).toLocaleString()}
+                        </span>
+                        <span>
+                          文档{" "}
+                          {(source.entry_summary?.document ?? 0).toLocaleString()}
+                        </span>
+                        <span>
+                          仅元数据{" "}
+                          {(
+                            source.entry_summary?.metadata_only ?? 0
+                          ).toLocaleString()}
+                        </span>
+                        <span>
+                          仅路径{" "}
+                          {(
+                            source.entry_summary?.path_only ?? 0
+                          ).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
                     {source.last_ingestion && (
                       <dl className="source-metrics">
                         <div>
@@ -2102,6 +2188,18 @@ export default function App() {
                         onClick={() => handleKnowledgeSourceEdit(source)}
                       >
                         编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="button-quiet"
+                        disabled={knowledgeBusy !== null}
+                        onClick={() =>
+                          handleKnowledgeInventoryToggle(source.id)
+                        }
+                      >
+                        {expandedInventorySourceId === source.id
+                          ? "收起文件资产"
+                          : "文件资产"}
                       </button>
                       <button
                         type="button"
@@ -2156,6 +2254,68 @@ export default function App() {
                         删除
                       </button>
                     </footer>
+                    {expandedInventorySourceId === source.id &&
+                      knowledgeInventories[source.id] && (
+                        <section
+                          className="source-inventory"
+                          aria-label={`${source.name}文件资产`}
+                        >
+                          <div className="source-inventory-heading">
+                            <strong>
+                              当前文件资产{" "}
+                              {knowledgeInventories[
+                                source.id
+                              ].total.toLocaleString()}{" "}
+                              条
+                            </strong>
+                            <small>
+                              展示前{" "}
+                              {knowledgeInventories[
+                                source.id
+                              ].items.length.toLocaleString()}{" "}
+                              条
+                            </small>
+                          </div>
+                          <div className="source-inventory-table-wrap">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>处理方式</th>
+                                  <th>相对路径</th>
+                                  <th>大小</th>
+                                  <th>状态</th>
+                                  <th>最后发现</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {knowledgeInventories[source.id].items.map(
+                                  (item) => (
+                                    <tr key={item.id}>
+                                      <td>
+                                        {PROCESSING_MODE_LABELS[
+                                          item.processing_mode
+                                        ] ?? item.processing_mode}
+                                      </td>
+                                      <td>{item.relative_path}</td>
+                                      <td>{formatFileSize(item.file_size)}</td>
+                                      <td>
+                                        {item.reason_code
+                                          ? rejectionReasonLabel(
+                                              item.reason_code,
+                                            )
+                                          : PROCESSING_STATUS_LABELS[
+                                              item.processing_status
+                                            ] ?? item.processing_status}
+                                      </td>
+                                      <td>{formatTime(item.last_seen_at)}</td>
+                                    </tr>
+                                  ),
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </section>
+                      )}
                     {expandedHistorySourceId === source.id && (
                       <div
                         className="source-history"
@@ -2191,7 +2351,16 @@ export default function App() {
                                 {ingestion.skipped_files ?? 0}
                               </small>
                               {ingestion.error && (
-                                <p>{ingestion.error}</p>
+                                <div className="ingestion-error-summary">
+                                  <p>
+                                    {ingestion.error_summary ??
+                                      ingestion.error.split("\n")[0]}
+                                  </p>
+                                  <details>
+                                    <summary>查看完整技术日志</summary>
+                                    <pre>{ingestion.error}</pre>
+                                  </details>
+                                </div>
                               )}
                               {((ingestion.rejected_files ?? 0) > 0 ||
                                 (ingestion.skipped_files ?? 0) > 0 ||

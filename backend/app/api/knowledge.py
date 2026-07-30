@@ -25,13 +25,18 @@ from app.api.dependencies import (
     get_session,
     get_task_service,
 )
-from app.knowledge.service import KnowledgeService, KnowledgeUnavailableError
+from app.knowledge.service import (
+    KnowledgeService,
+    KnowledgeUnavailableError,
+    summarize_knowledge_error,
+)
 from app.queue.coordinator import QueueCoordinator
 from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
     KnowledgeIngestionRejection,
     KnowledgeSource,
+    KnowledgeSourceEntry,
 )
 from app.services.task_service import ProjectNotFoundError, TaskService
 
@@ -104,6 +109,7 @@ class SearchRequest(BaseModel):
 def source_response(
     source: KnowledgeSource,
     latest_ingestion: KnowledgeIngestion | None = None,
+    entry_summary: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": source.id,
@@ -134,6 +140,15 @@ def source_response(
         "last_content_change_at": source.last_content_change_at,
         "consecutive_failures": source.consecutive_failures,
         "scheduler_claimed": source.sync_lease_expires_at is not None,
+        "entry_summary": entry_summary
+        or {
+            "total": 0,
+            "code": 0,
+            "document": 0,
+            "metadata_only": 0,
+            "path_only": 0,
+            "removed": 0,
+        },
         "last_ingestion": (
             ingestion_response(latest_ingestion)
             if latest_ingestion is not None
@@ -160,6 +175,11 @@ def ingestion_response(ingestion: KnowledgeIngestion) -> dict[str, Any]:
         "removed_files": ingestion.removed_files,
         "trigger": ingestion.trigger,
         "error": ingestion.error,
+        "error_summary": (
+            summarize_knowledge_error(ingestion.error)
+            if ingestion.error
+            else None
+        ),
         "created_at": ingestion.created_at,
         "started_at": ingestion.started_at,
         "completed_at": ingestion.completed_at,
@@ -225,8 +245,47 @@ def list_sources(
             .where(KnowledgeIngestion.source_id == item.id)
             .order_by(KnowledgeIngestion.created_at.desc())
         )
-        responses.append(source_response(item, latest))
+        responses.append(
+            source_response(
+                item,
+                latest,
+                source_entry_summary(session, item.id),
+            )
+        )
     return responses
+
+
+def source_entry_summary(
+    session: Session,
+    source_id: str,
+) -> dict[str, int]:
+    summary = {
+        "total": 0,
+        "code": 0,
+        "document": 0,
+        "metadata_only": 0,
+        "path_only": 0,
+        "removed": 0,
+    }
+    rows = session.execute(
+        select(
+            KnowledgeSourceEntry.processing_mode,
+            KnowledgeSourceEntry.present,
+            func.count(KnowledgeSourceEntry.id),
+        )
+        .where(KnowledgeSourceEntry.source_id == source_id)
+        .group_by(
+            KnowledgeSourceEntry.processing_mode,
+            KnowledgeSourceEntry.present,
+        )
+    )
+    for mode, present, count in rows:
+        summary["total"] += count
+        if present and mode in summary:
+            summary[mode] += count
+        if not present:
+            summary["removed"] += count
+    return summary
 
 
 @router.patch("/knowledge/sources/{source_id}")
@@ -353,6 +412,83 @@ def list_source_ingestions(
         .limit(50)
     )
     return [ingestion_response(item) for item in ingestions]
+
+
+def source_entry_response(item: KnowledgeSourceEntry) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "source_id": item.source_id,
+        "relative_path": item.relative_path,
+        "entry_kind": item.entry_kind,
+        "extension": item.extension,
+        "file_size": item.file_size,
+        "modified_at": item.modified_at,
+        "processing_mode": item.processing_mode,
+        "processing_status": item.processing_status,
+        "reason_code": item.reason_code,
+        "present": item.present,
+        "last_seen_ingestion_id": item.last_seen_ingestion_id,
+        "processor_fingerprint": item.processor_fingerprint,
+        "content_hash": item.content_hash,
+        "first_seen_at": item.first_seen_at,
+        "last_seen_at": item.last_seen_at,
+        "processed_at": item.processed_at,
+        "removed_at": item.removed_at,
+    }
+
+
+@router.get("/knowledge/sources/{source_id}/entries")
+def list_source_entries(
+    source_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    processing_mode: str | None = Query(
+        default=None,
+        pattern=r"^(code|document|metadata_only|path_only)$",
+    ),
+    present: bool | None = Query(default=True),
+    query: str | None = Query(default=None, max_length=255),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if session.get(KnowledgeSource, source_id) is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    filters: list[Any] = [
+        KnowledgeSourceEntry.source_id == source_id
+    ]
+    if processing_mode:
+        filters.append(
+            KnowledgeSourceEntry.processing_mode == processing_mode
+        )
+    if present is not None:
+        filters.append(KnowledgeSourceEntry.present.is_(present))
+    if query and query.strip():
+        filters.append(
+            KnowledgeSourceEntry.relative_path.ilike(
+                f"%{query.strip()}%"
+            )
+        )
+    total = session.scalar(
+        select(func.count(KnowledgeSourceEntry.id)).where(*filters)
+    ) or 0
+    items = list(
+        session.scalars(
+            select(KnowledgeSourceEntry)
+            .where(*filters)
+            .order_by(
+                KnowledgeSourceEntry.relative_path,
+                KnowledgeSourceEntry.id,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return {
+        "items": [source_entry_response(item) for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "summary": source_entry_summary(session, source_id),
+    }
 
 
 @router.get("/knowledge/ingestions/{ingestion_id}")

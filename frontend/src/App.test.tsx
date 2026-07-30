@@ -294,6 +294,14 @@ describe("One Agent Gateway conversation page", () => {
             last_content_change_at: null,
             consecutive_failures: 0,
             scheduler_claimed: false,
+            entry_summary: {
+              total: 5,
+              code: 1,
+              document: 1,
+              metadata_only: 2,
+              path_only: 1,
+              removed: 0,
+            },
             last_ingestion: null,
           };
           knowledgeSecrets["source-1"] = String(
@@ -308,6 +316,47 @@ describe("One Agent Gateway conversation page", () => {
           (!init?.method || init.method === "GET")
         ) {
           return jsonResponse(knowledgeSources);
+        }
+        if (
+          url.includes(
+            "/api/v1/knowledge/sources/source-1/entries?",
+          )
+        ) {
+          return jsonResponse({
+            items: [
+              {
+                id: "entry-1",
+                source_id: "source-1",
+                relative_path: "archive/historical.zip",
+                entry_kind: "file",
+                extension: ".zip",
+                file_size: 3337986743,
+                modified_at: "2026-07-28T00:00:00Z",
+                processing_mode: "metadata_only",
+                processing_status: "metadata_only",
+                reason_code: "metadata_only_policy",
+                present: true,
+                last_seen_ingestion_id: "ingestion-history-1",
+                processor_fingerprint: null,
+                content_hash: null,
+                first_seen_at: "2026-07-28T00:00:00Z",
+                last_seen_at: "2026-07-28T00:00:00Z",
+                processed_at: "2026-07-28T00:00:00Z",
+                removed_at: null,
+              },
+            ],
+            total: 5,
+            limit: 100,
+            offset: 0,
+            summary: {
+              total: 5,
+              code: 1,
+              document: 1,
+              metadata_only: 2,
+              path_only: 1,
+              removed: 0,
+            },
+          });
         }
         if (
           url.endsWith(
@@ -671,7 +720,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.17.1")).toBeInTheDocument();
+    expect(screen.getByText("v0.18.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -755,6 +804,13 @@ describe("One Agent Gateway conversation page", () => {
     expect(
       await screen.findByText("docs/product"),
     ).toBeInTheDocument();
+    expect(screen.getByText("文件资产 5")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "文件资产" }));
+    expect(
+      await screen.findByText("archive/historical.zip"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("3.34 GB")).toBeInTheDocument();
+    expect(screen.getAllByText("仅登记元数据").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "运行历史" }));
     expect(await screen.findByText("自动同步")).toBeInTheDocument();
     expect(screen.getByText(/变化 2 · 删除 1/)).toBeInTheDocument();
