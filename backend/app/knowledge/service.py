@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Float, delete, or_, select, update
+from sqlalchemy import Float, delete, false, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -55,6 +55,7 @@ from app.models import (
     KnowledgeUsage,
     MemoryCandidate,
     MemoryStatus,
+    ProductVersion,
     Project,
     QueueItem,
     Task,
@@ -495,7 +496,13 @@ class KnowledgeService:
                 source_id=source_id,
                 trigger=trigger,
             )
-            source.status = KnowledgeStatus.INDEXING
+            has_active_generation = session.scalar(
+                select(KnowledgeDocument.id)
+                .where(KnowledgeDocument.source_id == source.id)
+                .limit(1)
+            )
+            if has_active_generation is None:
+                source.status = KnowledgeStatus.INDEXING
             source.error = None
             source.last_sync_attempt_at = utc_now()
             session.add(ingestion)
@@ -833,6 +840,7 @@ class KnowledgeService:
                             processor_fingerprint=(
                                 document_fingerprints[relative_path]
                             ),
+                            generation_ingestion_id=ingestion.id,
                         )
                         session.add(document)
                         session.flush()
@@ -982,6 +990,7 @@ class KnowledgeService:
                         "chunks_written": len(chunks),
                         "vectors_reused": vectors_reused,
                         "index_fingerprint": index_fingerprint,
+                        "active_generation_id": ingestion.id,
                     },
                 )
                 self._append_ingestion_event(
@@ -1485,20 +1494,12 @@ class KnowledgeService:
             f"Query: {query}"
         )
         query_vector = (await self._provider.embed([instructed_query]))[0]
-        access_filter = or_(
-            (
-                (KnowledgeChunk.scope == "tenant")
-                & (KnowledgeChunk.tenant_id == project.tenant_id)
-            ),
-            (
-                (KnowledgeChunk.scope == "product")
-                & (
-                    KnowledgeChunk.product_version_id
-                    == project.product_version_id
-                )
-            ),
-        )
         with self._database.session_factory() as session:
+            access_filter = self._knowledge_access_filter(
+                session,
+                project,
+                KnowledgeChunk,
+            )
             chunk_query = (
                 select(KnowledgeChunk)
                 .join(KnowledgeDocument)
@@ -1545,18 +1546,10 @@ class KnowledgeService:
                     .where(
                         KnowledgeSource.approved_for_codex.is_(True),
                         KnowledgeSource.status == KnowledgeStatus.APPROVED,
-                        or_(
-                            (
-                                (CodeSymbol.scope == "tenant")
-                                & (CodeSymbol.tenant_id == project.tenant_id)
-                            ),
-                            (
-                                (CodeSymbol.scope == "product")
-                                & (
-                                    CodeSymbol.product_version_id
-                                    == project.product_version_id
-                                )
-                            ),
+                        self._knowledge_access_filter(
+                            session,
+                            project,
+                            CodeSymbol,
                         ),
                     )
                 )
@@ -1935,22 +1928,44 @@ class KnowledgeService:
                 .where(
                     KnowledgeSource.approved_for_codex.is_(True),
                     KnowledgeSource.status == KnowledgeStatus.APPROVED,
-                    or_(
-                        (
-                            (CodeSymbol.scope == "tenant")
-                            & (CodeSymbol.tenant_id == project.tenant_id)
-                        ),
-                        (
-                            (CodeSymbol.scope == "product")
-                            & (
-                                CodeSymbol.product_version_id
-                                == project.product_version_id
-                            )
-                        ),
+                    self._knowledge_access_filter(
+                        session,
+                        project,
+                        CodeSymbol,
                     ),
                 )
             )
         )
+
+    @staticmethod
+    def _knowledge_access_filter(
+        session,
+        project: Project,
+        scoped_model,
+    ):
+        tenant_filter = (
+            (scoped_model.scope == "tenant")
+            & (scoped_model.tenant_id == project.tenant_id)
+        )
+        if project.product_version_id is None:
+            product_filter = false()
+        else:
+            product_id = session.scalar(
+                select(ProductVersion.product_id).where(
+                    ProductVersion.id == project.product_version_id
+                )
+            )
+            product_filter = (
+                (scoped_model.scope == "product")
+                & scoped_model.product_version_id.in_(
+                    select(ProductVersion.id).where(
+                        ProductVersion.product_id == product_id
+                    )
+                )
+                if product_id is not None
+                else false()
+            )
+        return or_(tenant_filter, product_filter)
 
     @staticmethod
     def _code_symbol_payload(symbol: CodeSymbol) -> dict[str, Any]:
@@ -2330,7 +2345,21 @@ class KnowledgeService:
                 },
             )
             if source is not None:
-                source.status = KnowledgeStatus.FAILED
+                has_active_generation = session.scalar(
+                    select(KnowledgeDocument.id)
+                    .where(KnowledgeDocument.source_id == source.id)
+                    .limit(1)
+                )
+                source.status = (
+                    KnowledgeStatus.APPROVED
+                    if has_active_generation is not None
+                    and source.approved_for_codex
+                    else (
+                        KnowledgeStatus.READY
+                        if has_active_generation is not None
+                        else KnowledgeStatus.FAILED
+                    )
+                )
                 source.error = error_summary
                 source.consecutive_failures += 1
                 source.sync_lease_owner = None

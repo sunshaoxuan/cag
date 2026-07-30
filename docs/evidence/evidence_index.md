@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.20.0
+
+* `docs/evidence/stable-product-knowledge-0.20.0/`
+* `docs/evidence/screenshots/stable-product-knowledge-0.20.0.png`
+
 ## Version 0.19.0
 
 * `docs/evidence/conversation-message-presentation-0.19.0/`

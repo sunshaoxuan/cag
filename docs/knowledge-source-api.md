@@ -191,6 +191,19 @@ ZIP, DUMP, backup, binary and files over the configured size limit use
 `metadata_only`. A processor-policy change updates the fingerprint so unchanged
 bytes can be reconsidered on a later ingestion.
 
+The source list response includes:
+
+* `active_generation_id`, the most recent completed ingestion.
+* `retrieval_health.status`, one of `searchable`, `refreshing`, `degraded`,
+  `indexing`, `scope_mismatch`, `approval_required`, `disabled` or `empty`.
+* `retrieval_health.total_chunks` and `accessible_chunks`.
+* `retrieval_health.legacy_documents`, which identifies documents eligible for
+  a processor upgrade.
+
+Product scope uses the stable Product physical ID. All ProductVersion records
+for that Product share completed knowledge. Tenant scope continues to require
+an exact Tenant physical ID.
+
 Every rejected or skipped source entry creates one
 `KnowledgeIngestionRejection` row with an independent UUID physical ID and an
 ingestion foreign key. The row stores the source-relative path, entry kind,
@@ -266,12 +279,14 @@ ingestion stream emits:
 * `knowledge.code.graph.persisted` with current source symbol, relationship and
   documentation-link counts.
 
-The source fingerprint and path plus content-hash comparison remain the
-idempotency authority. Unchanged code files retain their vectors and symbols.
+The source fingerprint, content hash and processor fingerprint are the
+idempotency authority. Unchanged files with the same processor fingerprint
+retain their vectors and symbols. A changed processor fingerprint reprocesses
+the file even when its bytes are unchanged.
 Changed and removed files replace dependent structural records. Relationship
 and documentation evidence is rebuilt with unique fingerprints before the
 ingestion completes.
 
 Code knowledge can be queried through `/api/v1/knowledge/code/*`. These
 endpoints expose only approved sources that match the requested Project Tenant
-or ProductVersion.
+or stable Product.

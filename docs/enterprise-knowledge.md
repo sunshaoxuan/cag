@@ -59,6 +59,18 @@ model and vector dimensions. A changed fingerprint gives an unchanged file a
 new processing opportunity. A matching content hash and fingerprint reuses the
 existing chunks and vectors.
 
+Product-scoped knowledge follows the stable Product physical ID. ProductVersion
+records remain release and provenance metadata. A Project version change keeps
+all completed knowledge from the same Product eligible for retrieval.
+
+Every indexed document records the ingestion physical ID that produced its
+current representation. Embeddings are prepared before the replacement
+transaction. Changed documents, chunks, code symbols, graph facts, source
+fingerprint and ingestion status commit together. Readers continue to see the
+previous committed representation until that transaction succeeds. A failed
+refresh preserves the previous searchable generation and records a degraded
+health state.
+
 The managed knowledge store is PostgreSQL 16 with pgvector. Embeddings use the
 native `vector(1024)` type and an HNSW cosine index. The vector channel executes
 distance ordering inside PostgreSQL. SQLite is accepted only by isolated tests
@@ -125,6 +137,8 @@ the file-level audit, CSV export and compressed archive from this history.
 Failed scheduled runs increment the source failure counter and receive an
 exponential retry delay bounded by the configured regular interval. A
 successful run resets the failure counter and schedules the next interval.
+Sources with a completed generation remain approved and searchable during a
+refresh and after a refresh failure.
 Queued or running records found during Gateway startup become failed recovery
 records, after which their sources can retry safely.
 
@@ -180,7 +194,16 @@ run rebuilds it under the new governance boundary.
 
 ## Scope rules
 
-Tenant chunks match only the current Project Tenant physical ID. Product chunks match the current ProductVersion physical ID. A source becomes retrievable only after local indexing and explicit Codex approval.
+Tenant chunks match only the current Project Tenant physical ID. Product chunks
+match every ProductVersion that belongs to the current Project Product physical
+ID. Gateway and frontend release changes therefore retain completed enterprise
+knowledge. A source becomes retrievable after local indexing and explicit
+Codex approval.
+
+The source API reports `retrieval_health` with total and accessible chunk
+counts, legacy-document count, health state and active generation ID. The
+management badge uses this result instead of treating the source workflow
+status as proof of retrievability.
 
 Task memories begin as encrypted tenant scoped candidates. Approval makes the record accepted for governance. Product promotion removes the tenant reference only after approval.
 

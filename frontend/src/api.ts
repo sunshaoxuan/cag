@@ -123,6 +123,7 @@ export type KnowledgeSource = {
   status: string;
   source_commit: string | null;
   index_fingerprint: string | null;
+  active_generation_id: string | null;
   approved_for_codex: boolean;
   error: string | null;
   last_validated_at: string | null;
@@ -135,7 +136,24 @@ export type KnowledgeSource = {
   consecutive_failures: number;
   scheduler_claimed: boolean;
   entry_summary: KnowledgeSourceEntrySummary;
+  retrieval_health: KnowledgeRetrievalHealth;
   last_ingestion: KnowledgeIngestion | null;
+};
+
+export type KnowledgeRetrievalHealth = {
+  status:
+    | "searchable"
+    | "refreshing"
+    | "degraded"
+    | "indexing"
+    | "scope_mismatch"
+    | "approval_required"
+    | "disabled"
+    | "empty";
+  total_chunks: number;
+  accessible_chunks: number;
+  legacy_documents: number;
+  active_generation_id: string | null;
 };
 
 export type KnowledgeIngestion = {

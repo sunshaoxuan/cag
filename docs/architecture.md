@@ -124,7 +124,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
-Alembic owns schema versioning through revision `20260730_0015`. SQLite is
+Alembic owns schema versioning through revision `20260730_0016`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension
@@ -230,7 +230,11 @@ independent retention window.
 
 ### Enterprise knowledge plane
 
-Knowledge Sources bind to a Project and either its Tenant or ProductVersion. Ingestion reads approved local text files, scans and redacts secrets, creates encrypted chunks, requests 1024 dimensional embeddings from Ollama and stores them in PostgreSQL with pgvector.
+Knowledge Sources bind to a Project and either its Tenant or stable Product.
+ProductVersion remains provenance metadata and does not partition completed
+product knowledge. Ingestion reads approved local text files, scans and redacts
+secrets, creates encrypted chunks, requests 1024 dimensional embeddings from
+Ollama and stores them in PostgreSQL with pgvector.
 
 Each discovered filesystem entry is upserted into the durable
 `KnowledgeSourceEntry` inventory before its content outcome is finalized. A
@@ -245,6 +249,11 @@ dimensions. Content hash plus this fingerprint controls reuse. A changed
 fingerprint reprocesses an unchanged file, while a matching fingerprint keeps
 the existing chunks and vectors.
 
+Each document records its producing ingestion. Embeddings are prepared before a
+single replacement transaction commits documents, chunks, code facts and the
+successful ingestion receipt. Existing knowledge remains visible during a
+refresh. Failed refreshes retain the last completed generation.
+
 Local-directory and network-share connectors use a breadth-first directory
 queue. Only the current directory is open for enumeration. Its child
 directories are queued in stable name order, its supported files are processed,
@@ -255,7 +264,7 @@ processed. An ingestion-state gate provides single-flight execution for each
 source, so repeated API calls follow the active ingestion without launching a
 second collector.
 
-Task retrieval uses tenant and product version filters before reciprocal rank
+Task retrieval uses tenant and stable product filters before reciprocal rank
 fusion. Every Conversation turn completes this retrieval before Codex
 app-server execution. CAG injects only approved, non-instructional evidence
 blocks into Codex developer instructions. Each block includes the source

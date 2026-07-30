@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.19.0`
+Current version: `0.20.0`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.19.0"
+    "version": "0.20.0"
 }
 ```
 
@@ -146,6 +146,13 @@ secret.
 Source responses include `entry_summary`, grouped by `processing_mode` and
 status. The entries endpoint accepts `limit`, `offset`, `processing_mode`,
 `present` and `query`. File sizes are 64-bit integers.
+
+Source responses also include `active_generation_id` and `retrieval_health`.
+The health object reports actual total and accessible chunk counts,
+legacy-document count and one of `searchable`, `refreshing`, `degraded`,
+`indexing`, `scope_mismatch`, `approval_required`, `disabled` or `empty`.
+Product scope matches the stable Product physical ID across ProductVersion
+changes.
 
 ```powershell
 $entries = Invoke-RestMethod `

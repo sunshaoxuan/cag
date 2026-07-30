@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.19.0 | Evidence |
+| Requirement | Status for 0.20.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -65,7 +65,8 @@ Legend:
 | Path-complete semantic indexing | Partial | Zero-byte file path knowledge is implemented; directory and every-file independent path vectors remain planned in ADR 0015 |
 | Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
-| Tenant and ProductVersion knowledge isolation | Implemented | UUID foreign keys and filtered retrieval tests |
+| Tenant and stable Product knowledge isolation | Implemented | Product-scoped retrieval follows the stable Product physical ID across ProductVersion changes |
+| Atomic active knowledge generations | Implemented | New vectors and code facts commit in one transaction; failed refreshes preserve the last completed generation |
 | Governed Modular RAG | Implemented | Ingestion, hybrid recall, resource-linked citations and context isolation |
 | Japanese enterprise text encoding | Implemented | UTF-8, UTF-16, CP932 and Shift-JIS extraction tests |
 | Structure-aware code indexing | Implemented | AST and Tree-sitter adapter, language fallback, symbol-boundary chunks and code intelligence tests |

@@ -9,6 +9,7 @@ import subprocess
 import zipfile
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 
@@ -102,6 +103,11 @@ class CompleteRerankFakeOllama(FakeOllamaClient):
                 for item in candidates
             ]
         }
+
+
+class FailingEmbeddingOllama(FakeOllamaClient):
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        raise OllamaError("forced embedding failure")
 
 
 class CapturingKnowledgeRuntime:
@@ -565,6 +571,114 @@ class CustomerService:
             },
         )
         assert duplicate_source.status_code == 422
+
+
+def test_product_knowledge_survives_version_rollover_and_failed_refresh(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    phrase = "该任务已经被其他批准者接受，或者申请者已经撤回。"
+    source_dir = project_repository / "product-knowledge"
+    source_dir.mkdir()
+    source_file = source_dir / "messages.sql"
+    source_file.write_text(
+        f"INSERT INTO messages VALUES ('{phrase}');\n",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(
+        settings,
+        project_repository.parent,
+    )
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Stable product knowledge",
+                "root_path": str(source_dir),
+                "scope": "product",
+                "approved_for_codex": True,
+            },
+        ).json()
+        first = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        first_result = wait_for_ingestion(client, first["id"])
+        assert first_result["status"] == "completed"
+        with app.state.database.session_factory() as session:
+            learned_document = session.scalar(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.source_id == source["id"]
+                )
+            )
+            assert learned_document is not None
+            assert learned_document.generation_ingestion_id == first["id"]
+
+        project_path = active_settings.projects_dir / "test-project.yaml"
+        project_config = yaml.safe_load(
+            project_path.read_text(encoding="utf-8")
+        )
+        project_config["product"]["version"] = "2.0.0"
+        project_path.write_text(
+            yaml.safe_dump(project_config, sort_keys=False),
+            encoding="utf-8",
+        )
+        app.state.project_registry.reload()
+
+        search = client.post(
+            "/api/v1/knowledge/search",
+            json={
+                "project_id": "test-project",
+                "query": phrase,
+                "limit": 5,
+            },
+        )
+        assert search.status_code == 200
+        assert search.json()["results"][0]["path"] == "messages.sql"
+        source_status = next(
+            item
+            for item in client.get("/api/v1/knowledge/sources").json()
+            if item["id"] == source["id"]
+        )
+        assert source_status["retrieval_health"]["status"] == "searchable"
+        assert (
+            source_status["retrieval_health"]["accessible_chunks"]
+            == source_status["retrieval_health"]["total_chunks"]
+        )
+        assert source_status["active_generation_id"] == first["id"]
+
+        source_file.write_text(
+            "INSERT INTO messages VALUES ('new content');\n",
+            encoding="utf-8",
+        )
+        service._provider = FailingEmbeddingOllama()
+        second = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        second_result = wait_for_ingestion(client, second["id"])
+        assert second_result["status"] == "failed"
+        service._provider = FakeOllamaClient()
+
+        after_failure = next(
+            item
+            for item in client.get("/api/v1/knowledge/sources").json()
+            if item["id"] == source["id"]
+        )
+        assert after_failure["status"] == "approved"
+        assert after_failure["active_generation_id"] == first["id"]
+        assert after_failure["retrieval_health"]["status"] == "degraded"
+        preserved = client.post(
+            "/api/v1/knowledge/search",
+            json={
+                "project_id": "test-project",
+                "query": phrase,
+                "limit": 5,
+            },
+        ).json()
+        assert preserved["results"][0]["path"] == "messages.sql"
 
 
 def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(

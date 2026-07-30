@@ -199,6 +199,17 @@ const SOURCE_STATUS_LABELS: Record<string, string> = {
   failed: "同步失败",
 };
 
+const RETRIEVAL_HEALTH_LABELS: Record<string, string> = {
+  searchable: "可检索",
+  refreshing: "可检索 · 更新中",
+  degraded: "可检索 · 更新失败",
+  indexing: "建立索引中",
+  scope_mismatch: "作用域失配",
+  approval_required: "等待批准",
+  disabled: "已停用",
+  empty: "尚无索引",
+};
+
 const INGESTION_EVENT_LABELS: Record<string, string> = {
   "knowledge.ingestion.queued": "采集任务已排队",
   "knowledge.ingestion.started": "采集任务已启动",
@@ -2087,16 +2098,23 @@ export default function App() {
                       </div>
                       <span
                         className={`status status-${
-                          source.status === "approved" ||
-                          source.status === "ready"
+                          [
+                            "searchable",
+                            "refreshing",
+                            "degraded",
+                          ].includes(source.retrieval_health.status)
                             ? "completed"
-                            : source.status
+                            : source.retrieval_health.status ===
+                                "scope_mismatch"
+                              ? "failed"
+                              : source.status
                         }`}
                       >
-                        {source.enabled
-                          ? SOURCE_STATUS_LABELS[source.status] ??
-                            source.status
-                          : "已停用"}
+                        {RETRIEVAL_HEALTH_LABELS[
+                          source.retrieval_health.status
+                        ] ??
+                          SOURCE_STATUS_LABELS[source.status] ??
+                          source.status}
                       </span>
                     </header>
                     <p>{source.location}</p>
@@ -2178,6 +2196,32 @@ export default function App() {
                         </span>
                       </div>
                     )}
+                    <div
+                      className="source-retrieval-health"
+                      aria-label="知识检索健康状态"
+                    >
+                      <span>
+                        可访问分块{" "}
+                        {source.retrieval_health.accessible_chunks.toLocaleString()}
+                      </span>
+                      <span>
+                        总分块{" "}
+                        {source.retrieval_health.total_chunks.toLocaleString()}
+                      </span>
+                      {source.retrieval_health.legacy_documents > 0 && (
+                        <span className="source-sync-warning">
+                          待升级处理{" "}
+                          {source.retrieval_health.legacy_documents.toLocaleString()}{" "}
+                          个文档
+                        </span>
+                      )}
+                      {source.active_generation_id && (
+                        <span>
+                          活动知识代{" "}
+                          {source.active_generation_id.slice(0, 8)}
+                        </span>
+                      )}
+                    </div>
                     {source.last_ingestion && (
                       <dl className="source-metrics">
                         <div>

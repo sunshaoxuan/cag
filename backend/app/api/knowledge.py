@@ -15,7 +15,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
@@ -35,8 +35,13 @@ from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
     KnowledgeIngestionRejection,
+    KnowledgeChunk,
+    KnowledgeDocument,
     KnowledgeSource,
     KnowledgeSourceEntry,
+    KnowledgeStatus,
+    ProductVersion,
+    Project,
 )
 from app.services.task_service import ProjectNotFoundError, TaskService
 
@@ -110,12 +115,18 @@ def source_response(
     source: KnowledgeSource,
     latest_ingestion: KnowledgeIngestion | None = None,
     entry_summary: dict[str, int] | None = None,
+    retrieval_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": source.id,
         "project_id": source.project_id,
         "tenant_id": source.tenant_id,
         "product_version_id": source.product_version_id,
+        "active_generation_id": (
+            retrieval_health.get("active_generation_id")
+            if retrieval_health is not None
+            else None
+        ),
         "name": source.name,
         "source_type": source.source_type,
         "location": source.root_path,
@@ -148,6 +159,14 @@ def source_response(
             "metadata_only": 0,
             "path_only": 0,
             "removed": 0,
+        },
+        "retrieval_health": retrieval_health
+        or {
+            "status": "empty",
+            "total_chunks": 0,
+            "accessible_chunks": 0,
+            "legacy_documents": 0,
+            "active_generation_id": None,
         },
         "last_ingestion": (
             ingestion_response(latest_ingestion)
@@ -250,9 +269,112 @@ def list_sources(
                 item,
                 latest,
                 source_entry_summary(session, item.id),
+                source_retrieval_health(session, item, latest),
             )
         )
     return responses
+
+
+def source_retrieval_health(
+    session: Session,
+    source: KnowledgeSource,
+    latest_ingestion: KnowledgeIngestion | None,
+) -> dict[str, Any]:
+    total_chunks = int(
+        session.scalar(
+            select(func.count(KnowledgeChunk.id))
+            .join(KnowledgeDocument)
+            .where(KnowledgeDocument.source_id == source.id)
+        )
+        or 0
+    )
+    legacy_documents = int(
+        session.scalar(
+            select(func.count(KnowledgeDocument.id)).where(
+                KnowledgeDocument.source_id == source.id,
+                or_(
+                    KnowledgeDocument.processing_mode == "legacy",
+                    KnowledgeDocument.processor_fingerprint.is_(None),
+                ),
+            )
+        )
+        or 0
+    )
+    active_generation_id = session.scalar(
+        select(KnowledgeIngestion.id)
+        .where(
+            KnowledgeIngestion.source_id == source.id,
+            KnowledgeIngestion.status == "completed",
+        )
+        .order_by(
+            KnowledgeIngestion.completed_at.desc(),
+            KnowledgeIngestion.created_at.desc(),
+        )
+        .limit(1)
+    )
+    project = session.get(Project, source.project_id)
+    scope_matches = False
+    if project is not None and source.scope == "tenant":
+        scope_matches = (
+            source.tenant_id is not None
+            and source.tenant_id == project.tenant_id
+        )
+    elif (
+        project is not None
+        and source.scope == "product"
+        and source.product_version_id is not None
+        and project.product_version_id is not None
+    ):
+        source_product_id = session.scalar(
+            select(ProductVersion.product_id).where(
+                ProductVersion.id == source.product_version_id
+            )
+        )
+        project_product_id = session.scalar(
+            select(ProductVersion.product_id).where(
+                ProductVersion.id == project.product_version_id
+            )
+        )
+        scope_matches = (
+            source_product_id is not None
+            and source_product_id == project_product_id
+        )
+    accessible_chunks = total_chunks if scope_matches else 0
+    refreshing = (
+        latest_ingestion is not None
+        and latest_ingestion.status in {"queued", "running"}
+    )
+    if not source.enabled:
+        health_status = "disabled"
+    elif accessible_chunks > 0 and source.error:
+        health_status = "degraded"
+    elif accessible_chunks > 0 and refreshing:
+        health_status = "refreshing"
+    elif (
+        accessible_chunks > 0
+        and source.approved_for_codex
+        and source.status in {
+            KnowledgeStatus.APPROVED,
+            KnowledgeStatus.INDEXING,
+            KnowledgeStatus.FAILED,
+        }
+    ):
+        health_status = "searchable"
+    elif total_chunks > 0 and not scope_matches:
+        health_status = "scope_mismatch"
+    elif total_chunks > 0 and not source.approved_for_codex:
+        health_status = "approval_required"
+    elif refreshing:
+        health_status = "indexing"
+    else:
+        health_status = "empty"
+    return {
+        "status": health_status,
+        "total_chunks": total_chunks,
+        "accessible_chunks": accessible_chunks,
+        "legacy_documents": legacy_documents,
+        "active_generation_id": active_generation_id,
+    }
 
 
 def source_entry_summary(
@@ -805,6 +927,7 @@ async def search_knowledge(
 ) -> dict[str, Any]:
     try:
         project = task_service.resolve_project(session, request.project_id)
+        session.commit()
         results = await service.search(
             project=project,
             query=request.query.strip(),
@@ -846,6 +969,7 @@ def code_knowledge_summary(
 ) -> dict[str, Any]:
     try:
         project = task_service.resolve_project(session, project_id)
+        session.commit()
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
     return service.code_summary(project)
@@ -863,6 +987,7 @@ def list_code_symbols(
 ) -> list[dict[str, Any]]:
     try:
         project = task_service.resolve_project(session, project_id)
+        session.commit()
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
     return service.list_code_symbols(
@@ -883,6 +1008,7 @@ def get_code_symbol(
 ) -> dict[str, Any]:
     try:
         project = task_service.resolve_project(session, project_id)
+        session.commit()
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
     result = service.code_symbol_detail(

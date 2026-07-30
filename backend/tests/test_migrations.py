@@ -81,6 +81,7 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
     assert {
         "processing_mode",
         "processor_fingerprint",
+        "generation_ingestion_id",
     } <= document_columns
     rejection_file_size = next(
         column
@@ -90,6 +91,16 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         if column["name"] == "file_size"
     )
     assert str(rejection_file_size["type"]).upper() == "BIGINT"
+
+    command.downgrade(config, "20260730_0015")
+    generation_downgraded = inspect(create_engine(database_url))
+    assert "generation_ingestion_id" not in {
+        column["name"]
+        for column in generation_downgraded.get_columns(
+            "knowledge_documents"
+        )
+    }
+    command.upgrade(config, "head")
 
     command.downgrade(config, "20260728_0011")
     audit_downgraded = inspect(create_engine(database_url))

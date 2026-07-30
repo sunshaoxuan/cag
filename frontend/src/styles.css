@@ -1328,6 +1328,26 @@ h1 span {
   font-size: 0.78rem;
 }
 
+.source-retrieval-health {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #dce8e4;
+  border-radius: 11px;
+  background: #f7fbfa;
+}
+
+.source-retrieval-health span {
+  color: #3d635b;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.source-retrieval-health .source-sync-warning {
+  color: #a8321c;
+}
+
 .source-inventory {
   margin-top: 16px;
   padding: 14px;

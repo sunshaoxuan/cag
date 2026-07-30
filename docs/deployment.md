@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.19.0 development deployment
+## 0.20.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -192,7 +192,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260730_0015` and then
+The normal Windows launcher applies Alembic revision `20260730_0016` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

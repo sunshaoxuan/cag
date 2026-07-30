@@ -344,6 +344,11 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
     processor_fingerprint: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    generation_ingestion_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_ingestions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     source = relationship("KnowledgeSource", back_populates="documents")
     chunks = relationship(

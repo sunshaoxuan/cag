@@ -288,6 +288,7 @@ describe("One Agent Gateway conversation page", () => {
             status: "draft",
             source_commit: null,
             index_fingerprint: null,
+            active_generation_id: null,
             error: null,
             last_validated_at: null,
             last_collected_at: null,
@@ -303,6 +304,13 @@ describe("One Agent Gateway conversation page", () => {
               metadata_only: 2,
               path_only: 1,
               removed: 0,
+            },
+            retrieval_health: {
+              status: "empty",
+              total_chunks: 0,
+              accessible_chunks: 0,
+              legacy_documents: 0,
+              active_generation_id: null,
             },
             last_ingestion: null,
           };
@@ -722,7 +730,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.19.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.20.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
