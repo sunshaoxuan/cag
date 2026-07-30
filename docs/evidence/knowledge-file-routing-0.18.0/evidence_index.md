@@ -9,4 +9,6 @@
 | `backend/tests/test_migrations.py` | Migration and column type assertions |
 | `frontend/src/App.test.tsx` | File asset summary, table and compact error behavior |
 | `docs/evidence/screenshots/knowledge-file-inventory-detail-0.18.0.png` | Isolated browser rendering |
+| `docs/evidence/screenshots/knowledge-file-inventory-production-0.18.0.png` | Deployed 5173 rendering with Ollama and scheduler ready |
 | `test_results.md` | Automated and live-isolated validation results |
+| `production_deployment.md` | Backup, migration, managed restart and live acceptance |

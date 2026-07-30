@@ -20,8 +20,18 @@ The screenshot is stored at
 
 ## Cutover
 
-This receipt covers the source release and isolated validation. The live
-long-running learning process remains on its current version. After that run
-reaches a terminal state, the planned restart applies migration
-`20260730_0015`. A subsequent ingestion can reuse unchanged normal documents,
-reprocess legacy code, and inventory metadata-only assets under the new policy.
+The live managed service was upgraded on 2026-07-30 after all active work
+reached a terminal state. PostgreSQL was backed up before shutdown. Alembic
+revision `20260730_0015`, Gateway 0.18.0 and the rebuilt 5173 frontend are now
+active.
+
+The Gateway listens on all interfaces at port 8000. The local Ollama boundary
+is ready with both required models. A due scheduled source automatically began
+the first production 0.18.0 scan, and its durable entry inventory and progress
+events are increasing.
+
+Rollback evidence is the custom-format database backup under
+`backups/releases/0.18.0-20260730T0814Z`. Restore requires stopping the managed
+Gateway, restoring into a separate PostgreSQL database, validating counts and
+then changing the configured database URL. The source backup is retained
+without changing the active database.

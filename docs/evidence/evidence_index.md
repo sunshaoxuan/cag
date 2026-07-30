@@ -4,6 +4,7 @@
 
 * `docs/evidence/knowledge-file-routing-0.18.0/`
 * `docs/evidence/screenshots/knowledge-file-inventory-detail-0.18.0.png`
+* `docs/evidence/screenshots/knowledge-file-inventory-production-0.18.0.png`
 
 ## Version 0.17.1
 
