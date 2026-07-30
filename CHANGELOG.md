@@ -2,6 +2,25 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.19.0
+
+发布日期：2026-07-30
+
+### Added
+
+* API 测试台新增灰色中间回答区域，按 Agent 运行和消息项聚合，默认折叠并可由使用者展开。
+* 最终报告新增 GitHub 风格 Markdown 渲染，支持标题、列表、链接、代码、引用和表格。
+
+### Changed
+
+* Agent SSE 增量继续完整进入审计事件流，聊天主回答仅在 Task 进入终态后读取 `final_report.summary`。
+* 调查、执行和独立复核消息不再覆盖最终回答，执行期间保持明确的处理中状态。
+
+### Validation
+
+* 前端组件测试覆盖中间回答折叠、消息增量聚合和最终 Markdown 结构。
+* TypeScript 与 Vite 生产构建通过。
+
 ## 0.18.0
 
 发布日期：2026-07-30

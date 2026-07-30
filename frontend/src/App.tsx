@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
   AuditEvent,
@@ -275,7 +277,14 @@ type ChatTurn = {
   prompt: string;
   status: string;
   answer: string | null;
+  intermediateMessages: IntermediateMessage[];
   error: string | null;
+};
+
+type IntermediateMessage = {
+  id: string;
+  role: string;
+  text: string;
 };
 
 type FeedbackLevel = "essential" | "standard" | "full";
@@ -410,6 +419,29 @@ function summarizeKnowledgeIngestionEvent(
 
 function isTerminal(status: string): boolean {
   return ["completed", "failed", "cancelled"].includes(status);
+}
+
+function projectIntermediateMessage(
+  messages: IntermediateMessage[],
+  event: TaskEvent,
+): IntermediateMessage[] {
+  const itemId = String(event.data.item_id ?? event.event_id);
+  const agentRunId = String(event.data.agent_run_id ?? "task");
+  const id = `${agentRunId}:${itemId}`;
+  const existing = messages.find((message) => message.id === id);
+  const text =
+    event.data.text === undefined
+      ? `${existing?.text ?? ""}${String(event.data.delta ?? "")}`
+      : String(event.data.text);
+  if (!text) return messages;
+
+  const nextMessage: IntermediateMessage = {
+    id,
+    role: String(event.data.role ?? existing?.role ?? "agent"),
+    text,
+  };
+  if (existing === undefined) return [...messages, nextMessage];
+  return messages.map((message) => (message.id === id ? nextMessage : message));
 }
 
 function includeFeedbackEvent(
@@ -779,15 +811,9 @@ export default function App() {
       nextStatus = "running";
     }
 
-    let liveAnswer: string | null = null;
-    if (event.type === "agent.message.delta") {
-      liveAnswer = String(event.data.text ?? "");
-    } else if (
-      event.type === "agent.message" &&
-      event.data.level !== "warning"
-    ) {
-      liveAnswer = String(event.data.text ?? "");
-    }
+    const isIntermediateMessage =
+      event.type === "agent.message.delta" ||
+      (event.type === "agent.message" && event.data.level !== "warning");
 
     setTask((current) =>
       current?.id === event.task_id
@@ -803,7 +829,9 @@ export default function App() {
           ? {
               ...turn,
               status: nextStatus ?? turn.status,
-              answer: liveAnswer || turn.answer,
+              intermediateMessages: isIntermediateMessage
+                ? projectIntermediateMessage(turn.intermediateMessages, event)
+                : turn.intermediateMessages,
             }
           : turn,
       ),
@@ -899,6 +927,7 @@ export default function App() {
           prompt: trimmedPrompt,
           status: createdTask.status,
           answer: null,
+          intermediateMessages: [],
           error: null,
         },
       ]);
@@ -3050,10 +3079,29 @@ export default function App() {
                 </div>
                 <div className="message message-agent">
                   <span>Codex</span>
-                  {turn.answer && !isTerminal(turn.status) && (
-                    <em className="message-live">实时反馈</em>
+                  {turn.intermediateMessages.length > 0 && (
+                    <details className="message-intermediate">
+                      <summary>
+                        中间回答 · {turn.intermediateMessages.length} 条
+                      </summary>
+                      <div className="message-intermediate-list">
+                        {turn.intermediateMessages.map((message) => (
+                          <article key={message.id}>
+                            <span>{message.role}</span>
+                            <p>{message.text}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
                   )}
-                  {turn.answer && <p>{turn.answer}</p>}
+                  {turn.answer && (
+                    <div className="message-final">
+                      <strong>最终结果</strong>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {turn.answer}
+                      </ReactMarkdown>
+                    </div>
+                  )}
                   {turn.error && <p className="message-error">{turn.error}</p>}
                   {!turn.answer && !turn.error && (
                     <p className="message-pending">

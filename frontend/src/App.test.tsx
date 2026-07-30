@@ -61,7 +61,7 @@ function queuedTask(id: string, prompt: string): Task {
   };
 }
 
-function completedTask(task: Task): Task {
+function completedTask(task: Task, summary?: string): Task {
   return {
     ...task,
     status: "completed",
@@ -71,7 +71,7 @@ function completedTask(task: Task): Task {
     completed_at: "2026-07-27T00:00:02Z",
     final_report: {
       status: "completed",
-      summary: `已完成：${task.prompt}`,
+      summary: summary ?? `已完成：${task.prompt}`,
       root_cause: null,
       changes: [],
       validation: [{ command: "pytest", status: "passed" }],
@@ -126,6 +126,7 @@ describe("One Agent Gateway conversation page", () => {
   let knowledgeSources: Array<Record<string, unknown>>;
   let knowledgeSecrets: Record<string, string>;
   let clipboardWrite: ReturnType<typeof vi.fn>;
+  let completedSummary: string | undefined;
 
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
@@ -134,6 +135,7 @@ describe("One Agent Gateway conversation page", () => {
     pendingApprovals = [];
     knowledgeSources = [];
     knowledgeSecrets = {};
+    completedSummary = undefined;
     clipboardWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -581,7 +583,7 @@ describe("One Agent Gateway conversation page", () => {
           url.endsWith(`/api/v1/tasks/${item.id}`),
         );
         if (matchedTask) {
-          return jsonResponse(completedTask(matchedTask));
+          return jsonResponse(completedTask(matchedTask, completedSummary));
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -720,7 +722,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.18.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.19.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -1070,7 +1072,7 @@ describe("One Agent Gateway conversation page", () => {
     });
   });
 
-  it("projects live Agent deltas into the conversation independently of the event filter", async () => {
+  it("keeps live Agent messages in a collapsed intermediate answer", async () => {
     render(<App />);
     await openConversationPage();
     await screen.findByRole("option", {
@@ -1121,7 +1123,10 @@ describe("One Agent Gateway conversation page", () => {
     });
 
     expect(await screen.findByText("正在查询东京天气")).toBeInTheDocument();
-    expect(screen.getByText("实时反馈")).toBeInTheDocument();
+    const intermediateSummary = screen.getByText("中间回答 · 1 条");
+    const intermediateDetails = intermediateSummary.closest("details");
+    expect(intermediateDetails).not.toHaveAttribute("open");
+    expect(intermediateDetails).toHaveClass("message-intermediate");
     expect(
       screen.getByRole("button", { name: "本轮执行中" }),
     ).toBeDisabled();
@@ -1146,7 +1151,59 @@ describe("One Agent Gateway conversation page", () => {
       });
     });
     expect(await screen.findByText("已完成：查询天气")).toBeInTheDocument();
-    expect(screen.queryByText("实时反馈")).not.toBeInTheDocument();
+    expect(screen.getByText("最终结果")).toBeInTheDocument();
+  });
+
+  it("renders the terminal report as GitHub-flavored Markdown", async () => {
+    completedSummary = [
+      "# VPN 调查结果",
+      "",
+      "**未找到**已学习资料。",
+      "",
+      "- 已检查企业知识",
+      "- 已保留调查记录",
+      "",
+      "| 项目 | 结果 |",
+      "| --- | --- |",
+      "| VPN | 无资料 |",
+      "",
+      "[资料入口](https://example.com/vpn)",
+    ].join("\n");
+
+    render(<App />);
+    await openConversationPage();
+    await screen.findByRole("option", {
+      name: "One Agent Gateway · cag",
+    });
+    fireEvent.change(screen.getByLabelText("发送消息"), {
+      target: { value: "Markdown 测试" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("Markdown 测试");
+
+    const source = MockEventSource.instances[0];
+    act(() => {
+      source.emit("task.completed", {
+        event_id: "event-markdown-completed",
+        conversation_id: conversation.id,
+        task_id: "task-1",
+        sequence: 1,
+        task_sequence: 1,
+        type: "task.completed",
+        timestamp: "2026-07-30T00:00:01Z",
+        data: {},
+      });
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "VPN 调查结果" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("未找到").tagName).toBe("STRONG");
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "资料入口" })).toHaveAttribute(
+      "href",
+      "https://example.com/vpn",
+    );
   });
 
   it("limits visible feedback rows without dropping received events", async () => {

@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.19.0
+
+* `docs/evidence/conversation-message-presentation-0.19.0/`
+* `docs/evidence/screenshots/conversation-message-presentation-0.19.0.png`
+
 ## Version 0.18.0
 
 * `docs/evidence/knowledge-file-routing-0.18.0/`

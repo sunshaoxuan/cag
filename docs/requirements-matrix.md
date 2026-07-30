@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.18.0 | Evidence |
+| Requirement | Status for 0.19.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -46,6 +46,8 @@ Legend:
 | Traceable knowledge learning loop | Implemented | citations shared by context injection, final report and MemoryCandidate evidence |
 | Continuous conversation frontend | Implemented | Component, build and browser evidence |
 | Truthful runtime feedback | Implemented | User-visible app-server deltas are durable CAG events; hidden reasoning and credentials remain excluded |
+| Conversation intermediate-answer presentation | Implemented | Agent messages are grouped in a gray, collapsed disclosure while the Task remains active |
+| Terminal report Markdown | Implemented | Final report is published after terminal Task state and rendered with GitHub-flavored Markdown |
 | Enterprise knowledge plane | Implemented | `docs/enterprise-knowledge.md`, knowledge API tests |
 | Managed local, UNC, Git, GitLab and SVN knowledge sources | Implemented | Connector tests, `docs/knowledge-source-api.md`, Knowledge page browser evidence |
 | Visual knowledge source lifecycle management | Implemented | Source create, edit, enable, disable, search, filter, trigger, live run center and history controls |

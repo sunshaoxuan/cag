@@ -2,7 +2,7 @@
 
 This matrix records engineering alignment and evidence. It is not a certification claim.
 
-| Reference | Control objective | CAG 0.18.0 evidence | Status |
+| Reference | Control objective | CAG 0.19.0 evidence | Status |
 |---|---|---|---|
 | NeurIPS RAG | Separate parametric Agent reasoning and non-parametric knowledge | `docs/enterprise-knowledge.md`, KnowledgeSource and KnowledgeChunk | Implemented |
 | ISO/IEC 42001 | Defined AI system boundary, ownership and continual improvement | Promotion state machine, GardenerRun, installation receipts | Implemented mapping |

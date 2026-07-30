@@ -69,6 +69,15 @@ use browser history and reset document scroll position. Direct
 loads and reloads are served by the frontend fallback. Conversation state stays
 mounted during in-app navigation so an active task remains observable.
 
+Starting with version 0.19.0, the conversation route separates execution
+feedback from the terminal answer. Agent messages remain truthful SSE records
+and are grouped by Agent run and message item in a gray disclosure that is
+collapsed by default. The chat answer is populated from `final_report.summary`
+only after `task.completed`. Terminal reports render GitHub-flavored Markdown,
+including headings, lists, links, code, blockquotes and tables. The adjacent
+event monitor continues to expose the complete filtered or unfiltered event
+sequence.
+
 The Knowledge route uses an editable source registry form followed by source
 cards and a live ingestion event panel. Location, type, version, subpath,
 scope, sync policy and credentials can be maintained from the page. Credential
