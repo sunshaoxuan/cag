@@ -135,6 +135,7 @@ p {
   padding: 12px 0;
   font-size: 0.86rem;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .site-nav a::after {
@@ -2448,6 +2449,409 @@ textarea:focus {
   white-space: pre;
 }
 
+.operations-intro {
+  background:
+    radial-gradient(circle at 82% 30%, rgba(26, 142, 131, 0.14), transparent 25%),
+    linear-gradient(135deg, #fff9f4 0%, #fff 55%, #eefaf8 100%);
+}
+
+.operations-dashboard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+
+.operations-dashboard article {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.operations-dashboard span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.operations-dashboard strong {
+  font-size: 2rem;
+}
+
+.operations-error {
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border: 1px solid #f0b6ad;
+  border-radius: 14px;
+  background: #fff1ef;
+  color: #a83f32;
+}
+
+.operations-workspace {
+  display: grid;
+  grid-template-columns: minmax(310px, 0.72fr) minmax(0, 1.45fr);
+  min-height: 720px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--surface);
+}
+
+.operations-list {
+  padding: 22px;
+  border-right: 1px solid var(--line);
+  background: #fbfaf8;
+}
+
+.operations-toolbar {
+  display: grid;
+  grid-template-columns: 1fr 0.75fr 0.9fr;
+  gap: 9px;
+}
+
+.operations-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.operations-toolbar span,
+.operations-count {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.operations-toolbar input,
+.operations-toolbar select,
+.operations-approval textarea,
+.operations-implementation-fields input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.operations-toolbar input,
+.operations-implementation-fields input {
+  padding: 0 11px;
+}
+
+.operations-count {
+  margin: 14px 0 8px;
+}
+
+.operations-items {
+  display: grid;
+  gap: 9px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.operations-item {
+  display: grid;
+  gap: 7px;
+  padding: 15px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.operations-item:hover,
+.operations-item.is-selected {
+  border-color: rgba(255, 92, 39, 0.42);
+  background: #fff7f1;
+}
+
+.operations-item strong {
+  line-height: 1.45;
+}
+
+.operations-item small {
+  color: var(--muted);
+}
+
+.severity {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.07em;
+}
+
+.severity-critical,
+.severity-high {
+  background: #ffe8e3;
+  color: #bb3d2d;
+}
+
+.severity-medium {
+  background: #fff1d5;
+  color: #8c5d00;
+}
+
+.severity-low {
+  background: #def5f1;
+  color: #13766d;
+}
+
+.operations-detail {
+  min-width: 0;
+  padding: 30px;
+}
+
+.operations-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.operations-detail-header p {
+  margin: 0;
+  color: var(--orange);
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.operations-detail-header h2 {
+  margin: 5px 0 8px;
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
+}
+
+.operations-detail-header div > span {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.issue-status {
+  flex: none;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fff0e9;
+  color: var(--orange-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.status-closed {
+  background: #def5e9;
+  color: #2c7557;
+}
+
+.status-triage_failed,
+.status-rejected {
+  background: #ffe6e2;
+  color: #a63e31;
+}
+
+.operations-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.operations-facts div {
+  min-width: 0;
+  padding: 13px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.operations-facts dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.operations-facts dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.operations-human-input,
+.operations-approval {
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #b9e3de;
+  border-radius: 15px;
+  background: #eefaf8;
+}
+
+.operations-human-input p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.operations-approval h3,
+.operations-artifacts h3,
+.operations-timeline h3 {
+  margin-top: 0;
+}
+
+.operations-approval textarea {
+  min-height: 92px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.operations-approval > div,
+.operations-implementation-fields {
+  display: flex;
+  gap: 10px;
+  margin-top: 11px;
+}
+
+.operations-approval > button {
+  margin-top: 11px;
+}
+
+.operations-artifacts,
+.operations-timeline {
+  margin-top: 26px;
+}
+
+.operations-artifacts details {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fff;
+}
+
+.operations-artifacts summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.operations-artifacts summary span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.operations-artifacts details > p {
+  margin: 0;
+  padding: 0 16px 14px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.operations-artifacts pre {
+  max-height: 300px;
+  margin: 0 16px 16px;
+  padding: 14px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #252728;
+  color: #f8f4ef;
+  font: 0.72rem/1.6 "Cascadia Code", Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.operations-timeline ol {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.operations-timeline li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 12px;
+  padding-bottom: 15px;
+}
+
+.operations-timeline li > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #f5b59d;
+  border-radius: 50%;
+  background: #fff7f1;
+  color: var(--orange);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.operations-timeline li div {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.operations-timeline strong,
+.operations-timeline small {
+  display: block;
+}
+
+.operations-timeline small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.operations-timeline p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.operations-empty {
+  padding: 28px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (min-width: 1081px) and (max-width: 1320px) {
+  .site-header {
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
+    grid-template-columns: auto 1fr;
+    row-gap: 6px;
+  }
+
+  .brand {
+    grid-area: brand;
+  }
+
+  .site-nav {
+    grid-area: nav;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(40, 32, 27, 0.08);
+  }
+
+  .site-nav a {
+    padding: 8px 0 6px;
+    font-size: 0.8rem;
+  }
+
+  .site-actions {
+    grid-area: actions;
+    justify-self: end;
+  }
+}
+
 @media (max-width: 1080px) {
   .site-header {
     grid-template-columns: auto 1fr;
@@ -2475,6 +2879,23 @@ textarea:focus {
   .code-browser,
   .api-runtime-grid {
     grid-template-columns: 1fr;
+  }
+
+  .operations-dashboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operations-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .operations-items {
+    max-height: 360px;
   }
 
   .knowledge-management-metrics {
@@ -2578,6 +2999,22 @@ textarea:focus {
   .api-example-grid,
   .api-contract dl {
     grid-template-columns: 1fr;
+  }
+
+  .operations-dashboard,
+  .operations-toolbar,
+  .operations-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-detail {
+    padding: 21px;
+  }
+
+  .operations-detail-header,
+  .operations-approval > div,
+  .operations-implementation-fields {
+    flex-direction: column;
   }
 
   .knowledge-management-metrics,

@@ -73,6 +73,9 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'gateway\.restarting'
         $content | Should Match 'gateway-supervisor\.log'
         $content | Should Match 'retainedLogFiles = 5'
+        $content | Should Match 'operational-issue-spool\.jsonl'
+        $content | Should Match '/api/v1/operations/issues/intake'
+        $content | Should Match 'Flush-OperationalIssueSpool'
     }
 
     It "reports the persistent Gateway as running" {

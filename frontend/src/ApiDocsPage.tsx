@@ -106,6 +106,40 @@ progress.addEventListener("knowledge.collection.progress", (message) => {
       "  relative_path, processing_mode, status, file_size, reason_code",
     ].join("\n"),
   },
+  {
+    title: "提交运行失败到问题中心",
+    description: "调用方提供稳定事件ID，重复上报会保留幂等并按指纹归并。",
+    language: "curl",
+    code: `curl -X POST "$BASE_URL/api/v1/operations/issues/intake" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "project_reference": "cag",
+    "source_type": "external_connector",
+    "source_id": "upds-share",
+    "title": "Network share authentication failed",
+    "error_type": "CredentialFailure",
+    "error_message": "Authentication failed",
+    "severity": "high",
+    "external_event_id": "connector-event-20260731-001",
+    "evidence": {"attempt": 3}
+  }'`,
+  },
+  {
+    title: "审批AI改进方案",
+    description: "内部问题批准后创建受控改进分支任务，外部问题转为等待管理员处理。",
+    language: "PowerShell",
+    code: [
+      "$approval = @{",
+      '  resolved_by = "gateway-admin"',
+      '  note = "批准隔离分支实施并执行回归测试"',
+      "} | ConvertTo-Json",
+      "Invoke-RestMethod `",
+      "  -Method Post `",
+      '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/approve" `',
+      "  -ContentType 'application/json; charset=utf-8' `",
+      "  -Body $approval",
+    ].join("\n"),
+  },
 ];
 
 function countFor(
@@ -203,10 +237,18 @@ export default function ApiDocsPage() {
             </small>
           </article>
           <article>
+            <span>问题处理等待</span>
+            <strong>{countFor(queueStatus, "operations", "queued")}</strong>
+            <small>
+              {queueStatus?.configured_workers.operations ?? 0} 个工作器
+            </small>
+          </article>
+          <article>
             <span>正在执行</span>
             <strong>
               {countFor(queueStatus, "interactive", "leased") +
-                countFor(queueStatus, "knowledge", "leased")}
+                countFor(queueStatus, "knowledge", "leased") +
+                countFor(queueStatus, "operations", "leased")}
             </strong>
             <small>{queueStatus?.workers.length ?? 0} 个活跃工作器</small>
           </article>

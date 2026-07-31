@@ -102,6 +102,76 @@ export type QueueStatus = {
   }>;
 };
 
+export type OperationalIssueArtifact = {
+  id: string;
+  artifact_type: "plan" | "review" | "implementation" | "evaluation";
+  revision: number;
+  content: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+};
+
+export type OperationalIssueEvent = {
+  id: string;
+  sequence: number;
+  type: string;
+  data: Record<string, unknown>;
+  created_at: string;
+};
+
+export type OperationalIssueOccurrence = {
+  id: string;
+  external_event_id: string | null;
+  event_type: string;
+  error_type: string | null;
+  error_message: string;
+  evidence: Record<string, unknown>;
+  occurred_at: string;
+};
+
+export type OperationalIssue = {
+  id: string;
+  project_id: string;
+  parent_issue_id: string | null;
+  implementation_task_id: string | null;
+  code: string;
+  source_type: string;
+  source_id: string | null;
+  title: string;
+  summary: string;
+  severity: "low" | "medium" | "high" | "critical";
+  boundary: string | null;
+  boundary_confidence: number | null;
+  status: string;
+  occurrence_count: number;
+  evidence: Record<string, unknown>;
+  allowed_actions: string[];
+  required_human_input: string | null;
+  approval_status: string;
+  approved_by: string | null;
+  approval_note: string | null;
+  approved_at: string | null;
+  improvement_branch: string | null;
+  evaluation_status: string;
+  resolution: string | null;
+  closed_by: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  occurrences?: OperationalIssueOccurrence[];
+  artifacts?: OperationalIssueArtifact[];
+  events?: OperationalIssueEvent[];
+};
+
+export type OperationalDashboard = {
+  total: number;
+  by_status: Record<string, number>;
+  by_severity: Record<string, number>;
+  by_boundary: Record<string, number>;
+};
+
 export type KnowledgeSource = {
   id: string;
   project_id: string;
@@ -505,6 +575,95 @@ export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
 
 export function getQueueStatus(): Promise<QueueStatus> {
   return request<QueueStatus>("/api/v1/queue/status");
+}
+
+export function getOperationalDashboard(): Promise<OperationalDashboard> {
+  return request<OperationalDashboard>("/api/v1/operations/dashboard");
+}
+
+export function listOperationalIssues(): Promise<OperationalIssue[]> {
+  return request<OperationalIssue[]>("/api/v1/operations/issues");
+}
+
+export function getOperationalIssue(
+  issueId: string,
+): Promise<OperationalIssue> {
+  return request<OperationalIssue>(
+    `/api/v1/operations/issues/${issueId}`,
+  );
+}
+
+export function approveOperationalIssue(
+  issueId: string,
+  note: string,
+): Promise<OperationalIssue> {
+  return request<OperationalIssue>(
+    `/api/v1/operations/issues/${issueId}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resolved_by: "gateway-admin",
+        note,
+      }),
+    },
+  );
+}
+
+export function rejectOperationalIssue(
+  issueId: string,
+  note: string,
+): Promise<OperationalIssue> {
+  return request<OperationalIssue>(
+    `/api/v1/operations/issues/${issueId}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resolved_by: "gateway-admin",
+        note,
+      }),
+    },
+  );
+}
+
+export function recordOperationalImplementation(
+  issueId: string,
+  payload: {
+    summary: string;
+    branch: string | null;
+    commits: string[];
+  },
+): Promise<OperationalIssue> {
+  return request<OperationalIssue>(
+    `/api/v1/operations/issues/${issueId}/implementations`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        implemented_by: "gateway-admin",
+        validation: [],
+        ...payload,
+      }),
+    },
+  );
+}
+
+export function reopenOperationalIssue(
+  issueId: string,
+  reason: string,
+): Promise<OperationalIssue> {
+  return request<OperationalIssue>(
+    `/api/v1/operations/issues/${issueId}/reopen`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reopened_by: "gateway-admin",
+        reason,
+      }),
+    },
+  );
 }
 
 export function listKnowledgeSources(): Promise<KnowledgeSource[]> {

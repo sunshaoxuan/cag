@@ -2,8 +2,10 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from app.database import Database
-from app.models import TaskStatus
+from app.models import QueueItem, QueueItemStatus, TaskStatus
 from app.models.base import utc_now
 from app.runtimes.base import AgentRuntime
 from app.services.task_service import TaskNotFoundError, TaskService
@@ -11,6 +13,7 @@ from app.workspaces.manager import WorkspaceManager
 from app.knowledge.service import KnowledgeService
 from app.harness.service import AgentHarness
 from app.learning.service import LearningService
+from app.operations.service import OperationalIssueService
 
 
 class TaskExecutor:
@@ -24,6 +27,7 @@ class TaskExecutor:
         knowledge_service: KnowledgeService | None = None,
         harness: AgentHarness | None = None,
         learning_service: LearningService | None = None,
+        operational_issue_service: OperationalIssueService | None = None,
     ) -> None:
         self._database = database
         self._runtime = runtime
@@ -33,6 +37,7 @@ class TaskExecutor:
         self._knowledge_service = knowledge_service
         self._harness = harness
         self._learning_service = learning_service
+        self._operational_issue_service = operational_issue_service
         self._event_lock = asyncio.Lock()
 
     async def execute(self, task_id: str) -> None:
@@ -56,6 +61,7 @@ class TaskExecutor:
             knowledge_mode = task.knowledge_mode
             harness_profile = task.harness_profile
             learning_mode = task.learning_mode
+            request_metadata = task.request_metadata or {}
             conversation_id = task.conversation_id
             conversation_thread_id = (
                 task.conversation.codex_thread_id
@@ -84,6 +90,13 @@ class TaskExecutor:
                 project=project_config,
                 task_id=task_id,
             )
+            improvement_branch = request_metadata.get("improvement_branch")
+            if improvement_branch:
+                workspace = await asyncio.to_thread(
+                    self._workspace_manager.create_branch,
+                    workspace,
+                    str(improvement_branch),
+                )
         except Exception as exc:
             await self._fail_task(task_id, str(exc))
             return
@@ -186,6 +199,20 @@ class TaskExecutor:
                 if developer_instructions
                 else self_improvement_instructions
             )
+            operational_issue_id = request_metadata.get(
+                "operational_issue_id"
+            )
+            if operational_issue_id and improvement_branch:
+                issue_instructions = (
+                    f"This is approved operational issue {operational_issue_id}. "
+                    f"Work only on prepared branch {improvement_branch}. "
+                    "Run the declared acceptance and regression tests, commit all "
+                    "verified project changes locally, and do not push or merge. "
+                    "Include the final commit and rollback evidence in the report."
+                )
+                developer_instructions = (
+                    f"{developer_instructions}\n\n{issue_instructions}"
+                )
 
         try:
             runtime_arguments = dict(
@@ -311,7 +338,24 @@ class TaskExecutor:
                 event_type="task.completed",
                 data={"report": task.final_report},
             )
+            queue_item = session.scalar(
+                select(QueueItem).where(QueueItem.task_id == task.id)
+            )
+            if queue_item is not None:
+                queue_item.status = QueueItemStatus.COMPLETED
+                queue_item.completed_at = task.completed_at
+                queue_item.lease_owner = None
+                queue_item.lease_expires_at = None
             session.commit()
+
+        if (
+            self._operational_issue_service is not None
+            and request_metadata.get("operational_issue_id")
+        ):
+            await asyncio.to_thread(
+                self._operational_issue_service.record_implementation_completed,
+                task_id,
+            )
 
     async def _emit(
         self,

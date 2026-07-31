@@ -114,3 +114,37 @@ class WorkspaceManager:
             commit_sha=commit_result.stdout.strip(),
             branch=project.repository.default_branch,
         )
+
+    def create_branch(
+        self,
+        workspace: WorkspaceInfo,
+        branch: str,
+    ) -> WorkspaceInfo:
+        resolved_workspace = workspace.path.resolve()
+        if not resolved_workspace.is_relative_to(self._root):
+            raise WorkspaceError("Improvement workspace escaped the configured root")
+        result = subprocess.run(
+            [
+                self._git_executable,
+                "-C",
+                str(resolved_workspace),
+                "switch",
+                "-c",
+                branch,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise WorkspaceError(
+                f"Improvement branch could not be created: {detail[-2000:]}"
+            )
+        return WorkspaceInfo(
+            workspace_id=workspace.workspace_id,
+            path=workspace.path,
+            commit_sha=workspace.commit_sha,
+            branch=branch,
+        )

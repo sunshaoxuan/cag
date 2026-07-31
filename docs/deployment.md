@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.20.0 development deployment
+## 0.21.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -31,7 +31,8 @@ published to the LAN.
 
 The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
-console, API audit monitor, enterprise knowledge and capability governance.
+console, API audit monitor, enterprise knowledge, capability governance and the
+self-operations issue center.
 The independent Code Knowledge route exposes governed structural facts without
 placing code graph controls on the source maintenance page.
 Browser API and SSE requests use the same 5173 origin. Nginx forwards `/api`
@@ -138,6 +139,12 @@ leave the runtime Python child active after the scheduler action completes.
 Starting the task replaces a prior loopback-only managed listener and verifies
 that the resulting address is `0.0.0.0` or `::`.
 
+When the Gateway is unavailable, the supervisor writes startup and readiness
+failures to `workspaces\.gateway\logs\operational-issue-spool.jsonl`. After the
+Gateway becomes ready, the supervisor submits each event to the issue intake
+API. Stable external event IDs make replay idempotent, and unsuccessful
+submissions remain in the spool.
+
 The host Gateway requires PostgreSQL with pgvector. Configure the connection in
 the ignored `backend/.env.local` file or the
 `AGENT_GATEWAY_DATABASE_URL` environment variable. The managed runtime rejects
@@ -158,6 +165,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
 | `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
+| `AGENT_GATEWAY_QUEUE_OPERATIONS_WORKERS` | Independent self-operations issue Worker count |
 | `AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR` | Managed Git and SVN source snapshot directory |
 | `AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` | Maximum accepted source file size |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
@@ -192,7 +200,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260730_0016` and then
+The normal Windows launcher applies Alembic revision `20260731_0017` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

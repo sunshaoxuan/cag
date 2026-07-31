@@ -13,6 +13,8 @@ from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
     KnowledgeSource,
+    OperationalIssue,
+    OperationalIssueStatus,
     QueueItem,
     QueueItemStatus,
     QueueWorker,
@@ -83,6 +85,7 @@ class QueueService:
         counts = {
             "tasks_enqueued": 0,
             "ingestions_enqueued": 0,
+            "issues_enqueued": 0,
             "expired_requeued": 0,
         }
         with self._database.session_factory() as session:
@@ -196,6 +199,52 @@ class QueueService:
                 )
                 self._reset_terminal_item(item, now=now)
                 counts["ingestions_enqueued"] += 1
+
+            issue_rows = list(
+                session.scalars(
+                    select(OperationalIssue).where(
+                        OperationalIssue.status.in_(
+                            (
+                                OperationalIssueStatus.DETECTED,
+                                OperationalIssueStatus.TRIAGING,
+                                OperationalIssueStatus.EVALUATING,
+                            )
+                        ),
+                        ~exists(
+                            select(QueueItem.id).where(
+                                QueueItem.issue_id == OperationalIssue.id,
+                                QueueItem.status.in_(
+                                    (
+                                        QueueItemStatus.QUEUED,
+                                        QueueItemStatus.LEASED,
+                                    )
+                                ),
+                            )
+                        ),
+                    )
+                )
+            )
+            for issue in issue_rows:
+                issue.status = (
+                    OperationalIssueStatus.EVALUATING
+                    if issue.evaluation_status in {"queued", "running"}
+                    else OperationalIssueStatus.DETECTED
+                )
+                session.add(
+                    QueueItem(
+                        queue_name="operations",
+                        job_type=(
+                            "operational_evaluation"
+                            if issue.status == OperationalIssueStatus.EVALUATING
+                            else "operational_triage"
+                        ),
+                        issue_id=issue.id,
+                        project_id=issue.project_id,
+                        client_id="cag-self-operations",
+                        priority=100,
+                    )
+                )
+                counts["issues_enqueued"] += 1
 
             expired = list(
                 session.scalars(
@@ -500,6 +549,7 @@ class QueueService:
             "job_type": item.job_type,
             "task_id": item.task_id,
             "ingestion_id": item.ingestion_id,
+            "issue_id": item.issue_id,
             "project_id": item.project_id,
             "conversation_id": item.conversation_id,
             "client_id": item.client_id,
@@ -611,6 +661,10 @@ class QueueService:
                         "attempt": item.attempt_count,
                     },
                 )
+        if item.issue_id is not None:
+            issue = session.get(OperationalIssue, item.issue_id)
+            if issue is not None and issue.status not in OperationalIssueStatus.TERMINAL:
+                issue.status = OperationalIssueStatus.DETECTED
 
     @staticmethod
     def _aware_datetime(value: datetime) -> datetime:
@@ -662,6 +716,12 @@ class QueueService:
                     "knowledge.ingestion.cancelled",
                     {"reason": reason},
                 )
+        if item.issue_id is not None:
+            issue = session.get(OperationalIssue, item.issue_id)
+            if issue is not None:
+                issue.status = OperationalIssueStatus.REJECTED
+                issue.resolution = reason
+                issue.closed_at = now
 
     def _fail_locked(self, session, item: QueueItem, *, reason: str) -> None:
         now = utc_now()
@@ -698,6 +758,11 @@ class QueueService:
                     "knowledge.ingestion.failed",
                     {"error": reason, "reason": "queue_attempts_exhausted"},
                 )
+        if item.issue_id is not None:
+            issue = session.get(OperationalIssue, item.issue_id)
+            if issue is not None:
+                issue.status = OperationalIssueStatus.TRIAGE_FAILED
+                issue.summary = reason
 
     @staticmethod
     def _append_ingestion_event(
@@ -721,17 +786,27 @@ class QueueService:
         if item.task_id is not None:
             task = session.get(Task, item.task_id)
             return task.status if task is not None else "failed"
-        ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
-        return ingestion.status if ingestion is not None else "failed"
+        if item.ingestion_id is not None:
+            ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
+            return ingestion.status if ingestion is not None else "failed"
+        issue = session.get(OperationalIssue, item.issue_id)
+        if issue is None:
+            return "failed"
+        if issue.status == OperationalIssueStatus.TRIAGE_FAILED:
+            return "failed"
+        return "completed"
 
     @staticmethod
     def _resource_error(session, item: QueueItem) -> str | None:
         if item.task_id is not None:
             task = session.get(Task, item.task_id)
             return task.error if task is not None else "Task is unavailable"
-        ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
-        return (
-            ingestion.error
-            if ingestion is not None
-            else "Knowledge ingestion is unavailable"
-        )
+        if item.ingestion_id is not None:
+            ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
+            return (
+                ingestion.error
+                if ingestion is not None
+                else "Knowledge ingestion is unavailable"
+            )
+        issue = session.get(OperationalIssue, item.issue_id)
+        return issue.summary if issue is not None else "Operational issue is unavailable"

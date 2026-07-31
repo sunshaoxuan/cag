@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.21.0
+
+* `docs/evidence/self-operations-0.21.0/`
+* `docs/evidence/self-operations-0.21.0/screenshots/operations-center.png`
+
 ## Version 0.20.0
 
 * `docs/evidence/stable-product-knowledge-0.20.0/`

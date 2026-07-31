@@ -10,6 +10,7 @@ from app.models import QueueItem
 from app.queue.notifier import QueueNotifier
 from app.queue.service import QueueService
 from app.tasks.executor import TaskExecutor
+from app.operations.service import OperationalIssueService
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ class QueueCoordinator:
         knowledge_service: KnowledgeService,
         interactive_workers: int,
         knowledge_workers: int,
+        operations_workers: int,
+        operational_issue_service: OperationalIssueService,
         poll_seconds: float,
         heartbeat_seconds: int,
         shutdown_seconds: int,
@@ -33,9 +36,11 @@ class QueueCoordinator:
         self._notifier = notifier
         self._task_executor = task_executor
         self._knowledge_service = knowledge_service
+        self._operational_issue_service = operational_issue_service
         self._worker_counts = {
             "interactive": interactive_workers,
             "knowledge": knowledge_workers,
+            "operations": operations_workers,
         }
         self._poll_seconds = poll_seconds
         self._heartbeat_seconds = heartbeat_seconds
@@ -196,18 +201,28 @@ class QueueCoordinator:
             )
         except Exception as error:
             logger.exception("Queue item %s execution failed", item.id)
-            await asyncio.to_thread(
+            abandoned_status = await asyncio.to_thread(
                 self._service.abandon,
                 item_id=item.id,
                 worker_key=worker_key,
                 reason=f"{type(error).__name__}: {str(error)[:500]}",
             )
+            if abandoned_status == "failed":
+                await asyncio.to_thread(
+                    self._operational_issue_service.capture_queue_failure,
+                    item.id,
+                )
         else:
-            await asyncio.to_thread(
+            final_status = await asyncio.to_thread(
                 self._service.finish,
                 item_id=item.id,
                 worker_key=worker_key,
             )
+            if final_status == "failed":
+                await asyncio.to_thread(
+                    self._operational_issue_service.capture_queue_failure,
+                    item.id,
+                )
 
     async def _dispatch(self, item: QueueItem) -> None:
         if item.job_type == "agent_task" and item.task_id is not None:
@@ -218,5 +233,11 @@ class QueueCoordinator:
             and item.ingestion_id is not None
         ):
             await self._knowledge_service.ingest(item.ingestion_id)
+            return
+        if item.issue_id is not None and item.job_type.startswith("operational_"):
+            await self._operational_issue_service.process(
+                item.issue_id,
+                item.job_type,
+            )
             return
         raise RuntimeError(f"Unsupported queue job type: {item.job_type}")

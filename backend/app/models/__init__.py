@@ -33,6 +33,13 @@ from app.models.knowledge import (
 )
 from app.models.project import Project
 from app.models.queue import QueueItem, QueueItemStatus, QueueWorker
+from app.models.operations import (
+    OperationalIssue,
+    OperationalIssueArtifact,
+    OperationalIssueEvent,
+    OperationalIssueOccurrence,
+    OperationalIssueStatus,
+)
 from app.models.migration import DataMigrationReceipt
 from app.models.harness import (
     AgentArtifact,
@@ -87,6 +94,11 @@ __all__ = [
     "QueueItem",
     "QueueItemStatus",
     "QueueWorker",
+    "OperationalIssue",
+    "OperationalIssueArtifact",
+    "OperationalIssueEvent",
+    "OperationalIssueOccurrence",
+    "OperationalIssueStatus",
     "DataMigrationReceipt",
     "QualityScore",
     "ReviewFinding",

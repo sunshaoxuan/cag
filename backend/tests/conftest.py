@@ -111,6 +111,7 @@ def settings(tmp_path: Path, projects_dir: Path) -> Settings:
         queue_heartbeat_seconds=1,
         queue_shutdown_seconds=2,
         auto_create_schema=True,
+        self_improvement_root=tmp_path / "self-improvement",
         projects_dir=projects_dir,
         workspace_root=tmp_path / "workspaces",
     )

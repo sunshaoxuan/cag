@@ -13,6 +13,7 @@ from app.approvals.service import ApprovalService
 from app.capabilities.service import CapabilityService
 from app.queue.coordinator import QueueCoordinator
 from app.queue.service import QueueService
+from app.operations.service import OperationalIssueService
 
 
 def get_database(request: Request) -> Database:
@@ -58,3 +59,7 @@ def get_queue_coordinator(request: Request) -> QueueCoordinator:
 
 def get_queue_service(request: Request) -> QueueService:
     return request.app.state.queue_service
+
+
+def get_operational_issue_service(request: Request) -> OperationalIssueService:
+    return request.app.state.operational_issue_service

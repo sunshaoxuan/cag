@@ -29,8 +29,9 @@ class QueueItem(PhysicalIdMixin, Base):
     __tablename__ = "queue_items"
     __table_args__ = (
         CheckConstraint(
-            "(task_id IS NOT NULL AND ingestion_id IS NULL) OR "
-            "(task_id IS NULL AND ingestion_id IS NOT NULL)",
+            "(CASE WHEN task_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN ingestion_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN issue_id IS NOT NULL THEN 1 ELSE 0 END) = 1",
             name="exactly_one_resource",
         ),
         UniqueConstraint("task_id", name="uq_queue_items_task_id"),
@@ -54,6 +55,11 @@ class QueueItem(PhysicalIdMixin, Base):
     ingestion_id: Mapped[str | None] = mapped_column(
         ForeignKey("knowledge_ingestions.id", ondelete="CASCADE"),
         nullable=True,
+    )
+    issue_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operational_issues.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="RESTRICT"),

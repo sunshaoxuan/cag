@@ -26,6 +26,9 @@ from app.learning.service import LearningService
 from app.queue.coordinator import QueueCoordinator
 from app.queue.notifier import QueueNotifier
 from app.queue.service import QueueService
+from app.operations.service import OperationalIssueService
+from fastapi import Request
+import asyncio
 
 
 def create_app(
@@ -111,6 +114,13 @@ def create_app(
         database=database,
         capabilities=capability_service,
     )
+    operational_issue_service = OperationalIssueService(
+        database=database,
+        runtime=active_runtime,
+        project_registry=project_registry,
+        task_service=task_service,
+        workspace_manager=workspace_manager,
+    )
     task_executor = TaskExecutor(
         database=database,
         runtime=active_runtime,
@@ -120,6 +130,7 @@ def create_app(
         knowledge_service=knowledge_service,
         harness=harness,
         learning_service=learning_service,
+        operational_issue_service=operational_issue_service,
     )
     queue_service = QueueService(
         database=database,
@@ -138,6 +149,8 @@ def create_app(
         knowledge_service=knowledge_service,
         interactive_workers=active_settings.queue_interactive_workers,
         knowledge_workers=active_settings.queue_knowledge_workers,
+        operations_workers=active_settings.queue_operations_workers,
+        operational_issue_service=operational_issue_service,
         poll_seconds=active_settings.queue_poll_seconds,
         heartbeat_seconds=active_settings.queue_heartbeat_seconds,
         shutdown_seconds=active_settings.queue_shutdown_seconds,
@@ -192,6 +205,33 @@ def create_app(
     application.state.queue_service = queue_service
     application.state.queue_notifier = queue_notifier
     application.state.queue_coordinator = queue_coordinator
+    application.state.operational_issue_service = operational_issue_service
+
+    @application.middleware("http")
+    async def capture_unhandled_api_failure(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as error:
+            project = next(iter(project_registry.list()), None)
+            if project is not None:
+                try:
+                    await asyncio.to_thread(
+                        operational_issue_service.capture,
+                        project_reference=project.id,
+                        source_type="api",
+                        source_id=request.url.path,
+                        title=f"Unhandled API failure: {request.method} {request.url.path}",
+                        error_type=type(error).__name__,
+                        error_message=str(error),
+                        severity="high",
+                        evidence={
+                            "method": request.method,
+                            "path": request.url.path,
+                        },
+                    )
+                except Exception:
+                    pass
+            raise
     application.add_middleware(
         CORSMiddleware,
         allow_origins=[

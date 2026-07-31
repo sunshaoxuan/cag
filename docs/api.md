@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.20.0`
+Current version: `0.21.0`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.20.0"
+    "version": "0.21.0"
 }
 ```
 
@@ -108,6 +108,8 @@ Interactive Agent tasks and knowledge ingestions use separate worker pools.
 Tasks in the same Conversation are claimed in creation order. Tasks belonging
 to different Conversations can run concurrently.
 
+The self-operations issue center uses a third `operations` Worker pool.
+
 Example:
 
 ```powershell
@@ -117,6 +119,78 @@ $status.queues
 $status.workers
 $status.redis
 ```
+
+## Self-operations issue center
+
+Every issue and occurrence has an independent physical UUID. A stable
+Project-scoped fingerprint groups repeated failures while
+`external_event_id` makes supervisor and connector replay idempotent. Evidence
+is sanitized before persistence.
+
+### Intake and query
+
+* `POST /api/v1/operations/issues/intake`
+* `GET /api/v1/operations/dashboard`
+* `GET /api/v1/operations/issues`
+* `GET /api/v1/operations/issues/{issue_id}`
+
+Example:
+
+```json
+{
+  "project_reference": "cag",
+  "source_type": "knowledge_ingestion",
+  "source_id": "2053dbe5-3ba7-4125-beea-91d5678f7317",
+  "title": "Network share authentication failed",
+  "error_type": "CredentialFailure",
+  "error_message": "Authentication failed",
+  "severity": "high",
+  "external_event_id": "upds-20260731-001",
+  "event_type": "failure",
+  "evidence": {
+    "knowledge_source_id": "c4837509-0c4c-4689-bb34-e30a1138da05"
+  }
+}
+```
+
+The intake response is HTTP 202. A new or reopened issue enters the
+`operations` queue. The local Codex runtime produces a boundary decision,
+versioned plan and independent Review in read-only isolated workspaces.
+
+### Approval and implementation
+
+* `POST /api/v1/operations/issues/{issue_id}/approve`
+* `POST /api/v1/operations/issues/{issue_id}/reject`
+* `POST /api/v1/operations/issues/{issue_id}/implementations`
+* `POST /api/v1/operations/bulk/implementations`
+
+Approval request:
+
+```json
+{
+  "resolved_by": "gateway-admin",
+  "note": "批准隔离分支实施，并执行规模化检索回归测试"
+}
+```
+
+Approved CAG-internal issues create a standard Task with runtime profile
+`self-improvement-candidate`, balanced Harness and a
+`codex/improvement/<issue-code>` branch. The task can commit locally and cannot
+push or merge through this API.
+
+Credential and external dependency issues move to `waiting_external`.
+Administrators record manual or batch changes with summary, optional branch,
+commit hashes and validation evidence. This queues an independent evaluation.
+
+### Evaluation and continuation
+
+* `POST /api/v1/operations/issues/{issue_id}/evaluations`
+* `POST /api/v1/operations/issues/{issue_id}/reopen`
+
+AI evaluation replays the original evidence and checks validation, regression,
+performance, security, migration and rollback readiness. Passing evaluation
+closes the issue. Failed evaluation queues another triage cycle with all prior
+artifacts and events preserved.
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
 * `POST /api/v1/knowledge/search`
 * `GET /api/v1/memory-candidates`

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.20.0"
+APP_VERSION = "0.21.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     queue_redis_channel_prefix: str = "cag:queue"
     queue_interactive_workers: int = Field(default=2, ge=1, le=32)
     queue_knowledge_workers: int = Field(default=1, ge=1, le=8)
+    queue_operations_workers: int = Field(default=1, ge=1, le=8)
     queue_poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
     queue_lease_seconds: int = Field(default=120, ge=30, le=3_600)
     queue_heartbeat_seconds: int = Field(default=10, ge=1, le=300)

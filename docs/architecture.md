@@ -82,6 +82,28 @@ Global audit SSE
 External listeners and web monitor
 ```
 
+The self-operations path runs beside the Task and knowledge paths:
+
+```text
+Task, ingestion, API, supervisor or connector failure
+  |
+Operational issue intake and immutable occurrence
+  |
+PostgreSQL operations queue and Redis wake-up
+  |
+Read-only AI boundary decision and improvement plan
+  |
+Independent AI Review
+  |
+Administrator approval
+  |
+Internal improvement Task or recorded external fix
+  |
+Independent replay evaluation
+  |
+Close or submit the same issue into the next cycle
+```
+
 ## 4. Current components
 
 ### API
@@ -101,6 +123,37 @@ client, caller request ID, source, request hash and optional idempotency key.
 ### Task executor
 
 The executor changes a task from `queued` to `preparing`, creates its isolated Git workspace, records the resolved commit, moves to `running`, invokes the selected runtime, stores every emitted event in sequence, and closes the task as `completed` or `failed`.
+
+Approved internal operational issues add a controlled
+`codex/improvement/<issue-code>` branch inside the isolated task workspace.
+The runtime receives instructions to test and commit locally. It cannot push or
+merge the branch through the issue workflow.
+
+### Self-operations issue center
+
+`OperationalIssueService` accepts sanitized failure evidence and computes a
+stable Project-scoped fingerprint. Repeated failures increment the occurrence
+count while every occurrence retains its own physical ID, event ID, evidence
+and timestamp.
+
+The `operations` queue has an independent Worker pool. Triage runs the local
+ChatGPT-authenticated Codex runtime twice in read-only mode. The first run
+classifies the boundary and drafts an improvement plan. The second run performs
+an independent architecture, security, migration and regression Review.
+Versioned artifacts and the complete event timeline remain visible before an
+administrator decides.
+
+Internal approval creates a standard durable Task with runtime profile
+`self-improvement-candidate` and balanced Harness Review. External dependency
+and credential issues wait for administrator evidence. Both paths enter the
+same independent evaluation stage. Passing evaluation closes the issue.
+Failed evaluation resets the issue to detected and queues the next planning
+cycle.
+
+The boundary taxonomy is `cag_internal`, `external_dependency`,
+`credential_or_authorization` and `policy_or_scope`. Secret-like fields and
+values are removed before evidence persistence. An AI classification does not
+grant permissions or bypass administrator approval.
 
 ### Fake runtime
 
@@ -124,7 +177,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
-Alembic owns schema versioning through revision `20260730_0016`. SQLite is
+Alembic owns schema versioning through revision `20260731_0017`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension

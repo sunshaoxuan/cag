@@ -60,6 +60,34 @@ Monitor later task outcomes
 Rollback when acceptance regresses
 ```
 
+## Operational issue entrypoint
+
+Version 0.21.0 adds the self-operations issue center as the universal failure
+entrypoint. Task-learning signals continue to discover repeated capability
+patterns. Runtime failures first become an `OperationalIssue` with immutable
+occurrences, a responsibility boundary, an AI plan and an independent Review.
+
+The issue lifecycle is:
+
+```text
+detected
+  |
+triaging
+  |
+waiting_approval
+  |
+implementing or waiting_external
+  |
+evaluating
+  |
+closed or detected for the next cycle
+```
+
+An internal issue can create a `self-improvement-candidate` Task only after
+administrator approval. The Task runs on an isolated improvement branch and
+cannot push or merge through the issue workflow. External fixes can be recorded
+individually or in batches and receive the same evaluation gate.
+
 ## Promotion state machine
 
 ```text

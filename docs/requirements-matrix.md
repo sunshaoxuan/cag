@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.20.0 | Evidence |
+| Requirement | Status for 0.21.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -36,6 +36,13 @@ Legend:
 | Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
 | PostgreSQL plus Redis durable gateway queue | Implemented | QueueItem, QueueWorker, `FOR UPDATE SKIP LOCKED`, Redis wake, lease recovery and queue API tests |
 | Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API and recovery tests |
+| Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
+| Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
+| AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, versioned artifacts and tests |
+| Administrator improvement approval | Implemented | approval and rejection APIs, visible plan and Review findings |
+| Governed improvement branch | Implemented | approved internal issues create isolated `codex/improvement/<issue-code>` task branches |
+| Improvement re-evaluation and closure | Implemented | AI evaluation Worker, original issue evidence, pass closure and failed-cycle resubmission |
+| Visual self-operations management | Implemented | `/operations` dashboard, filters, detail, approval, external fix and timeline UI |
 | Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |

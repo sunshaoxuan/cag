@@ -14,6 +14,7 @@ $gatewayScript = Join-Path $PSScriptRoot "run-local-codex-gateway.ps1"
 $powerShellExecutable = (Get-Process -Id $PID).Path
 $logDirectory = Join-Path $repositoryRoot "workspaces\.gateway\logs"
 $logPath = Join-Path $logDirectory "gateway-supervisor.log"
+$issueSpoolPath = Join-Path $logDirectory "operational-issue-spool.jsonl"
 $maximumLogBytes = 10MB
 $retainedLogFiles = 5
 
@@ -52,6 +53,64 @@ function Write-SupervisorLog {
         -LiteralPath $logPath `
         -Value "$timestamp $Message" `
         -Encoding utf8
+}
+
+function Add-OperationalIssueSpool {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Title,
+        [Parameter(Mandatory)]
+        [string]$ErrorType,
+        [Parameter(Mandatory)]
+        [string]$ErrorMessage,
+        [hashtable]$Evidence = @{}
+    )
+
+    $payload = @{
+        project_reference = "cag"
+        source_type = "gateway_supervisor"
+        source_id = "port-$Port"
+        title = $Title
+        error_type = $ErrorType
+        error_message = $ErrorMessage
+        severity = "critical"
+        external_event_id = [guid]::NewGuid().ToString()
+        event_type = "supervisor_failure"
+        evidence = $Evidence
+    } | ConvertTo-Json -Depth 6 -Compress
+    Add-Content -LiteralPath $issueSpoolPath -Value $payload -Encoding utf8
+}
+
+function Flush-OperationalIssueSpool {
+    if (-not (Test-Path -LiteralPath $issueSpoolPath -PathType Leaf)) {
+        return
+    }
+    $pending = @(
+        Get-Content -LiteralPath $issueSpoolPath |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($pending.Count -eq 0) {
+        return
+    }
+    $remaining = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $pending) {
+        try {
+            Invoke-RestMethod `
+                -Method Post `
+                -Uri "http://127.0.0.1:$Port/api/v1/operations/issues/intake" `
+                -ContentType "application/json; charset=utf-8" `
+                -Body $line `
+                -TimeoutSec 5 | Out-Null
+        }
+        catch {
+            $remaining.Add($line)
+        }
+    }
+    [System.IO.File]::WriteAllLines(
+        $issueSpoolPath,
+        $remaining,
+        [System.Text.UTF8Encoding]::new($false)
+    )
 }
 
 function Get-GatewayListener {
@@ -125,6 +184,16 @@ while ($true) {
             Write-SupervisorLog (
                 "gateway.launcher_exited exit_code=$($launcherProcess.ExitCode)"
             )
+            if ($launcherProcess.ExitCode -ne 0) {
+                Add-OperationalIssueSpool `
+                    -Title "Gateway launcher exited" `
+                    -ErrorType "GatewayLauncherExit" `
+                    -ErrorMessage (
+                        "Gateway launcher exited with code " +
+                        $launcherProcess.ExitCode
+                    ) `
+                    -Evidence @{ exit_code = $launcherProcess.ExitCode }
+            }
             $launcherProcess.Dispose()
             $launcherProcess = $null
         }
@@ -157,6 +226,10 @@ while ($true) {
                 " "
             )
             Write-SupervisorLog "gateway.start_failed error=$safeError"
+            Add-OperationalIssueSpool `
+                -Title "Gateway start failed" `
+                -ErrorType "GatewayStartFailure" `
+                -ErrorMessage $safeError
         }
         Start-Sleep -Seconds $CheckIntervalSeconds
         continue
@@ -187,6 +260,7 @@ while ($true) {
             )
             $lastReportedState = "ready"
         }
+        Flush-OperationalIssueSpool
         Start-Sleep -Seconds $CheckIntervalSeconds
         continue
     }
@@ -204,6 +278,18 @@ while ($true) {
             "gateway.restarting pid=$($listener.OwningProcess) " +
             "reason=health_threshold"
         )
+        Add-OperationalIssueSpool `
+            -Title "Gateway health threshold exceeded" `
+            -ErrorType "GatewayHealthFailure" `
+            -ErrorMessage (
+                "Gateway readiness failed $consecutiveUnhealthyChecks " +
+                "consecutive checks and requires restart"
+            ) `
+            -Evidence @{
+                process_id = $listener.OwningProcess
+                unhealthy_checks = $consecutiveUnhealthyChecks
+                threshold = $UnhealthyThreshold
+            }
         Stop-Process -Id $listener.OwningProcess -Force
         if (
             $null -ne $launcherProcess -and
