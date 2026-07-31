@@ -129,6 +129,44 @@ export type OperationalIssueOccurrence = {
   occurred_at: string;
 };
 
+export type OperationalResolutionMode =
+  | "agent_self_improvement"
+  | "human_code_change"
+  | "external_operator_action"
+  | "mixed"
+  | "out_of_scope"
+  | "undetermined";
+
+export type OperationalDecisionBrief = {
+  problem_summary?: string;
+  impact_summary?: string;
+  root_cause_summary?: string;
+  root_cause_confidence?: number;
+  improvement_goal?: string;
+  resolution_mode?: OperationalResolutionMode;
+  resolution_mode_reason?: string;
+  resolution_mode_confidence?: number;
+  recommended_changes?: Array<{
+    area?: string;
+    change?: string;
+    reason?: string;
+  }>;
+  validation_plan?: string[];
+  rollback_plan?: string[];
+  administrator_actions?: string[];
+  review_summary?: string;
+  review_recommendation?: "approve" | "revise" | "reject";
+  blocking_findings?: Array<{
+    code?: string;
+    severity?: string;
+    title?: string;
+    finding?: string;
+    required_change?: string;
+  }>;
+  approval_conditions?: string[];
+  approval_ready?: boolean;
+};
+
 export type OperationalIssue = {
   id: string;
   project_id: string;
@@ -142,6 +180,12 @@ export type OperationalIssue = {
   severity: "low" | "medium" | "high" | "critical";
   boundary: string | null;
   boundary_confidence: number | null;
+  resolution_mode: OperationalResolutionMode | null;
+  resolution_mode_confidence: number | null;
+  resolution_mode_reason: string | null;
+  decision_brief: OperationalDecisionBrief;
+  review_recommendation: "approve" | "revise" | "reject" | null;
+  blocking_finding_count: number;
   status: string;
   occurrence_count: number;
   evidence: Record<string, unknown>;
@@ -170,6 +214,7 @@ export type OperationalDashboard = {
   by_status: Record<string, number>;
   by_severity: Record<string, number>;
   by_boundary: Record<string, number>;
+  by_resolution_mode: Record<string, number>;
 };
 
 export type OperationsAdminCredentials = {

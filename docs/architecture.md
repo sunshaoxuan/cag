@@ -140,8 +140,11 @@ The `operations` queue has an independent Worker pool. Triage runs the local
 ChatGPT-authenticated Codex runtime twice in read-only mode. The first run
 classifies the boundary and drafts an improvement plan. The second run performs
 an independent architecture, security, migration and regression Review.
-Versioned artifacts and the complete event timeline remain visible before an
-administrator decides.
+Both phases must return strict structured decisions. The durable decision brief
+separates problem summary, impact, root cause, improvement goal, implementation
+route, proposed changes, validation, rollback and Review blockers from raw
+runtime evidence. Versioned artifacts and the complete event timeline remain
+available as collapsed audit evidence.
 
 Operations mutations authenticate `X-CAG-Admin-Token` against an ignored
 service secret and record `X-CAG-Admin-Identity` as the acting principal.
@@ -158,6 +161,13 @@ The boundary taxonomy is `cag_internal`, `external_dependency`,
 `credential_or_authorization` and `policy_or_scope`. Secret-like fields and
 values are removed before evidence persistence. An AI classification does not
 grant permissions or bypass administrator approval.
+
+The implementation route taxonomy is `agent_self_improvement`,
+`human_code_change`, `external_operator_action`, `mixed`, `out_of_scope` and
+`undetermined`. A CAG internal issue can enter the governed Agent candidate
+workflow when the independent Review returns `approve` with zero blockers.
+Malformed or incomplete output, a `revise` decision, and every blocking finding
+produce `plan_revision_required`. The approval API repeats this gate.
 
 The operational timeline retains completed messages, commands, tests and
 lifecycle facts. Cumulative runtime event names ending in `.delta` remain
@@ -186,7 +196,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
-Alembic owns schema versioning through revision `20260731_0017`. SQLite is
+Alembic owns schema versioning through revision `20260731_0018`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension

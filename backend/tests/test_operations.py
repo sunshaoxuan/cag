@@ -1,8 +1,40 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import json
 import time
 
 from fastapi.testclient import TestClient
+
+from app.runtimes.fake import FakeAgentRuntime
+
+
+class ReviewDecisionRuntime(FakeAgentRuntime):
+    def __init__(self, review_summary: str) -> None:
+        super().__init__()
+        self._review_summary = review_summary
+
+    async def execute(self, **kwargs):
+        result = await super().execute(**kwargs)
+        if '"blocking_findings"' in str(kwargs["prompt"]):
+            return replace(result, summary=self._review_summary)
+        return result
+
+
+class PlanDecisionRuntime(FakeAgentRuntime):
+    def __init__(self, plan_summary: str) -> None:
+        super().__init__()
+        self._plan_summary = plan_summary
+
+    async def execute(self, **kwargs):
+        result = await super().execute(**kwargs)
+        prompt = str(kwargs["prompt"])
+        if (
+            '"resolution_mode_reason"' in prompt
+            and '"blocking_findings"' not in prompt
+        ):
+            return replace(result, summary=self._plan_summary)
+        return result
 
 
 def wait_for_issue(
@@ -339,3 +371,148 @@ def test_bulk_external_implementation_queues_evaluation(
     for issue_id in issue_ids:
         closed = wait_for_issue(client, issue_id, {"closed"})
         assert closed["evaluation_status"] == "passed"
+
+
+def test_review_blockers_require_plan_revision_and_prevent_approval(
+    app_factory,
+) -> None:
+    review = json.dumps(
+        {
+            "summary": "The plan needs one bounded correction.",
+            "root_cause_assessment": "The root cause evidence is sufficient.",
+            "recommendation": "revise",
+            "blocking_findings": [
+                {
+                    "code": "B1",
+                    "severity": "high",
+                    "title": "Missing concurrency gate",
+                    "finding": "Concurrent execution is not bounded.",
+                    "required_change": "Add a database-backed single-flight gate.",
+                }
+            ],
+            "approval_conditions": ["Resolve B1."],
+            "validation_plan": ["Run the concurrent execution test."],
+            "warnings": [],
+        }
+    )
+    with TestClient(
+        app_factory(ReviewDecisionRuntime(review)),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "review-admin",
+        },
+    ) as local_client:
+        issue = intake(
+            local_client,
+            title="Concurrent operational work",
+            error_message="Operational processing requires a concurrency gate",
+            external_event_id="review-revise-1",
+        )
+        reviewed = wait_for_issue(
+            local_client,
+            str(issue["id"]),
+            {"plan_revision_required"},
+        )
+        assert reviewed["resolution_mode"] == "agent_self_improvement"
+        assert reviewed["review_recommendation"] == "revise"
+        assert reviewed["blocking_finding_count"] == 1
+        assert reviewed["decision_brief"]["approval_ready"] is False
+        assert reviewed["decision_brief"]["blocking_findings"][0]["code"] == "B1"
+
+        approval = local_client.post(
+            f"/api/v1/operations/issues/{issue['id']}/approve",
+            json={"note": "approve despite blocker"},
+        )
+        assert approval.status_code == 409
+
+
+def test_malformed_review_fails_closed_with_visible_decision_brief(
+    app_factory,
+) -> None:
+    with TestClient(
+        app_factory(ReviewDecisionRuntime("review output without JSON")),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "review-admin",
+        },
+    ) as local_client:
+        issue = intake(
+            local_client,
+            title="Malformed reviewer output",
+            error_message="Reviewer response cannot be parsed",
+            external_event_id="review-malformed-1",
+        )
+        reviewed = wait_for_issue(
+            local_client,
+            str(issue["id"]),
+            {"plan_revision_required"},
+        )
+        assert reviewed["review_recommendation"] == "revise"
+        assert reviewed["blocking_finding_count"] == 1
+        finding = reviewed["decision_brief"]["blocking_findings"][0]
+        assert finding["code"] == "STRUCTURED_REVIEW_REQUIRED"
+
+
+def test_human_code_route_waits_for_manual_implementation(
+    app_factory,
+) -> None:
+    plan = json.dumps(
+        {
+            "problem_summary": "A privileged deployment hook requires correction.",
+            "impact_summary": "The release cannot pass its production gate.",
+            "root_cause_summary": "The hook is owned by a protected engineering path.",
+            "root_cause_confidence": 0.92,
+            "improvement_goal": "Correct the hook under human engineering control.",
+            "resolution_mode": "human_code_change",
+            "resolution_mode_reason": (
+                "The change requires direct engineering authority and supervision."
+            ),
+            "resolution_mode_confidence": 0.95,
+            "proposed_changes": [
+                {
+                    "area": "deployment hook",
+                    "change": "Apply the reviewed code correction manually.",
+                    "reason": "The protected path cannot be delegated.",
+                }
+            ],
+            "validation_plan": ["Run the protected deployment acceptance test."],
+            "rollback_plan": ["Restore the previous signed hook."],
+            "administrator_actions": ["Assign an authorized engineer."],
+            "boundary": "cag_internal",
+            "boundary_confidence": 0.96,
+        }
+    )
+    with TestClient(
+        app_factory(PlanDecisionRuntime(plan)),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "review-admin",
+        },
+    ) as local_client:
+        issue = intake(
+            local_client,
+            title="Protected deployment hook",
+            error_message="A privileged deployment hook failed validation",
+            external_event_id="human-code-route-1",
+        )
+        reviewed = wait_for_issue(
+            local_client,
+            str(issue["id"]),
+            {"waiting_approval"},
+        )
+        assert reviewed["resolution_mode"] == "human_code_change"
+        filtered = local_client.get(
+            "/api/v1/operations/issues",
+            params={"resolution_mode": "human_code_change"},
+        )
+        assert filtered.status_code == 200
+        assert [item["id"] for item in filtered.json()] == [issue["id"]]
+        dashboard = local_client.get("/api/v1/operations/dashboard").json()
+        assert dashboard["by_resolution_mode"]["human_code_change"] == 1
+        approval = local_client.post(
+            f"/api/v1/operations/issues/{issue['id']}/approve",
+            json={"note": "Assign to platform engineering"},
+        )
+        assert approval.status_code == 200
+        assert approval.json()["status"] == "waiting_external"
+        assert approval.json()["implementation_task_id"] is None

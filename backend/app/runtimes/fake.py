@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
@@ -59,8 +60,98 @@ class FakeAgentRuntime:
         )
         await self._pause()
 
+        summary = "Fake Agent Runtime completed the task deterministically."
+        if '"blocking_findings"' in prompt:
+            summary = json.dumps(
+                {
+                    "summary": (
+                        "The bounded plan is ready for administrator review."
+                    ),
+                    "root_cause_assessment": (
+                        "The plan is consistent with the supplied evidence."
+                    ),
+                    "recommendation": "approve",
+                    "blocking_findings": [],
+                    "approval_conditions": [
+                        "Administrator approves the selected execution route."
+                    ],
+                    "validation_plan": [
+                        "Run the deterministic regression validation."
+                    ],
+                    "warnings": [
+                        "This review was produced by FakeAgentRuntime."
+                    ],
+                }
+            )
+        elif '"resolution_mode_reason"' in prompt:
+            folded = prompt.rsplit("Issue evidence:", 1)[-1].casefold()
+            if any(
+                marker in folded
+                for marker in (
+                    "credential",
+                    "authentication",
+                    "password",
+                    "errno 86",
+                )
+            ):
+                boundary = "credential_or_authorization"
+                resolution_mode = "external_operator_action"
+            elif any(
+                marker in folded
+                for marker in (
+                    "external dependency",
+                    "connection timeout",
+                    "network connection",
+                )
+            ):
+                boundary = "external_dependency"
+                resolution_mode = "external_operator_action"
+            else:
+                boundary = "cag_internal"
+                resolution_mode = "agent_self_improvement"
+            summary = json.dumps(
+                {
+                    "problem_summary": (
+                        "The operational failure requires a bounded correction."
+                    ),
+                    "impact_summary": (
+                        "The affected workflow is unavailable until recovery."
+                    ),
+                    "root_cause_summary": (
+                        "Deterministic fake analysis identified the failure path."
+                    ),
+                    "root_cause_confidence": 0.9,
+                    "improvement_goal": (
+                        "Resolve the failure and prevent recurrence."
+                    ),
+                    "resolution_mode": resolution_mode,
+                    "resolution_mode_reason": (
+                        "The selected route follows the verified responsibility "
+                        "boundary."
+                    ),
+                    "resolution_mode_confidence": 0.9,
+                    "proposed_changes": [
+                        {
+                            "area": "failure path",
+                            "change": "Apply the bounded corrective change.",
+                            "reason": "The original failure must stop recurring.",
+                        }
+                    ],
+                    "validation_plan": [
+                        "Replay the original failure and verify recovery."
+                    ],
+                    "rollback_plan": [
+                        "Restore the previous verified implementation."
+                    ],
+                    "administrator_actions": [
+                        "Approve or reject the proposed execution route."
+                    ],
+                    "boundary": boundary,
+                    "boundary_confidence": 0.9,
+                }
+            )
         return RuntimeResult(
-            summary="Fake Agent Runtime completed the task deterministically.",
+            summary=summary,
             root_cause=None,
             changes=[],
             validation=[

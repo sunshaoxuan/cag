@@ -20,6 +20,7 @@ const STATUS_LABELS: Record<string, string> = {
   detected: "等待分诊",
   triaging: "AI 分诊中",
   waiting_approval: "等待审批",
+  plan_revision_required: "方案待修订",
   waiting_external: "等待外部处理",
   implementing: "改进中",
   evaluating: "再评估中",
@@ -34,6 +35,21 @@ const BOUNDARY_LABELS: Record<string, string> = {
   external_dependency: "外部依赖",
   credential_or_authorization: "凭据与授权",
   policy_or_scope: "职能边界",
+};
+
+const RESOLUTION_LABELS: Record<string, string> = {
+  agent_self_improvement: "Agent 自增益实施",
+  human_code_change: "人工代码补强",
+  external_operator_action: "人工或外部操作",
+  mixed: "Agent 与人工协作",
+  out_of_scope: "移交职责方",
+  undetermined: "实施方式待判断",
+};
+
+const REVIEW_LABELS: Record<string, string> = {
+  approve: "建议批准",
+  revise: "要求修订",
+  reject: "建议拒绝",
 };
 
 const ARTIFACT_LABELS: Record<string, string> = {
@@ -58,7 +74,9 @@ function contentSummary(content: Record<string, unknown>): string {
     content.summary ??
     content.root_cause ??
     content.recommendation;
-  return typeof value === "string" ? value : JSON.stringify(content, null, 2);
+  const text =
+    typeof value === "string" ? value : JSON.stringify(content, null, 2);
+  return text.length > 240 ? `${text.slice(0, 240)}…` : text;
 }
 
 export default function OperationsCenterPage() {
@@ -216,6 +234,10 @@ export default function OperationsCenterPage() {
       (dashboard.by_status.rejected ?? 0) -
       (dashboard.by_status.out_of_scope ?? 0)
     : 0;
+  const decisionBrief = selected?.decision_brief ?? {};
+  const recommendedChanges = decisionBrief.recommended_changes ?? [];
+  const blockingFindings = decisionBrief.blocking_findings ?? [];
+  const validationPlan = decisionBrief.validation_plan ?? [];
 
   function getAdminCredentials(): OperationsAdminCredentials {
     const identity = adminIdentity.trim();
@@ -311,6 +333,10 @@ export default function OperationsCenterPage() {
           <strong>{dashboard?.by_status.waiting_approval ?? 0}</strong>
         </article>
         <article>
+          <span>方案待修订</span>
+          <strong>{dashboard?.by_status.plan_revision_required ?? 0}</strong>
+        </article>
+        <article>
           <span>改进与评估</span>
           <strong>
             {(dashboard?.by_status.implementing ?? 0) +
@@ -388,6 +414,12 @@ export default function OperationsCenterPage() {
                     : "等待边界判断"}
                 </small>
                 <small>
+                  {issue.resolution_mode
+                    ? RESOLUTION_LABELS[issue.resolution_mode] ??
+                      issue.resolution_mode
+                    : "实施方式待判断"}
+                </small>
+                <small>
                   发生 {issue.occurrence_count} 次
                   <span aria-hidden="true"> · </span>
                   {formatDate(issue.last_seen_at)}
@@ -435,6 +467,28 @@ export default function OperationsCenterPage() {
                   <dd>{selected.approval_status}</dd>
                 </div>
                 <div>
+                  <dt>实施方式</dt>
+                  <dd>
+                    {selected.resolution_mode
+                      ? RESOLUTION_LABELS[selected.resolution_mode] ??
+                        selected.resolution_mode
+                      : "AI 判断中"}
+                    {selected.resolution_mode_confidence !== null &&
+                      ` · ${(selected.resolution_mode_confidence * 100).toFixed(0)}%`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>独立 Review</dt>
+                  <dd>
+                    {selected.review_recommendation
+                      ? REVIEW_LABELS[selected.review_recommendation] ??
+                        selected.review_recommendation
+                      : "尚未完成"}
+                    {selected.blocking_finding_count > 0 &&
+                      ` · ${selected.blocking_finding_count} 个阻断项`}
+                  </dd>
+                </div>
+                <div>
                   <dt>改进分支</dt>
                   <dd>{selected.improvement_branch ?? "尚未创建"}</dd>
                 </div>
@@ -444,6 +498,110 @@ export default function OperationsCenterPage() {
                 </div>
               </dl>
 
+              <section className="operations-decision-brief">
+                <div className="operations-section-heading">
+                  <div>
+                    <p>DECISION BRIEF</p>
+                    <h3>审核决策摘要</h3>
+                  </div>
+                  <span
+                    className={`review-recommendation review-${
+                      selected.review_recommendation ?? "pending"
+                    }`}
+                  >
+                    {selected.review_recommendation
+                      ? REVIEW_LABELS[selected.review_recommendation]
+                      : "等待 Review"}
+                  </span>
+                </div>
+
+                <div className="operations-brief-grid">
+                  <article>
+                    <span>问题归纳</span>
+                    <p>{decisionBrief.problem_summary ?? selected.summary}</p>
+                  </article>
+                  <article>
+                    <span>业务与运行影响</span>
+                    <p>
+                      {decisionBrief.impact_summary ??
+                        "AI 分析完成后生成影响摘要。"}
+                    </p>
+                  </article>
+                  <article>
+                    <span>根因判断</span>
+                    <p>
+                      {decisionBrief.root_cause_summary ??
+                        "当前证据尚未形成根因结论。"}
+                    </p>
+                  </article>
+                  <article>
+                    <span>改进目标</span>
+                    <p>
+                      {decisionBrief.improvement_goal ??
+                        "AI 分析完成后生成改进目标。"}
+                    </p>
+                  </article>
+                </div>
+
+                <div className="operations-resolution-callout">
+                  <strong>
+                    {selected.resolution_mode
+                      ? RESOLUTION_LABELS[selected.resolution_mode]
+                      : "实施方式待判断"}
+                  </strong>
+                  <p>
+                    {selected.resolution_mode_reason ??
+                      "需要更多结构化证据才能选择实施方式。"}
+                  </p>
+                </div>
+
+                {recommendedChanges.length > 0 && (
+                  <div className="operations-improvement-plan">
+                    <h4>建议改进点</h4>
+                    <ol>
+                      {recommendedChanges.map((change, index) => (
+                        <li key={`${change.area ?? "change"}-${index}`}>
+                          <strong>{change.area ?? `改进项 ${index + 1}`}</strong>
+                          <p>{change.change ?? "待补充具体变更"}</p>
+                          {change.reason && <small>{change.reason}</small>}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {blockingFindings.length > 0 && (
+                  <div className="operations-blockers">
+                    <h4>审批阻断项</h4>
+                    <ol>
+                      {blockingFindings.map((finding, index) => (
+                        <li key={`${finding.code ?? "blocker"}-${index}`}>
+                          <strong>
+                            {finding.code ?? `B${index + 1}`} ·{" "}
+                            {finding.title ?? "待修订项"}
+                          </strong>
+                          <p>{finding.finding ?? "Review 要求补充证据。"}</p>
+                          {finding.required_change && (
+                            <small>要求：{finding.required_change}</small>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {validationPlan.length > 0 && (
+                  <div className="operations-validation-plan">
+                    <h4>验收计划</h4>
+                    <ul>
+                      {validationPlan.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+
               {selected.required_human_input && (
                 <div className="operations-human-input">
                   <strong>需要管理员处理</strong>
@@ -451,34 +609,59 @@ export default function OperationsCenterPage() {
                 </div>
               )}
 
-              {selected.status === "waiting_approval" && (
-                <section className="operations-approval">
-                  <h3>改进审批</h3>
+              {selected.status === "plan_revision_required" && (
+                <section className="operations-approval operations-revision">
+                  <h3>方案需要修订</h3>
+                  <p>
+                    当前 Review 存在阻断项，审批入口保持关闭。补充证据后可重新执行
+                    AI 规划和独立 Review。
+                  </p>
                   <textarea
                     value={decisionNote}
                     onChange={(event) => setDecisionNote(event.target.value)}
-                    placeholder="填写审批意见或需要补充的改进点"
+                    placeholder="填写重新规划原因或需要补充的重点"
                   />
-                  <div>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={() => void decide("approve")}
-                      disabled={busy}
-                    >
-                      批准进入改进
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-outline"
-                      onClick={() => void decide("reject")}
-                      disabled={busy}
-                    >
-                      拒绝本轮方案
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={() => void reopen()}
+                    disabled={busy}
+                  >
+                    重新规划与 Review
+                  </button>
                 </section>
               )}
+
+              {selected.status === "waiting_approval" &&
+                selected.review_recommendation === "approve" &&
+                selected.blocking_finding_count === 0 && (
+                  <section className="operations-approval">
+                    <h3>改进审批</h3>
+                    <textarea
+                      value={decisionNote}
+                      onChange={(event) => setDecisionNote(event.target.value)}
+                      placeholder="填写审批意见或需要补充的改进点"
+                    />
+                    <div>
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => void decide("approve")}
+                        disabled={busy}
+                      >
+                        批准进入改进
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-outline"
+                        onClick={() => void decide("reject")}
+                        disabled={busy}
+                      >
+                        拒绝本轮方案
+                      </button>
+                    </div>
+                  </section>
+                )}
 
               {selected.status === "waiting_external" && (
                 <section className="operations-approval">
@@ -539,9 +722,12 @@ export default function OperationsCenterPage() {
               )}
 
               <section className="operations-artifacts">
-                <h3>方案、Review 与评估证据</h3>
+                <h3>完整证据与执行日志</h3>
+                <p className="operations-evidence-intro">
+                  上方决策摘要用于审核。以下原始材料保留审计追踪，按需展开查看。
+                </p>
                 {(selected.artifacts ?? []).map((artifact) => (
-                  <details key={artifact.id} open={artifact.artifact_type === "plan"}>
+                  <details key={artifact.id}>
                     <summary>
                       {ARTIFACT_LABELS[artifact.artifact_type] ??
                         artifact.artifact_type}
@@ -555,8 +741,11 @@ export default function OperationsCenterPage() {
                 ))}
               </section>
 
-              <section className="operations-timeline">
-                <h3>完整处理时间线</h3>
+              <details className="operations-timeline">
+                <summary>
+                  完整处理时间线
+                  <span>{selected.events?.length ?? 0} 条事件</span>
+                </summary>
                 <ol>
                   {[...(selected.events ?? [])].reverse().map((event) => (
                     <li key={event.id}>
@@ -569,7 +758,7 @@ export default function OperationsCenterPage() {
                     </li>
                   ))}
                 </ol>
-              </section>
+              </details>
             </>
           )}
         </section>

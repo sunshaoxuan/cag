@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.21.1`
+Current version: `0.22.0`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.21.1"
+    "version": "0.22.0"
 }
 ```
 
@@ -157,6 +157,58 @@ The intake response is HTTP 202. A new or reopened issue enters the
 `operations` queue. The local Codex runtime produces a boundary decision,
 versioned plan and independent Review in read-only isolated workspaces.
 
+Issue list query parameters include `status`, `severity`, `boundary`,
+`resolution_mode` and `limit`. `resolution_mode` is one of
+`agent_self_improvement`, `human_code_change`, `external_operator_action`,
+`mixed`, `out_of_scope` or `undetermined`.
+
+The issue response exposes the compact approval record separately from complete
+artifacts:
+
+```json
+{
+  "code": "OI-6B26534BF5",
+  "status": "plan_revision_required",
+  "boundary": "cag_internal",
+  "resolution_mode": "agent_self_improvement",
+  "resolution_mode_confidence": 0.91,
+  "resolution_mode_reason": "The bounded change is inside the CAG repository.",
+  "review_recommendation": "revise",
+  "blocking_finding_count": 2,
+  "decision_brief": {
+    "problem_summary": "Review evidence and approval state were inconsistent.",
+    "impact_summary": "An incomplete plan could be presented for approval.",
+    "root_cause_summary": "Free-form reports were reduced by a permissive heuristic.",
+    "improvement_goal": "Use one validated decision object for UI and API gates.",
+    "recommended_changes": [
+      {
+        "area": "operations review",
+        "change": "Parse a strict reviewer schema and fail closed.",
+        "reason": "The persisted recommendation becomes authoritative."
+      }
+    ],
+    "validation_plan": [
+      "A revise recommendation hides and rejects approval."
+    ],
+    "blocking_findings": [
+      {
+        "code": "B1",
+        "severity": "high",
+        "title": "Structured Review required",
+        "finding": "The current Review cannot be approved.",
+        "required_change": "Regenerate a valid independent Review."
+      }
+    ],
+    "approval_ready": false
+  }
+}
+```
+
+`decision_brief` is the reviewer-facing projection. `artifacts` and `events`
+retain the complete plan, Review and runtime evidence. Invalid or incomplete
+structured output, a `revise` recommendation, or any blocking finding produces
+`plan_revision_required`.
+
 ### Approval and implementation
 
 * `POST /api/v1/operations/issues/{issue_id}/approve`
@@ -184,6 +236,10 @@ Approval request:
   "note": "批准隔离分支实施，并执行规模化检索回归测试"
 }
 ```
+
+The server accepts approval only when `review_recommendation` is `approve`,
+`blocking_finding_count` is zero and `decision_brief.approval_ready` is true.
+Clients receive HTTP 409 when any gate is unmet.
 
 Approved CAG-internal issues create a standard Task with runtime profile
 `self-improvement-candidate`, balanced Harness and a

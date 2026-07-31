@@ -5,10 +5,11 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, TypeVar
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import func, select, update
 
 from app.database import Database
 from app.models import (
@@ -26,6 +27,7 @@ from app.models import (
 )
 from app.models.base import utc_now
 from app.projects.registry import ProjectRegistry
+from app.operations.schemas import OperationalPlan, OperationalReview
 from app.runtimes.base import AgentRuntime, RuntimeResult
 from app.services.task_service import TaskService
 from app.workspaces.manager import WorkspaceManager
@@ -35,6 +37,15 @@ BOUNDARY_INTERNAL = "cag_internal"
 BOUNDARY_EXTERNAL = "external_dependency"
 BOUNDARY_CREDENTIAL = "credential_or_authorization"
 BOUNDARY_SCOPE = "policy_or_scope"
+
+RESOLUTION_AGENT = "agent_self_improvement"
+RESOLUTION_HUMAN_CODE = "human_code_change"
+RESOLUTION_EXTERNAL = "external_operator_action"
+RESOLUTION_MIXED = "mixed"
+RESOLUTION_OUT_OF_SCOPE = "out_of_scope"
+RESOLUTION_UNDETERMINED = "undetermined"
+
+OperationsModel = TypeVar("OperationsModel", bound=BaseModel)
 
 SECRET_PATTERNS = (
     re.compile(r"(?i)(password|secret|token|api[_ -]?key)\s*[:=]\s*\S+"),
@@ -141,6 +152,9 @@ class OperationalIssueService:
                     issue.resolution = None
                     issue.approval_status = "not_requested"
                     issue.evaluation_status = "not_started"
+                    issue.review_recommendation = None
+                    issue.blocking_finding_count = 0
+                    issue.decision_brief = {}
 
             session.add(
                 OperationalIssueOccurrence(
@@ -223,27 +237,87 @@ class OperationalIssueService:
             prompt=(
                 "You are the CAG operational issue triage and improvement planner. "
                 "Work read-only. Classify the responsibility boundary, identify "
-                "root cause evidence, propose a bounded improvement plan, acceptance "
-                "tests, rollback, and any administrator input. Do not modify files. "
+                "root cause evidence, decide whether Agent self-improvement can "
+                "complete the code change or human engineering is required, propose "
+                "a bounded improvement plan, acceptance tests, rollback, and any "
+                "administrator input. Do not modify files. Return exactly one JSON "
+                "object matching this JSON Schema. Do not wrap the JSON in Markdown.\n"
+                f"{json.dumps(OperationalPlan.model_json_schema(), ensure_ascii=False)}\n"
                 f"Issue evidence:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}"
             ),
         )
-        boundary, confidence, required_input, allowed_actions = self._classify(
-            evidence,
-            analysis,
-        )
-        plan = {
-            "problem_statement": analysis.summary,
-            "root_cause": analysis.root_cause,
-            "proposed_changes": analysis.changes,
-            "validation": analysis.validation,
-            "rollback": analysis.next_actions,
-            "warnings": analysis.warnings,
-            "acceptance": self._default_acceptance(evidence),
-            "boundary": boundary,
-            "boundary_confidence": confidence,
-            "required_human_input": required_input,
-        }
+        try:
+            structured_plan = self._parse_runtime_model(
+                analysis,
+                OperationalPlan,
+            )
+            plan_parse_error = None
+        except ValueError as exc:
+            structured_plan = None
+            plan_parse_error = str(exc)
+
+        if structured_plan is None:
+            boundary, confidence, required_input, allowed_actions = (
+                self._classify(evidence, analysis)
+            )
+            resolution_mode = self._default_resolution_mode(boundary)
+            resolution_confidence = min(confidence, 0.5)
+            resolution_reason = (
+                "The planner output did not satisfy the decision schema. "
+                "A new structured plan is required before implementation approval."
+            )
+            plan = {
+                "structured_output_valid": False,
+                "parse_error": plan_parse_error,
+                "problem_summary": evidence["summary"],
+                "impact_summary": (
+                    f"Severity {evidence['severity']} issue observed "
+                    f"{evidence['occurrence_count']} time(s)."
+                ),
+                "root_cause_summary": (
+                    analysis.root_cause
+                    or "Root cause is not confirmed by structured evidence."
+                ),
+                "root_cause_confidence": 0.0,
+                "improvement_goal": (
+                    "Produce a valid, bounded and reviewable improvement plan."
+                ),
+                "resolution_mode": resolution_mode,
+                "resolution_mode_reason": resolution_reason,
+                "resolution_mode_confidence": resolution_confidence,
+                "proposed_changes": analysis.changes,
+                "validation_plan": analysis.validation,
+                "rollback_plan": analysis.next_actions,
+                "administrator_actions": [],
+                "boundary": boundary,
+                "boundary_confidence": confidence,
+                "raw_runtime_report": analysis.to_report(),
+            }
+        else:
+            boundary = structured_plan.boundary
+            confidence = structured_plan.boundary_confidence
+            resolution_mode = self._reconcile_resolution_mode(
+                boundary,
+                structured_plan.resolution_mode,
+            )
+            resolution_confidence = (
+                structured_plan.resolution_mode_confidence
+            )
+            resolution_reason = structured_plan.resolution_mode_reason
+            required_input = self._required_human_input(
+                boundary=boundary,
+                resolution_mode=resolution_mode,
+                administrator_actions=structured_plan.administrator_actions,
+            )
+            allowed_actions = self._actions_for_resolution(
+                boundary,
+                resolution_mode,
+            )
+            plan = {
+                "structured_output_valid": True,
+                **structured_plan.model_dump(),
+                "resolution_mode": resolution_mode,
+            }
         review = await self._run_ai(
             issue_id=issue_id,
             phase="review",
@@ -253,23 +327,100 @@ class OperationalIssueService:
                 "You are an independent CAG architecture, security, data migration, "
                 "and regression reviewer. Work read-only. Review the proposed plan, "
                 "identify blocking findings and missing acceptance tests, then give "
-                "an approval recommendation. Do not modify files. "
+                "an explicit approval recommendation. Unknown, malformed, incomplete "
+                "or contradictory evidence must result in revise. Do not modify files. "
+                "Return exactly one JSON object matching this JSON Schema. Do not wrap "
+                "the JSON in Markdown.\n"
+                f"{json.dumps(OperationalReview.model_json_schema(), ensure_ascii=False)}\n"
                 f"Evidence:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}\n"
                 f"Plan:\n{json.dumps(plan, ensure_ascii=False, indent=2)}"
             ),
         )
-        review_payload = {
-            "summary": review.summary,
-            "root_cause": review.root_cause,
-            "findings": review.changes,
-            "validation": review.validation,
-            "warnings": review.warnings,
-            "recommendation": (
-                "revise"
-                if review.root_cause and not review.validation
-                else "approve"
+        try:
+            structured_review = self._parse_runtime_model(
+                review,
+                OperationalReview,
+            )
+            review_parse_error = None
+        except ValueError as exc:
+            structured_review = None
+            review_parse_error = str(exc)
+
+        if structured_review is None:
+            review_payload = {
+                "structured_output_valid": False,
+                "parse_error": review_parse_error,
+                "summary": (
+                    "The independent review output was not structurally valid. "
+                    "The plan requires revision before approval."
+                ),
+                "root_cause_assessment": (
+                    review.root_cause
+                    or "No validated structured assessment is available."
+                ),
+                "recommendation": "revise",
+                "blocking_findings": [
+                    {
+                        "code": "STRUCTURED_REVIEW_REQUIRED",
+                        "severity": "critical",
+                        "title": "Independent review output is invalid",
+                        "finding": review_parse_error or "Malformed review output",
+                        "required_change": (
+                            "Run the independent review again and persist a valid "
+                            "decision object."
+                        ),
+                    }
+                ],
+                "approval_conditions": [],
+                "validation_plan": [],
+                "warnings": review.warnings,
+                "raw_runtime_report": review.to_report(),
+            }
+        else:
+            review_payload = {
+                "structured_output_valid": True,
+                **structured_review.model_dump(),
+            }
+        blocking_findings = list(
+            review_payload.get("blocking_findings") or []
+        )
+        recommendation = str(review_payload["recommendation"])
+        approval_ready = (
+            structured_plan is not None
+            and structured_review is not None
+            and recommendation == "approve"
+            and not blocking_findings
+            and resolution_mode
+            in {
+                RESOLUTION_AGENT,
+                RESOLUTION_HUMAN_CODE,
+                RESOLUTION_EXTERNAL,
+                RESOLUTION_MIXED,
+            }
+        )
+        decision_brief = {
+            "problem_summary": plan["problem_summary"],
+            "impact_summary": plan["impact_summary"],
+            "root_cause_summary": plan["root_cause_summary"],
+            "root_cause_confidence": plan["root_cause_confidence"],
+            "improvement_goal": plan["improvement_goal"],
+            "resolution_mode": resolution_mode,
+            "resolution_mode_reason": resolution_reason,
+            "resolution_mode_confidence": resolution_confidence,
+            "recommended_changes": plan["proposed_changes"],
+            "validation_plan": self._merge_string_lists(
+                plan["validation_plan"],
+                review_payload.get("validation_plan") or [],
             ),
-            "next_actions": review.next_actions,
+            "rollback_plan": plan["rollback_plan"],
+            "administrator_actions": plan["administrator_actions"],
+            "review_summary": review_payload["summary"],
+            "review_recommendation": recommendation,
+            "blocking_findings": blocking_findings,
+            "approval_conditions": review_payload.get(
+                "approval_conditions"
+            ) or [],
+            "approval_ready": approval_ready,
         }
         with self._database.session_factory() as session:
             issue = session.get(OperationalIssue, issue_id)
@@ -279,12 +430,21 @@ class OperationalIssueService:
             issue.boundary_confidence = confidence
             issue.required_human_input = required_input
             issue.allowed_actions = allowed_actions
-            issue.approval_status = "pending"
-            issue.status = (
-                OperationalIssueStatus.OUT_OF_SCOPE
-                if boundary == BOUNDARY_SCOPE
-                else OperationalIssueStatus.WAITING_APPROVAL
-            )
+            issue.resolution_mode = resolution_mode
+            issue.resolution_mode_confidence = resolution_confidence
+            issue.resolution_mode_reason = resolution_reason
+            issue.decision_brief = decision_brief
+            issue.review_recommendation = recommendation
+            issue.blocking_finding_count = len(blocking_findings)
+            if boundary == BOUNDARY_SCOPE and structured_plan is not None:
+                issue.approval_status = "not_requested"
+                issue.status = OperationalIssueStatus.OUT_OF_SCOPE
+            elif approval_ready:
+                issue.approval_status = "pending"
+                issue.status = OperationalIssueStatus.WAITING_APPROVAL
+            else:
+                issue.approval_status = "revision_required"
+                issue.status = OperationalIssueStatus.PLAN_REVISION_REQUIRED
             self._add_artifact(session, issue, "plan", plan, "ai-planner")
             self._add_artifact(
                 session,
@@ -300,7 +460,10 @@ class OperationalIssueService:
                 {
                     "boundary": boundary,
                     "confidence": confidence,
-                    "recommendation": review_payload["recommendation"],
+                    "recommendation": recommendation,
+                    "blocking_finding_count": len(blocking_findings),
+                    "resolution_mode": resolution_mode,
+                    "approval_ready": approval_ready,
                     "status": issue.status,
                 },
             )
@@ -421,6 +584,14 @@ class OperationalIssueService:
                 raise KeyError(issue_id)
             if issue.status != OperationalIssueStatus.WAITING_APPROVAL:
                 raise ValueError("Issue is not waiting for approval")
+            if (
+                issue.review_recommendation != "approve"
+                or issue.blocking_finding_count != 0
+                or not bool((issue.decision_brief or {}).get("approval_ready"))
+            ):
+                raise ValueError(
+                    "Independent review has not cleared this issue for approval"
+                )
             issue.approval_status = "approved"
             issue.approved_by = approved_by
             issue.approval_note = note
@@ -431,7 +602,15 @@ class OperationalIssueService:
                 "issue.approved",
                 {"approved_by": approved_by, "note": note},
             )
-            if issue.boundary in {BOUNDARY_EXTERNAL, BOUNDARY_CREDENTIAL}:
+            if (
+                issue.boundary in {BOUNDARY_EXTERNAL, BOUNDARY_CREDENTIAL}
+                or issue.resolution_mode
+                in {
+                    RESOLUTION_HUMAN_CODE,
+                    RESOLUTION_EXTERNAL,
+                    RESOLUTION_MIXED,
+                }
+            ):
                 issue.status = OperationalIssueStatus.WAITING_EXTERNAL
                 session.commit()
                 session.refresh(issue)
@@ -788,6 +967,9 @@ class OperationalIssueService:
             issue.resolution = None
             issue.approval_status = "not_requested"
             issue.evaluation_status = "not_started"
+            issue.review_recommendation = None
+            issue.blocking_finding_count = 0
+            issue.decision_brief = {}
             self._enqueue(
                 session,
                 issue,
@@ -810,6 +992,7 @@ class OperationalIssueService:
         status: str | None = None,
         severity: str | None = None,
         boundary: str | None = None,
+        resolution_mode: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
         statement = select(OperationalIssue).order_by(
@@ -821,6 +1004,10 @@ class OperationalIssueService:
             statement = statement.where(OperationalIssue.severity == severity)
         if boundary:
             statement = statement.where(OperationalIssue.boundary == boundary)
+        if resolution_mode:
+            statement = statement.where(
+                OperationalIssue.resolution_mode == resolution_mode
+            )
         with self._database.session_factory() as session:
             return [
                 self._issue_summary(issue)
@@ -882,6 +1069,12 @@ class OperationalIssueService:
                     func.count(OperationalIssue.id),
                 ).group_by(OperationalIssue.boundary)
             )
+            resolution_rows = session.execute(
+                select(
+                    OperationalIssue.resolution_mode,
+                    func.count(OperationalIssue.id),
+                ).group_by(OperationalIssue.resolution_mode)
+            )
             return {
                 "total": int(
                     session.scalar(select(func.count(OperationalIssue.id))) or 0
@@ -893,6 +1086,10 @@ class OperationalIssueService:
                 "by_boundary": {
                     str(key or "unclassified"): int(value)
                     for key, value in boundary_rows
+                },
+                "by_resolution_mode": {
+                    str(key or "undetermined"): int(value)
+                    for key, value in resolution_rows
                 },
             }
 
@@ -993,17 +1190,20 @@ class OperationalIssueService:
         event_type: str,
         data: dict[str, Any],
     ) -> OperationalIssueEvent:
-        sequence = int(
-            session.scalar(
-                select(func.max(OperationalIssueEvent.sequence)).where(
-                    OperationalIssueEvent.issue_id == issue.id
-                )
+        sequence = session.scalar(
+            update(OperationalIssue)
+            .where(OperationalIssue.id == issue.id)
+            .values(
+                event_sequence=OperationalIssue.event_sequence + 1,
             )
-            or 0
-        ) + 1
+            .returning(OperationalIssue.event_sequence)
+        )
+        if sequence is None:
+            raise RuntimeError("Operational issue event sequence is unavailable")
+        issue.event_sequence = int(sequence)
         event = OperationalIssueEvent(
             issue_id=issue.id,
-            sequence=sequence,
+            sequence=int(sequence),
             type=event_type,
             data=data,
         )
@@ -1107,6 +1307,152 @@ class OperationalIssueService:
         if value is None or isinstance(value, (bool, int, float)):
             return value
         return str(value)
+
+    @staticmethod
+    def _parse_runtime_model(
+        result: RuntimeResult,
+        model_type: type[OperationsModel],
+    ) -> OperationsModel:
+        raw = result.summary.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw, count=1)
+            raw = re.sub(r"\s*```\s*$", "", raw, count=1)
+        decoder = json.JSONDecoder()
+        candidates = [match.start() for match in re.finditer(r"\{", raw)]
+        errors: list[str] = []
+        for start in candidates:
+            try:
+                payload, _ = decoder.raw_decode(raw[start:])
+                if not isinstance(payload, dict):
+                    continue
+                return model_type.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError) as exc:
+                errors.append(str(exc))
+        detail = errors[-1] if errors else "No JSON object was found"
+        raise ValueError(
+            f"{model_type.__name__} structured output is invalid: {detail}"
+        )
+
+    @staticmethod
+    def _default_resolution_mode(boundary: str) -> str:
+        if boundary == BOUNDARY_INTERNAL:
+            return RESOLUTION_AGENT
+        if boundary in {BOUNDARY_EXTERNAL, BOUNDARY_CREDENTIAL}:
+            return RESOLUTION_EXTERNAL
+        if boundary == BOUNDARY_SCOPE:
+            return RESOLUTION_OUT_OF_SCOPE
+        return RESOLUTION_UNDETERMINED
+
+    @staticmethod
+    def _reconcile_resolution_mode(
+        boundary: str,
+        proposed_mode: str,
+    ) -> str:
+        if boundary == BOUNDARY_SCOPE:
+            return RESOLUTION_OUT_OF_SCOPE
+        if boundary in {BOUNDARY_EXTERNAL, BOUNDARY_CREDENTIAL}:
+            if proposed_mode == RESOLUTION_MIXED:
+                return RESOLUTION_MIXED
+            return RESOLUTION_EXTERNAL
+        if boundary == BOUNDARY_INTERNAL and proposed_mode in {
+            RESOLUTION_AGENT,
+            RESOLUTION_HUMAN_CODE,
+            RESOLUTION_MIXED,
+            RESOLUTION_UNDETERMINED,
+        }:
+            return proposed_mode
+        return RESOLUTION_UNDETERMINED
+
+    @staticmethod
+    def _required_human_input(
+        *,
+        boundary: str,
+        resolution_mode: str,
+        administrator_actions: list[str],
+    ) -> str | None:
+        if resolution_mode == RESOLUTION_AGENT:
+            default = (
+                "Administrator approval is required before Agent "
+                "self-improvement starts."
+            )
+        elif resolution_mode == RESOLUTION_HUMAN_CODE:
+            default = (
+                "A human engineer must implement or supervise the required "
+                "code change."
+            )
+        elif resolution_mode == RESOLUTION_EXTERNAL:
+            default = (
+                "An authorized operator or external owner must complete the "
+                "required action."
+            )
+        elif resolution_mode == RESOLUTION_MIXED:
+            default = (
+                "Agent implementation and an authorized human or external "
+                "action are both required."
+            )
+        elif boundary == BOUNDARY_SCOPE:
+            default = "A responsible owner must accept the handoff."
+        else:
+            default = "More evidence is required before selecting an execution route."
+        actions = [item.strip() for item in administrator_actions if item.strip()]
+        return " ".join([default, *actions])[:8_000]
+
+    @staticmethod
+    def _actions_for_resolution(
+        boundary: str,
+        resolution_mode: str,
+    ) -> list[str]:
+        if boundary == BOUNDARY_SCOPE:
+            return ["document_handoff"]
+        if resolution_mode == RESOLUTION_AGENT:
+            return [
+                "plan",
+                "review",
+                "request_approval",
+                "implement_in_isolated_branch",
+                "evaluate",
+                "rollback",
+            ]
+        if resolution_mode == RESOLUTION_HUMAN_CODE:
+            return [
+                "plan",
+                "review",
+                "request_approval",
+                "record_manual_implementation",
+                "evaluate",
+            ]
+        if resolution_mode == RESOLUTION_EXTERNAL:
+            return [
+                "diagnose",
+                "request_approval",
+                "retry_after_authorization",
+                "record_external_fix",
+            ]
+        if resolution_mode == RESOLUTION_MIXED:
+            return [
+                "plan",
+                "review",
+                "request_approval",
+                "implement_in_isolated_branch",
+                "record_external_fix",
+                "evaluate",
+                "rollback",
+            ]
+        return ["diagnose", "request_more_evidence", "replan"]
+
+    @staticmethod
+    def _merge_string_lists(*groups: list[Any]) -> list[str]:
+        result: list[str] = []
+        for group in groups:
+            for value in group:
+                normalized = (
+                    value.strip()
+                    if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False, sort_keys=True)
+                )
+                if normalized and normalized not in result:
+                    result.append(normalized)
+        return result
 
     @staticmethod
     def _classify(
@@ -1215,6 +1561,12 @@ class OperationalIssueService:
             "severity": issue.severity,
             "boundary": issue.boundary,
             "boundary_confidence": issue.boundary_confidence,
+            "resolution_mode": issue.resolution_mode,
+            "resolution_mode_confidence": issue.resolution_mode_confidence,
+            "resolution_mode_reason": issue.resolution_mode_reason,
+            "decision_brief": issue.decision_brief or {},
+            "review_recommendation": issue.review_recommendation,
+            "blocking_finding_count": issue.blocking_finding_count,
             "status": issue.status,
             "occurrence_count": issue.occurrence_count,
             "evidence": issue.evidence,

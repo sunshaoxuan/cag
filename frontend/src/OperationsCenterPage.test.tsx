@@ -37,6 +37,29 @@ const issue = {
   severity: "high" as const,
   boundary: "cag_internal",
   boundary_confidence: 0.94,
+  resolution_mode: "agent_self_improvement" as const,
+  resolution_mode_confidence: 0.91,
+  resolution_mode_reason: "问题位于 CAG 内部，可由受控 Agent 改进流程处理。",
+  decision_brief: {
+    problem_summary: "知识检索会在请求线程中加载全部知识分块。",
+    impact_summary: "大规模知识源会导致查询超时。",
+    root_cause_summary: "查询缺少数据库侧候选召回。",
+    improvement_goal: "将候选召回下推到 PostgreSQL 和 pgvector。",
+    recommended_changes: [
+      {
+        area: "知识检索",
+        change: "增加数据库侧混合召回",
+        reason: "缩小进入重排的候选集合",
+      },
+    ],
+    validation_plan: ["验证精确短语和语义查询", "验证大规模知识源延迟"],
+    blocking_findings: [],
+    review_summary: "方案具备实施和回滚路径。",
+    review_recommendation: "approve" as const,
+    approval_ready: true,
+  },
+  review_recommendation: "approve" as const,
+  blocking_finding_count: 0,
   status: "waiting_approval",
   occurrence_count: 3,
   evidence: {},
@@ -97,6 +120,7 @@ describe("OperationsCenterPage", () => {
       by_status: { waiting_approval: 1 },
       by_severity: { high: 1 },
       by_boundary: { cag_internal: 1 },
+      by_resolution_mode: { agent_self_improvement: 1 },
     });
     vi.mocked(listOperationalIssues).mockResolvedValue([issue]);
     vi.mocked(getOperationalIssue).mockResolvedValue(issue);
@@ -118,8 +142,18 @@ describe("OperationsCenterPage", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("知识检索阻塞 Gateway")).toBeInTheDocument();
     expect(screen.getByText("CAG 内部 · 94%")).toBeInTheDocument();
+    expect(screen.getByText("Agent 自增益实施 · 91%")).toBeInTheDocument();
+    expect(screen.getByText("审核决策摘要")).toBeInTheDocument();
+    expect(screen.getByText("建议改进点")).toBeInTheDocument();
+    expect(screen.getByText("增加数据库侧混合召回")).toBeInTheDocument();
     expect(screen.getByText("AI 改进方案")).toBeInTheDocument();
     expect(screen.getByText("独立 AI Review")).toBeInTheDocument();
+    const timeline = screen
+      .getByText("完整处理时间线")
+      .closest("details");
+    expect(timeline).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("完整处理时间线"));
+    expect(timeline).toHaveAttribute("open");
     expect(screen.getByText("issue.detected")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("填写审批意见或需要补充的改进点"), {

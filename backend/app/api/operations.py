@@ -61,6 +61,7 @@ def list_issues(
     status: str | None = None,
     severity: str | None = None,
     boundary: str | None = None,
+    resolution_mode: str | None = None,
     limit: int = Query(default=200, ge=1, le=1_000),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
@@ -68,6 +69,7 @@ def list_issues(
         status=status,
         severity=severity,
         boundary=boundary,
+        resolution_mode=resolution_mode,
         limit=limit,
     )
 

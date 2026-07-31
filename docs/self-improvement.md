@@ -62,7 +62,7 @@ Rollback when acceptance regresses
 
 ## Operational issue entrypoint
 
-Version 0.21.1 adds the self-operations issue center as the universal failure
+Version 0.22.0 uses the self-operations issue center as the universal failure
 entrypoint. Task-learning signals continue to discover repeated capability
 patterns. Runtime failures first become an `OperationalIssue` with immutable
 occurrences, a responsibility boundary, an AI plan and an independent Review.
@@ -74,7 +74,7 @@ detected
   |
 triaging
   |
-waiting_approval
+waiting_approval or plan_revision_required
   |
 implementing or waiting_external
   |
@@ -91,6 +91,21 @@ individually or in batches and receive the same evaluation gate.
 Administrator state transitions require a configured operations token and an
 authenticated identity header. Runtime token deltas remain transient while
 completed messages, tool activity and lifecycle evidence remain durable.
+
+The planner also classifies the implementation route:
+
+* `agent_self_improvement` for a bounded CAG change that the governed candidate
+  workflow can implement after approval;
+* `human_code_change` when direct engineering judgment or authority is needed;
+* `external_operator_action` for credentials, infrastructure or external
+  ownership;
+* `mixed`, `out_of_scope` and `undetermined` for the remaining governed cases.
+
+The issue detail stores a compact decision brief for administrators. Raw plans,
+Reviews, command output and timeline events remain complete audit evidence.
+They stay collapsed in the management screen. A malformed plan or Review,
+`revise`, or any blocking finding produces `plan_revision_required` and keeps
+the approval endpoint closed.
 
 ## Promotion state machine
 

@@ -91,6 +91,19 @@ def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
         if column["name"] == "file_size"
     )
     assert str(rejection_file_size["type"]).upper() == "BIGINT"
+    operational_issue_columns = {
+        column["name"]
+        for column in inspector.get_columns("operational_issues")
+    }
+    assert {
+        "resolution_mode",
+        "resolution_mode_confidence",
+        "resolution_mode_reason",
+        "decision_brief",
+        "review_recommendation",
+        "blocking_finding_count",
+        "event_sequence",
+    } <= operational_issue_columns
 
     command.downgrade(config, "20260730_0015")
     generation_downgraded = inspect(create_engine(database_url))

@@ -20,6 +20,7 @@ class OperationalIssueStatus:
     DETECTED = "detected"
     TRIAGING = "triaging"
     WAITING_APPROVAL = "waiting_approval"
+    PLAN_REVISION_REQUIRED = "plan_revision_required"
     WAITING_EXTERNAL = "waiting_external"
     IMPLEMENTING = "implementing"
     EVALUATING = "evaluating"
@@ -32,6 +33,7 @@ class OperationalIssueStatus:
         DETECTED,
         TRIAGING,
         WAITING_APPROVAL,
+        PLAN_REVISION_REQUIRED,
         WAITING_EXTERNAL,
         IMPLEMENTING,
         EVALUATING,
@@ -74,6 +76,27 @@ class OperationalIssue(PhysicalIdMixin, Base):
     severity: Mapped[str] = mapped_column(String(32), default="medium", index=True)
     boundary: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     boundary_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolution_mode: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    resolution_mode_confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    resolution_mode_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    decision_brief: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    review_recommendation: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+    blocking_finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    event_sequence: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(
         String(32),
         default=OperationalIssueStatus.DETECTED,

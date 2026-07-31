@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.21.1 development deployment
+## 0.22.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -36,6 +36,8 @@ and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
 console, API audit monitor, enterprise knowledge, capability governance and the
 self-operations issue center.
 The issue list and evidence remain readable for operations visibility.
+The primary issue detail is a structured decision brief. Complete runtime
+artifacts and event history remain available as collapsed audit evidence.
 Approval, rejection, manual implementation, manual evaluation and reopen calls
 require `X-CAG-Admin-Token` and `X-CAG-Admin-Identity`. The management page
 keeps these values in browser session storage and clears them when the browser
@@ -207,7 +209,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260731_0017` and then
+The normal Windows launcher applies Alembic revision `20260731_0018` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

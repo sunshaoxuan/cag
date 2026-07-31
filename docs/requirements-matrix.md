@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.21.1 | Evidence |
+| Requirement | Status for 0.22.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -39,12 +39,14 @@ Legend:
 | Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, versioned artifacts and tests |
+| Structured operational decision brief | Implemented | strict planner and reviewer schemas, resolution mode, root cause, proposed changes, blockers, validation and rollback |
+| Fail-closed operational approval | Implemented | malformed, incomplete, revise or blocked Reviews enter `plan_revision_required`; approval repeats the gate server-side |
 | Administrator improvement approval | Implemented | approval and rejection APIs, visible plan and Review findings |
 | Authenticated operations administration | Implemented | constant-time administrator token validation, authenticated identity audit and session-scoped UI credentials |
 | Bounded operational AI timeline | Implemented | completed runtime evidence is durable; cumulative `*.delta` events are excluded with regression coverage |
 | Governed improvement branch | Implemented | approved internal issues create isolated `codex/improvement/<issue-code>` task branches |
 | Improvement re-evaluation and closure | Implemented | AI evaluation Worker, original issue evidence, pass closure and failed-cycle resubmission |
-| Visual self-operations management | Implemented | `/operations` dashboard, filters, detail, approval, external fix and timeline UI |
+| Visual self-operations management | Implemented | `/operations` decision brief, resolution classification, improvement and blocker lists, approval, external fix and collapsed evidence UI |
 | Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
