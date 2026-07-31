@@ -1,5 +1,10 @@
 # Evidence index
 
+## Version 0.21.1
+
+* `docs/evidence/self-operations-hardening-0.21.1/`
+* `docs/evidence/self-operations-hardening-0.21.1/screenshots/operations-admin-auth.png`
+
 ## Version 0.21.0
 
 * `docs/evidence/self-operations-0.21.0/`

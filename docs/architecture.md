@@ -143,6 +143,10 @@ an independent architecture, security, migration and regression Review.
 Versioned artifacts and the complete event timeline remain visible before an
 administrator decides.
 
+Operations mutations authenticate `X-CAG-Admin-Token` against an ignored
+service secret and record `X-CAG-Admin-Identity` as the acting principal.
+Request bodies cannot select the audited administrator identity.
+
 Internal approval creates a standard durable Task with runtime profile
 `self-improvement-candidate` and balanced Harness Review. External dependency
 and credential issues wait for administrator evidence. Both paths enter the
@@ -154,6 +158,11 @@ The boundary taxonomy is `cag_internal`, `external_dependency`,
 `credential_or_authorization` and `policy_or_scope`. Secret-like fields and
 values are removed before evidence persistence. An AI classification does not
 grant permissions or bypass administrator approval.
+
+The operational timeline retains completed messages, commands, tests and
+lifecycle facts. Cumulative runtime event names ending in `.delta` remain
+transient and are excluded from this ledger. Task and Conversation SSE keep
+their existing durable delta contract for reconnectable user conversations.
 
 ### Fake runtime
 

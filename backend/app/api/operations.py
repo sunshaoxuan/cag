@@ -3,7 +3,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.dependencies import get_operational_issue_service
+from app.api.dependencies import (
+    get_operational_issue_service,
+    require_operations_admin,
+)
 from app.operations.service import OperationalIssueService
 
 
@@ -25,17 +28,14 @@ class IssueIntakeRequest(BaseModel):
 
 
 class ApprovalDecisionRequest(BaseModel):
-    resolved_by: str = Field(min_length=2, max_length=128)
     note: str | None = Field(default=None, max_length=4_000)
 
 
 class RejectionRequest(BaseModel):
-    resolved_by: str = Field(min_length=2, max_length=128)
     note: str = Field(min_length=3, max_length=4_000)
 
 
 class ManualImplementationRequest(BaseModel):
-    implemented_by: str = Field(min_length=2, max_length=128)
     summary: str = Field(min_length=3, max_length=20_000)
     branch: str | None = Field(default=None, max_length=255)
     commits: list[str] = Field(default_factory=list, max_length=500)
@@ -47,14 +47,12 @@ class BulkImplementationRequest(ManualImplementationRequest):
 
 
 class ManualEvaluationRequest(BaseModel):
-    evaluated_by: str = Field(min_length=2, max_length=128)
     passed: bool
     summary: str = Field(min_length=3, max_length=20_000)
     metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReopenRequest(BaseModel):
-    reopened_by: str = Field(min_length=2, max_length=128)
     reason: str = Field(min_length=3, max_length=4_000)
 
 
@@ -109,12 +107,13 @@ def get_issue(
 def approve_issue(
     issue_id: str,
     request: ApprovalDecisionRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
         return service.approve(
             issue_id,
-            approved_by=request.resolved_by,
+            approved_by=admin_identity,
             note=request.note,
         )
     except KeyError as exc:
@@ -127,12 +126,13 @@ def approve_issue(
 def reject_issue(
     issue_id: str,
     request: RejectionRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
         return service.reject(
             issue_id,
-            resolved_by=request.resolved_by,
+            resolved_by=admin_identity,
             note=request.note,
         )
     except KeyError as exc:
@@ -145,12 +145,14 @@ def reject_issue(
 def record_implementation(
     issue_id: str,
     request: ManualImplementationRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
         return service.record_manual_implementation(
             issue_id,
             **request.model_dump(),
+            implemented_by=admin_identity,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
@@ -161,9 +163,11 @@ def record_implementation(
 @router.post("/bulk/implementations")
 def record_bulk_implementations(
     request: BulkImplementationRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     payload = request.model_dump(exclude={"issue_ids"})
+    payload["implemented_by"] = admin_identity
     results = []
     for issue_id in request.issue_ids:
         try:
@@ -184,12 +188,14 @@ def record_bulk_implementations(
 def record_evaluation(
     issue_id: str,
     request: ManualEvaluationRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
         return service.record_manual_evaluation(
             issue_id,
             **request.model_dump(),
+            evaluated_by=admin_identity,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
@@ -199,9 +205,14 @@ def record_evaluation(
 def reopen_issue(
     issue_id: str,
     request: ReopenRequest,
+    admin_identity: str = Depends(require_operations_admin),
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.reopen(issue_id, **request.model_dump())
+        return service.reopen(
+            issue_id,
+            **request.model_dump(),
+            reopened_by=admin_identity,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc

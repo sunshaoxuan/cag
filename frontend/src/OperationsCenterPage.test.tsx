@@ -125,12 +125,22 @@ describe("OperationsCenterPage", () => {
     fireEvent.change(screen.getByPlaceholderText("填写审批意见或需要补充的改进点"), {
       target: { value: "批准隔离分支实施" },
     });
+    fireEvent.change(screen.getByPlaceholderText("管理员身份"), {
+      target: { value: "security-admin" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("管理员令牌"), {
+      target: { value: "session-secret" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "批准进入改进" }));
 
     await waitFor(() => {
       expect(approveOperationalIssue).toHaveBeenCalledWith(
         issue.id,
         "批准隔离分支实施",
+        {
+          identity: "security-admin",
+          token: "session-secret",
+        },
       );
     });
   });

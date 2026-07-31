@@ -10,7 +10,7 @@ tenant:
 product:
   code: cag
   name: One Agent Gateway
-  version: "0.21.0"
+  version: "0.21.1"
 
 knowledge:
   enabled: true

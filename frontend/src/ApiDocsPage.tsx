@@ -130,12 +130,12 @@ progress.addEventListener("knowledge.collection.progress", (message) => {
     language: "PowerShell",
     code: [
       "$approval = @{",
-      '  resolved_by = "gateway-admin"',
       '  note = "批准隔离分支实施并执行回归测试"',
       "} | ConvertTo-Json",
       "Invoke-RestMethod `",
       "  -Method Post `",
       '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/approve" `',
+      '  -Headers @{"X-CAG-Admin-Token" = $env:CAG_OPERATIONS_ADMIN_TOKEN; "X-CAG-Admin-Identity" = "gateway-admin"} `',
       "  -ContentType 'application/json; charset=utf-8' `",
       "  -Body $approval",
     ].join("\n"),

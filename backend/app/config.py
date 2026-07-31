@@ -1,12 +1,12 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.21.0"
+APP_VERSION = "0.21.1"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     harness_agent_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
     approval_timeout_seconds: int = Field(default=300, ge=1, le=3_600)
     self_improvement_root: Path | None = None
+    operations_admin_token: SecretStr | None = None
     knowledge_enabled: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_embedding_model: str = "qwen3-embedding:8b"

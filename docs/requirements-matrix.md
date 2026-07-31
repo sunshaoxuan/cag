@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.21.0 | Evidence |
+| Requirement | Status for 0.21.1 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -40,6 +40,8 @@ Legend:
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, versioned artifacts and tests |
 | Administrator improvement approval | Implemented | approval and rejection APIs, visible plan and Review findings |
+| Authenticated operations administration | Implemented | constant-time administrator token validation, authenticated identity audit and session-scoped UI credentials |
+| Bounded operational AI timeline | Implemented | completed runtime evidence is durable; cumulative `*.delta` events are excluded with regression coverage |
 | Governed improvement branch | Implemented | approved internal issues create isolated `codex/improvement/<issue-code>` task branches |
 | Improvement re-evaluation and closure | Implemented | AI evaluation Worker, original issue evidence, pass closure and failed-cycle resubmission |
 | Visual self-operations management | Implemented | `/operations` dashboard, filters, detail, approval, external fix and timeline UI |

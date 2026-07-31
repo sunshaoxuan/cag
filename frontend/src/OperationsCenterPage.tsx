@@ -5,6 +5,7 @@ import {
   getOperationalDashboard,
   getOperationalIssue,
   listOperationalIssues,
+  OperationsAdminCredentials,
   OperationalDashboard,
   OperationalIssue,
   recordOperationalImplementation,
@@ -12,6 +13,8 @@ import {
   reopenOperationalIssue,
 } from "./api";
 
+const ADMIN_IDENTITY_KEY = "cag.operations.admin.identity";
+const ADMIN_TOKEN_KEY = "cag.operations.admin.token";
 
 const STATUS_LABELS: Record<string, string> = {
   detected: "等待分诊",
@@ -69,6 +72,12 @@ export default function OperationsCenterPage() {
   const [implementationSummary, setImplementationSummary] = useState("");
   const [implementationBranch, setImplementationBranch] = useState("");
   const [implementationCommits, setImplementationCommits] = useState("");
+  const [adminIdentity, setAdminIdentity] = useState(
+    () => window.sessionStorage.getItem(ADMIN_IDENTITY_KEY) ?? "",
+  );
+  const [adminToken, setAdminToken] = useState(
+    () => window.sessionStorage.getItem(ADMIN_TOKEN_KEY) ?? "",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -131,12 +140,18 @@ export default function OperationsCenterPage() {
     if (!selected) return;
     setBusy(true);
     try {
+      const credentials = getAdminCredentials();
       const updated =
         action === "approve"
-          ? await approveOperationalIssue(selected.id, decisionNote)
+          ? await approveOperationalIssue(
+              selected.id,
+              decisionNote,
+              credentials,
+            )
           : await rejectOperationalIssue(
               selected.id,
               decisionNote || "管理员拒绝本轮改进方案",
+              credentials,
             );
       setSelected(updated);
       setDecisionNote("");
@@ -152,14 +167,18 @@ export default function OperationsCenterPage() {
     if (!selected || !implementationSummary.trim()) return;
     setBusy(true);
     try {
-      const updated = await recordOperationalImplementation(selected.id, {
-        summary: implementationSummary.trim(),
-        branch: implementationBranch.trim() || null,
-        commits: implementationCommits
-          .split(/[\s,]+/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-      });
+      const updated = await recordOperationalImplementation(
+        selected.id,
+        {
+          summary: implementationSummary.trim(),
+          branch: implementationBranch.trim() || null,
+          commits: implementationCommits
+            .split(/[\s,]+/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+        },
+        getAdminCredentials(),
+      );
       setSelected(updated);
       setImplementationSummary("");
       setImplementationBranch("");
@@ -179,6 +198,7 @@ export default function OperationsCenterPage() {
       const updated = await reopenOperationalIssue(
         selected.id,
         decisionNote || "管理员要求重新评估",
+        getAdminCredentials(),
       );
       setSelected(updated);
       setDecisionNote("");
@@ -197,6 +217,33 @@ export default function OperationsCenterPage() {
       (dashboard.by_status.out_of_scope ?? 0)
     : 0;
 
+  function getAdminCredentials(): OperationsAdminCredentials {
+    const identity = adminIdentity.trim();
+    const token = adminToken.trim();
+    if (identity.length < 2 || !token) {
+      throw new Error("请先填写管理员身份和令牌");
+    }
+    return { identity, token };
+  }
+
+  function saveAdminCredentials() {
+    try {
+      const credentials = getAdminCredentials();
+      window.sessionStorage.setItem(ADMIN_IDENTITY_KEY, credentials.identity);
+      window.sessionStorage.setItem(ADMIN_TOKEN_KEY, credentials.token);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "管理员凭据无效");
+    }
+  }
+
+  function clearAdminCredentials() {
+    window.sessionStorage.removeItem(ADMIN_IDENTITY_KEY);
+    window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    setAdminIdentity("");
+    setAdminToken("");
+  }
+
   return (
     <>
       <section className="page-intro operations-intro">
@@ -212,6 +259,46 @@ export default function OperationsCenterPage() {
           <span>处理中问题</span>
           <strong>{activeCount}</strong>
         </div>
+      </section>
+
+      <section className="operations-admin-access" aria-label="管理员授权">
+        <div>
+          <strong>管理员授权</strong>
+          <span>审批和状态变更需要令牌，凭据只保存在当前浏览器会话。</span>
+        </div>
+        <label>
+          <span>管理员身份</span>
+          <input
+            value={adminIdentity}
+            onChange={(event) => setAdminIdentity(event.target.value)}
+            placeholder="管理员身份"
+            autoComplete="username"
+          />
+        </label>
+        <label>
+          <span>管理员令牌</span>
+          <input
+            type="password"
+            value={adminToken}
+            onChange={(event) => setAdminToken(event.target.value)}
+            placeholder="管理员令牌"
+            autoComplete="current-password"
+          />
+        </label>
+        <button
+          type="button"
+          className="button button-outline"
+          onClick={saveAdminCredentials}
+        >
+          保存本次会话
+        </button>
+        <button
+          type="button"
+          className="button button-ghost"
+          onClick={clearAdminCredentials}
+        >
+          清除
+        </button>
       </section>
 
       <section className="operations-dashboard" aria-label="问题中心总览">

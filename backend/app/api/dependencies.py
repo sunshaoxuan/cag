@@ -1,6 +1,7 @@
 from collections.abc import Iterator
+from secrets import compare_digest
 
-from fastapi import Request
+from fastapi import Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -63,3 +64,42 @@ def get_queue_service(request: Request) -> QueueService:
 
 def get_operational_issue_service(request: Request) -> OperationalIssueService:
     return request.app.state.operational_issue_service
+
+
+def require_operations_admin(
+    request: Request,
+    x_cag_admin_token: str | None = Header(
+        default=None,
+        alias="X-CAG-Admin-Token",
+    ),
+    x_cag_admin_identity: str | None = Header(
+        default=None,
+        alias="X-CAG-Admin-Identity",
+    ),
+) -> str:
+    settings = get_app_settings(request)
+    configured = settings.operations_admin_token
+    if configured is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Operations administrator authentication is not configured",
+        )
+    if (
+        x_cag_admin_token is None
+        or not compare_digest(
+            x_cag_admin_token,
+            configured.get_secret_value(),
+        )
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Valid operations administrator credentials are required",
+            headers={"WWW-Authenticate": "CAG-Admin-Token"},
+        )
+    identity = (x_cag_admin_identity or "").strip()
+    if len(identity) < 2 or len(identity) > 128:
+        raise HTTPException(
+            status_code=400,
+            detail="X-CAG-Admin-Identity must contain 2 to 128 characters",
+        )
+    return identity

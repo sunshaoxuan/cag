@@ -172,6 +172,11 @@ export type OperationalDashboard = {
   by_boundary: Record<string, number>;
 };
 
+export type OperationsAdminCredentials = {
+  identity: string;
+  token: string;
+};
+
 export type KnowledgeSource = {
   id: string;
   project_id: string;
@@ -593,17 +598,27 @@ export function getOperationalIssue(
   );
 }
 
+function operationsAdminHeaders(
+  credentials: OperationsAdminCredentials,
+): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-CAG-Admin-Identity": credentials.identity,
+    "X-CAG-Admin-Token": credentials.token,
+  };
+}
+
 export function approveOperationalIssue(
   issueId: string,
   note: string,
+  credentials: OperationsAdminCredentials,
 ): Promise<OperationalIssue> {
   return request<OperationalIssue>(
     `/api/v1/operations/issues/${issueId}/approve`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: operationsAdminHeaders(credentials),
       body: JSON.stringify({
-        resolved_by: "gateway-admin",
         note,
       }),
     },
@@ -613,14 +628,14 @@ export function approveOperationalIssue(
 export function rejectOperationalIssue(
   issueId: string,
   note: string,
+  credentials: OperationsAdminCredentials,
 ): Promise<OperationalIssue> {
   return request<OperationalIssue>(
     `/api/v1/operations/issues/${issueId}/reject`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: operationsAdminHeaders(credentials),
       body: JSON.stringify({
-        resolved_by: "gateway-admin",
         note,
       }),
     },
@@ -634,14 +649,14 @@ export function recordOperationalImplementation(
     branch: string | null;
     commits: string[];
   },
+  credentials: OperationsAdminCredentials,
 ): Promise<OperationalIssue> {
   return request<OperationalIssue>(
     `/api/v1/operations/issues/${issueId}/implementations`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: operationsAdminHeaders(credentials),
       body: JSON.stringify({
-        implemented_by: "gateway-admin",
         validation: [],
         ...payload,
       }),
@@ -652,14 +667,14 @@ export function recordOperationalImplementation(
 export function reopenOperationalIssue(
   issueId: string,
   reason: string,
+  credentials: OperationsAdminCredentials,
 ): Promise<OperationalIssue> {
   return request<OperationalIssue>(
     `/api/v1/operations/issues/${issueId}/reopen`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: operationsAdminHeaders(credentials),
       body: JSON.stringify({
-        reopened_by: "gateway-admin",
         reason,
       }),
     },

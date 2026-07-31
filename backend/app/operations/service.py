@@ -940,6 +940,8 @@ class OperationalIssueService:
         event_type: str,
         data: dict[str, Any],
     ) -> None:
+        if event_type.endswith(".delta"):
+            return
         with self._database.session_factory() as session:
             issue = session.get(OperationalIssue, issue_id)
             if issue is None:

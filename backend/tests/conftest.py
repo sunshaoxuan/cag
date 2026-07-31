@@ -112,6 +112,7 @@ def settings(tmp_path: Path, projects_dir: Path) -> Settings:
         queue_shutdown_seconds=2,
         auto_create_schema=True,
         self_improvement_root=tmp_path / "self-improvement",
+        operations_admin_token="test-operations-admin-token",
         projects_dir=projects_dir,
         workspace_root=tmp_path / "workspaces",
     )
@@ -127,5 +128,11 @@ def app_factory(settings: Settings):
 
 @pytest.fixture
 def client(app_factory) -> Iterator[TestClient]:
-    with TestClient(app_factory()) as test_client:
+    with TestClient(
+        app_factory(),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "test-admin",
+        },
+    ) as test_client:
         yield test_client

@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.21.0 development deployment
+## 0.21.1 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -9,6 +9,8 @@ Requirements:
 * Docker Desktop with Docker Compose.
 * Available ports 8000, 5173 and local-only 5432.
 * No OpenAI Platform API Key.
+* A high-entropy `AGENT_GATEWAY_OPERATIONS_ADMIN_TOKEN` stored in ignored
+  local configuration or the service environment.
 
 Start:
 
@@ -33,6 +35,11 @@ The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
 console, API audit monitor, enterprise knowledge, capability governance and the
 self-operations issue center.
+The issue list and evidence remain readable for operations visibility.
+Approval, rejection, manual implementation, manual evaluation and reopen calls
+require `X-CAG-Admin-Token` and `X-CAG-Admin-Identity`. The management page
+keeps these values in browser session storage and clears them when the browser
+session ends.
 The independent Code Knowledge route exposes governed structural facts without
 placing code graph controls on the source maintenance page.
 Browser API and SSE requests use the same 5173 origin. Nginx forwards `/api`

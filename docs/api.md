@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.21.0`
+Current version: `0.21.1`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.21.0"
+    "version": "0.21.1"
 }
 ```
 
@@ -164,11 +164,23 @@ versioned plan and independent Review in read-only isolated workspaces.
 * `POST /api/v1/operations/issues/{issue_id}/implementations`
 * `POST /api/v1/operations/bulk/implementations`
 
+Every mutation in this section, plus evaluation and reopen, requires:
+
+```text
+X-CAG-Admin-Token: <configured operations administrator token>
+X-CAG-Admin-Identity: <authenticated administrator identity>
+```
+
+The token is compared to `AGENT_GATEWAY_OPERATIONS_ADMIN_TOKEN` with a
+constant-time comparison. The authenticated identity header is written to the
+audit record. Administrator names supplied in a request body are ignored.
+Missing configuration returns HTTP 503 and invalid credentials return HTTP
+401.
+
 Approval request:
 
 ```json
 {
-  "resolved_by": "gateway-admin",
   "note": "批准隔离分支实施，并执行规模化检索回归测试"
 }
 ```
@@ -191,6 +203,11 @@ AI evaluation replays the original evidence and checks validation, regression,
 performance, security, migration and rollback readiness. Passing evaluation
 closes the issue. Failed evaluation queues another triage cycle with all prior
 artifacts and events preserved.
+
+AI investigation persists completed messages, commands, tests, state changes,
+plans, Reviews and evaluations. Runtime event names ending in `.delta` are
+transient delivery projections and are excluded from the durable operational
+issue timeline.
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/events`
 * `POST /api/v1/knowledge/search`
 * `GET /api/v1/memory-candidates`

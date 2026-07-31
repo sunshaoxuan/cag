@@ -114,6 +114,52 @@ def test_issue_center_deduplicates_and_closes_external_failure(
     assert closed["closed_by"] == "ai-independent-evaluator"
 
 
+def test_operations_mutations_require_authenticated_admin_and_skip_deltas(
+    client: TestClient,
+) -> None:
+    issue = intake(
+        client,
+        title="Controlled event retention validation",
+        error_message="Verify admin authentication and compact runtime events",
+        external_event_id="operations-security-event-1",
+    )
+    reviewed = wait_for_issue(
+        client,
+        str(issue["id"]),
+        {"waiting_approval"},
+    )
+
+    unauthorized = client.post(
+        f"/api/v1/operations/issues/{issue['id']}/approve",
+        json={"resolved_by": "spoofed", "note": "unauthorized"},
+        headers={
+            "X-CAG-Admin-Token": "incorrect",
+            "X-CAG-Admin-Identity": "spoofed",
+        },
+    )
+    assert unauthorized.status_code == 401
+
+    service = client.app.state.operational_issue_service
+    service._record_runtime_event(
+        str(issue["id"]),
+        "triage",
+        "agent.message.delta",
+        {"text": "large cumulative partial message"},
+    )
+    service._record_runtime_event(
+        str(issue["id"]),
+        "triage",
+        "agent.message",
+        {"text": "bounded final message"},
+    )
+    detail = client.get(
+        f"/api/v1/operations/issues/{reviewed['id']}"
+    ).json()
+    event_types = [event["type"] for event in detail["events"]]
+    assert "ai.triage.agent.message.delta" not in event_types
+    assert "ai.triage.agent.message" in event_types
+
+
 def test_internal_issue_uses_approved_improvement_branch(
     client: TestClient,
 ) -> None:

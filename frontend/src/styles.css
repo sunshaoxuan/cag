@@ -2455,6 +2455,44 @@ textarea:focus {
     linear-gradient(135deg, #fff9f4 0%, #fff 55%, #eefaf8 100%);
 }
 
+.operations-admin-access {
+  display: grid;
+  grid-template-columns:
+    minmax(210px, 1fr)
+    minmax(150px, 0.65fr)
+    minmax(180px, 0.8fr)
+    auto
+    auto;
+  gap: 12px;
+  align-items: end;
+  margin: 22px 0 0;
+  padding: 16px 18px;
+  border: 1px solid rgba(8, 191, 194, 0.28);
+  border-radius: 18px;
+  background: rgba(232, 251, 250, 0.76);
+}
+
+.operations-admin-access > div,
+.operations-admin-access label {
+  display: grid;
+  gap: 6px;
+}
+
+.operations-admin-access > div span,
+.operations-admin-access label span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.operations-admin-access input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: #fff;
+}
+
 .operations-dashboard {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2885,6 +2923,14 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .operations-admin-access {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operations-admin-access > div {
+    grid-column: 1 / -1;
+  }
+
   .operations-workspace {
     grid-template-columns: 1fr;
   }
@@ -3002,9 +3048,14 @@ textarea:focus {
   }
 
   .operations-dashboard,
+  .operations-admin-access,
   .operations-toolbar,
   .operations-facts {
     grid-template-columns: 1fr;
+  }
+
+  .operations-admin-access > div {
+    grid-column: auto;
   }
 
   .operations-detail {
