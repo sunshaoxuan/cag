@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.2`
+Current version: `0.22.3`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.2"
+    "version": "0.22.3"
 }
 ```
 
@@ -217,6 +217,10 @@ structured output, a `revise` recommendation, or any blocking finding produces
 `decision_brief.administrator_language` is `zh-CN`. Administrator-facing
 summary and decision fields use Simplified Chinese. Code identifiers, commands,
 paths, API names and error codes retain their original text.
+If the planning runtime fails before producing a plan, the issue enters
+`triage_failed` with a Chinese failure brief, one visible blocker and
+`approval_ready: false`. The original technical error remains in the root cause
+field and collapsed audit evidence.
 
 ### Approval and implementation
 

@@ -838,14 +838,94 @@ class OperationalIssueService:
             if item.issue_id is not None:
                 issue = session.get(OperationalIssue, item.issue_id)
                 if issue is not None:
+                    technical_error = self._sanitize_text(
+                        item.error or "Operational worker failed"
+                    )[:2_000]
                     issue.status = OperationalIssueStatus.TRIAGE_FAILED
-                    issue.summary = item.error or "Operational worker failed"
+                    issue.summary = technical_error
+                    issue.resolution_mode = RESOLUTION_UNDETERMINED
+                    issue.resolution_mode_confidence = 0.0
+                    issue.resolution_mode_reason = (
+                        "问题处理运行时失败，本轮未形成可审核的实施方式判断。"
+                    )
+                    issue.review_recommendation = None
+                    issue.blocking_finding_count = 1
+                    issue.approval_status = "not_requested"
+                    issue.required_human_input = (
+                        "请查看折叠日志中的问题处理失败证据，限制或修复调查"
+                        "输出后重新规划。"
+                    )
+                    issue.decision_brief = {
+                        "administrator_language": "zh-CN",
+                        "problem_summary": (
+                            "问题处理运行时在形成新方案前失败，原始技术错误"
+                            "已保留在审计证据中。"
+                        ),
+                        "impact_summary": (
+                            "本轮没有生成新的边界判断、改进方案和独立 Review，"
+                            "当前问题不能进入实施审批。"
+                        ),
+                        "root_cause_summary": (
+                            "已确认的直接原因是问题处理运行时返回错误："
+                            f"{technical_error}"
+                        ),
+                        "root_cause_confidence": 1.0,
+                        "improvement_goal": (
+                            "修复或限制本轮调查输出，重新生成结构化中文方案"
+                            "并完成独立 Review。"
+                        ),
+                        "resolution_mode": RESOLUTION_UNDETERMINED,
+                        "resolution_mode_reason": issue.resolution_mode_reason,
+                        "resolution_mode_confidence": 0.0,
+                        "recommended_changes": [
+                            {
+                                "area": "问题处理运行时",
+                                "change": (
+                                    "调查命令采用有界输出，并在运行时错误恢复后"
+                                    "重新执行规划。"
+                                ),
+                                "reason": (
+                                    "当前失败发生在方案完成前，不能沿用旧结论"
+                                    "作为本轮审核依据。"
+                                ),
+                            }
+                        ],
+                        "validation_plan": [
+                            "重新规划后确认 plan 与 Review 均通过结构化校验。",
+                            "确认所有管理员叙述字段使用简体中文。",
+                        ],
+                        "rollback_plan": [
+                            "保留上一版方案和本轮失败证据，不进入实施流程。"
+                        ],
+                        "administrator_actions": [
+                            issue.required_human_input
+                        ],
+                        "review_summary": "本轮未进入独立 Review。",
+                        "review_recommendation": None,
+                        "blocking_findings": [
+                            {
+                                "code": "RUNTIME_PROCESSING_FAILED",
+                                "severity": "high",
+                                "title": "问题处理运行时失败",
+                                "finding": (
+                                    "规划未完成，当前没有可供审批的新方案。"
+                                ),
+                                "required_change": (
+                                    "处理运行时错误并重新执行规划与独立 Review。"
+                                ),
+                            }
+                        ],
+                        "approval_conditions": [
+                            "新方案和独立 Review 完成且通过结构化中文校验。"
+                        ],
+                        "approval_ready": False,
+                    }
                     session.add(
                         OperationalIssueOccurrence(
                             issue_id=issue.id,
                             event_type="operations_worker_failure",
                             error_type="QueueWorkerError",
-                            error_message=issue.summary,
+                            error_message=technical_error,
                             evidence={"queue_item_id": item.id},
                         )
                     )

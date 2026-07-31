@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.22.2 | Evidence |
+| Requirement | Status for 0.22.3 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -40,7 +40,7 @@ Legend:
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, sequence-addressed fresh workspaces, versioned artifacts and tests |
 | Structured operational decision brief | Implemented | strict planner and reviewer schemas, resolution mode, root cause, proposed changes, blockers, validation and rollback |
-| Simplified Chinese operational decisions | Implemented | `administrator_language: zh-CN`, prompt and developer instruction constraints, Chinese field validation and fail-closed fallback |
+| Simplified Chinese operational decisions | Implemented | `administrator_language: zh-CN`, prompt and developer instruction constraints, Chinese field validation, planning failure brief and fail-closed fallback |
 | Fail-closed operational approval | Implemented | malformed, incomplete, revise or blocked Reviews enter `plan_revision_required`; approval repeats the gate server-side |
 | Administrator improvement approval | Implemented | approval and rejection APIs, visible plan and Review findings |
 | Authenticated operations administration | Implemented | constant-time administrator token validation, authenticated identity audit and session-scoped UI credentials |

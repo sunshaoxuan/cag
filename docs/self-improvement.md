@@ -62,7 +62,7 @@ Rollback when acceptance regresses
 
 ## Operational issue entrypoint
 
-Version 0.22.2 uses the self-operations issue center as the universal failure
+Version 0.22.3 uses the self-operations issue center as the universal failure
 entrypoint. Task-learning signals continue to discover repeated capability
 patterns. Runtime failures first become an `OperationalIssue` with immutable
 occurrences, a responsibility boundary, an AI plan and an independent Review.
@@ -114,6 +114,9 @@ summary fields fail the language gate and receive a Chinese revision record.
 Each planning cycle uses a new sequence-addressed read-only workspace so a
 reopened issue examines the current default branch instead of a checkout from
 an earlier plan.
+If the planning runtime itself fails, the service writes a Chinese failure
+brief, keeps the technical error as evidence, exposes a blocking finding and
+keeps approval closed.
 
 ## Promotion state machine
 

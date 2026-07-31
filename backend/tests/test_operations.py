@@ -37,6 +37,11 @@ class PlanDecisionRuntime(FakeAgentRuntime):
         return result
 
 
+class FailingOperationalRuntime(FakeAgentRuntime):
+    async def execute(self, **kwargs):
+        raise ValueError("Separator is not found, and chunk exceed the limit")
+
+
 def wait_for_issue(
     client: TestClient,
     issue_id: str,
@@ -591,3 +596,36 @@ def test_english_administrator_summary_fails_closed_to_chinese_brief(
         assert "问题中心收到" in brief["problem_summary"]
         assert "结构化简体中文校验" in brief["resolution_mode_reason"]
         assert brief["approval_ready"] is False
+
+
+def test_operational_runtime_failure_creates_chinese_decision_brief(
+    app_factory,
+) -> None:
+    with TestClient(
+        app_factory(FailingOperationalRuntime()),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "review-admin",
+        },
+    ) as local_client:
+        issue = intake(
+            local_client,
+            title="Operational output exceeded transport limit",
+            error_message="The operational planner could not finish",
+            external_event_id="operational-runtime-failure-1",
+        )
+        failed = wait_for_issue(
+            local_client,
+            str(issue["id"]),
+            {"triage_failed"},
+        )
+        brief = failed["decision_brief"]
+        assert brief["administrator_language"] == "zh-CN"
+        assert "问题处理运行时" in brief["problem_summary"]
+        assert "Separator is not found" in brief["root_cause_summary"]
+        assert brief["resolution_mode"] == "undetermined"
+        assert brief["approval_ready"] is False
+        assert brief["blocking_findings"][0]["code"] == (
+            "RUNTIME_PROCESSING_FAILED"
+        )
+        assert "请查看折叠日志" in failed["required_human_input"]

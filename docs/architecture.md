@@ -158,6 +158,10 @@ Review findings. Code identifiers, commands, paths, API names and error codes
 remain unchanged. A language validation failure enters
 `plan_revision_required`; the main decision brief uses a Chinese fallback while
 the original runtime report remains in collapsed evidence.
+An operations Worker failure before plan completion enters `triage_failed`.
+The service replaces stale decision prose with a Chinese failure brief, keeps
+the sanitized technical error in evidence, adds a blocking finding and leaves
+approval closed.
 
 Operations mutations authenticate `X-CAG-Admin-Token` against an ignored
 service secret and record `X-CAG-Admin-Identity` as the acting principal.
