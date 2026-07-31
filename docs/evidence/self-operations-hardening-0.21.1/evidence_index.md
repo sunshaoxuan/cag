@@ -15,6 +15,7 @@
 * `frontend/src/OperationsCenterPage.test.tsx`
 * `test_results.md`
 * `screenshots/operations-admin-auth.png`
+* `screenshots/production-operations.png`
 
 ## Release evidence
 

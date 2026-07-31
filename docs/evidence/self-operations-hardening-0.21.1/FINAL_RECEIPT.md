@@ -13,6 +13,12 @@ Every state-changing administrator action now requires configured credentials.
 Long-term operational issue timelines retain final evidence and exclude
 cumulative model token deltas.
 
+Version 0.21.1 is active on the managed production service. The production
+operations page passed browser and console inspection. A real network-share
+authentication failure has entered the approval queue with AI planning and
+independent review completed. It remains unchanged while awaiting an
+administrator decision.
+
 ## Secret handling
 
 The real administrator token is generated locally, stored only in the ignored
