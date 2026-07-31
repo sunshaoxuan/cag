@@ -118,6 +118,8 @@ def test_issue_center_deduplicates_and_closes_external_failure(
     assert reviewed["boundary"] == "credential_or_authorization"
     assert reviewed["occurrence_count"] == 2
     assert "plain-text-secret" not in str(reviewed)
+    assert reviewed["decision_brief"]["administrator_language"] == "zh-CN"
+    assert "故障" in reviewed["decision_brief"]["problem_summary"]
     assert {item["artifact_type"] for item in reviewed["artifacts"]} >= {
         "plan",
         "review",
@@ -378,20 +380,21 @@ def test_review_blockers_require_plan_revision_and_prevent_approval(
 ) -> None:
     review = json.dumps(
         {
-            "summary": "The plan needs one bounded correction.",
-            "root_cause_assessment": "The root cause evidence is sufficient.",
+            "administrator_language": "zh-CN",
+            "summary": "该方案需要完成一项有边界的修正。",
+            "root_cause_assessment": "现有根因证据足以支持本轮判断。",
             "recommendation": "revise",
             "blocking_findings": [
                 {
                     "code": "B1",
                     "severity": "high",
-                    "title": "Missing concurrency gate",
-                    "finding": "Concurrent execution is not bounded.",
-                    "required_change": "Add a database-backed single-flight gate.",
+                    "title": "缺少并发门禁",
+                    "finding": "当前并发执行没有明确上限。",
+                    "required_change": "增加数据库支持的单任务门禁。",
                 }
             ],
-            "approval_conditions": ["Resolve B1."],
-            "validation_plan": ["Run the concurrent execution test."],
+            "approval_conditions": ["完成 B1 修正。"],
+            "validation_plan": ["执行并发运行测试。"],
             "warnings": [],
         }
     )
@@ -449,8 +452,11 @@ def test_malformed_review_fails_closed_with_visible_decision_brief(
         )
         assert reviewed["review_recommendation"] == "revise"
         assert reviewed["blocking_finding_count"] == 1
+        assert reviewed["decision_brief"]["administrator_language"] == "zh-CN"
+        assert "简体中文" in reviewed["decision_brief"]["review_summary"]
         finding = reviewed["decision_brief"]["blocking_findings"][0]
         assert finding["code"] == "STRUCTURED_REVIEW_REQUIRED"
+        assert "审核记录要求" in finding["title"]
 
 
 def test_human_code_route_waits_for_manual_implementation(
@@ -458,26 +464,27 @@ def test_human_code_route_waits_for_manual_implementation(
 ) -> None:
     plan = json.dumps(
         {
-            "problem_summary": "A privileged deployment hook requires correction.",
-            "impact_summary": "The release cannot pass its production gate.",
-            "root_cause_summary": "The hook is owned by a protected engineering path.",
+            "administrator_language": "zh-CN",
+            "problem_summary": "受保护的部署钩子需要修正。",
+            "impact_summary": "当前发布无法通过生产门禁。",
+            "root_cause_summary": "该钩子属于受保护的工程路径。",
             "root_cause_confidence": 0.92,
-            "improvement_goal": "Correct the hook under human engineering control.",
+            "improvement_goal": "在人工工程控制下修正该钩子。",
             "resolution_mode": "human_code_change",
             "resolution_mode_reason": (
-                "The change requires direct engineering authority and supervision."
+                "该变更需要直接的工程权限和人工监督。"
             ),
             "resolution_mode_confidence": 0.95,
             "proposed_changes": [
                 {
-                    "area": "deployment hook",
-                    "change": "Apply the reviewed code correction manually.",
-                    "reason": "The protected path cannot be delegated.",
+                    "area": "部署钩子",
+                    "change": "由人工实施经过审核的代码修正。",
+                    "reason": "受保护路径不能直接委派给 Agent。",
                 }
             ],
-            "validation_plan": ["Run the protected deployment acceptance test."],
-            "rollback_plan": ["Restore the previous signed hook."],
-            "administrator_actions": ["Assign an authorized engineer."],
+            "validation_plan": ["执行受保护部署路径的验收测试。"],
+            "rollback_plan": ["恢复上一版已签名的部署钩子。"],
+            "administrator_actions": ["指派具备权限的工程师。"],
             "boundary": "cag_internal",
             "boundary_confidence": 0.96,
         }
@@ -516,3 +523,56 @@ def test_human_code_route_waits_for_manual_implementation(
         assert approval.status_code == 200
         assert approval.json()["status"] == "waiting_external"
         assert approval.json()["implementation_task_id"] is None
+
+
+def test_english_administrator_summary_fails_closed_to_chinese_brief(
+    app_factory,
+) -> None:
+    english_plan = json.dumps(
+        {
+            "administrator_language": "zh-CN",
+            "problem_summary": "The gateway health check failed.",
+            "impact_summary": "Requests may be unavailable.",
+            "root_cause_summary": "The initiating cause is unknown.",
+            "root_cause_confidence": 0.4,
+            "improvement_goal": "Collect evidence before changing behavior.",
+            "resolution_mode": "mixed",
+            "resolution_mode_reason": "Operator evidence and code analysis are required.",
+            "resolution_mode_confidence": 0.8,
+            "proposed_changes": [
+                {
+                    "area": "diagnostics",
+                    "change": "Collect bounded diagnostic evidence.",
+                    "reason": "The current evidence is incomplete.",
+                }
+            ],
+            "validation_plan": ["Verify the diagnostic record."],
+            "rollback_plan": ["Keep the previous behavior."],
+            "administrator_actions": ["Approve evidence collection."],
+            "boundary": "cag_internal",
+            "boundary_confidence": 0.8,
+        }
+    )
+    with TestClient(
+        app_factory(PlanDecisionRuntime(english_plan)),
+        headers={
+            "X-CAG-Admin-Token": "test-operations-admin-token",
+            "X-CAG-Admin-Identity": "review-admin",
+        },
+    ) as local_client:
+        issue = intake(
+            local_client,
+            title="English administrator summary",
+            error_message="The generated summary ignored the requested language",
+            external_event_id="english-summary-1",
+        )
+        reviewed = wait_for_issue(
+            local_client,
+            str(issue["id"]),
+            {"plan_revision_required"},
+        )
+        brief = reviewed["decision_brief"]
+        assert brief["administrator_language"] == "zh-CN"
+        assert "问题中心收到" in brief["problem_summary"]
+        assert "结构化简体中文校验" in brief["resolution_mode_reason"]
+        assert brief["approval_ready"] is False

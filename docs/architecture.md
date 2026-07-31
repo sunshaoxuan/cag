@@ -146,6 +146,14 @@ route, proposed changes, validation, rollback and Review blockers from raw
 runtime evidence. Versioned artifacts and the complete event timeline remain
 available as collapsed audit evidence.
 
+Administrator-facing decision fields use Simplified Chinese and declare
+`administrator_language: zh-CN`. The service validates Chinese content in the
+primary summary, root cause, goal, implementation reason, proposed changes and
+Review findings. Code identifiers, commands, paths, API names and error codes
+remain unchanged. A language validation failure enters
+`plan_revision_required`; the main decision brief uses a Chinese fallback while
+the original runtime report remains in collapsed evidence.
+
 Operations mutations authenticate `X-CAG-Admin-Token` against an ignored
 service secret and record `X-CAG-Admin-Identity` as the acting principal.
 Request bodies cannot select the audited administrator identity.

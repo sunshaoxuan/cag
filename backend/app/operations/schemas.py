@@ -31,6 +31,7 @@ class ProposedChange(StrictOperationsModel):
 
 
 class OperationalPlan(StrictOperationsModel):
+    administrator_language: Literal["zh-CN"]
     problem_summary: str = Field(min_length=1, max_length=4_000)
     impact_summary: str = Field(min_length=1, max_length=4_000)
     root_cause_summary: str = Field(min_length=1, max_length=8_000)
@@ -56,6 +57,7 @@ class BlockingFinding(StrictOperationsModel):
 
 
 class OperationalReview(StrictOperationsModel):
+    administrator_language: Literal["zh-CN"]
     summary: str = Field(min_length=1, max_length=8_000)
     root_cause_assessment: str = Field(min_length=1, max_length=8_000)
     recommendation: Literal["approve", "revise", "reject"]

@@ -64,22 +64,21 @@ class FakeAgentRuntime:
         if '"blocking_findings"' in prompt:
             summary = json.dumps(
                 {
-                    "summary": (
-                        "The bounded plan is ready for administrator review."
-                    ),
+                    "administrator_language": "zh-CN",
+                    "summary": "该方案边界明确，可以提交管理员审核。",
                     "root_cause_assessment": (
-                        "The plan is consistent with the supplied evidence."
+                        "方案中的根因判断与现有证据一致。"
                     ),
                     "recommendation": "approve",
                     "blocking_findings": [],
                     "approval_conditions": [
-                        "Administrator approves the selected execution route."
+                        "管理员确认并批准所选实施路线。"
                     ],
                     "validation_plan": [
-                        "Run the deterministic regression validation."
+                        "执行确定性的回归验证。"
                     ],
                     "warnings": [
-                        "This review was produced by FakeAgentRuntime."
+                        "本 Review 由 FakeAgentRuntime 生成。"
                     ],
                 }
             )
@@ -111,40 +110,32 @@ class FakeAgentRuntime:
                 resolution_mode = "agent_self_improvement"
             summary = json.dumps(
                 {
-                    "problem_summary": (
-                        "The operational failure requires a bounded correction."
-                    ),
-                    "impact_summary": (
-                        "The affected workflow is unavailable until recovery."
-                    ),
-                    "root_cause_summary": (
-                        "Deterministic fake analysis identified the failure path."
-                    ),
+                    "administrator_language": "zh-CN",
+                    "problem_summary": "该运行故障需要有边界的修正。",
+                    "impact_summary": "恢复完成前，受影响的流程不可用。",
+                    "root_cause_summary": "确定性测试分析已识别故障路径。",
                     "root_cause_confidence": 0.9,
-                    "improvement_goal": (
-                        "Resolve the failure and prevent recurrence."
-                    ),
+                    "improvement_goal": "解决当前故障并防止再次发生。",
                     "resolution_mode": resolution_mode,
                     "resolution_mode_reason": (
-                        "The selected route follows the verified responsibility "
-                        "boundary."
+                        "所选实施路线与已经验证的责任边界一致。"
                     ),
                     "resolution_mode_confidence": 0.9,
                     "proposed_changes": [
                         {
-                            "area": "failure path",
-                            "change": "Apply the bounded corrective change.",
-                            "reason": "The original failure must stop recurring.",
+                            "area": "故障路径",
+                            "change": "实施有边界的修正。",
+                            "reason": "需要阻止原始故障再次发生。",
                         }
                     ],
                     "validation_plan": [
-                        "Replay the original failure and verify recovery."
+                        "重放原始故障并验证恢复结果。"
                     ],
                     "rollback_plan": [
-                        "Restore the previous verified implementation."
+                        "恢复到上一版经过验证的实现。"
                     ],
                     "administrator_actions": [
-                        "Approve or reject the proposed execution route."
+                        "批准或拒绝建议的实施路线。"
                     ],
                     "boundary": boundary,
                     "boundary_confidence": 0.9,

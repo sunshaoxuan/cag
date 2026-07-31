@@ -62,7 +62,7 @@ Rollback when acceptance regresses
 
 ## Operational issue entrypoint
 
-Version 0.22.0 uses the self-operations issue center as the universal failure
+Version 0.22.1 uses the self-operations issue center as the universal failure
 entrypoint. Task-learning signals continue to discover repeated capability
 patterns. Runtime failures first become an `OperationalIssue` with immutable
 occurrences, a responsibility boundary, an AI plan and an independent Review.
@@ -106,6 +106,11 @@ Reviews, command output and timeline events remain complete audit evidence.
 They stay collapsed in the management screen. A malformed plan or Review,
 `revise`, or any blocking finding produces `plan_revision_required` and keeps
 the approval endpoint closed.
+
+Decision briefs and independent Reviews use Simplified Chinese for
+administrator-facing prose. Technical identifiers and original error evidence
+retain their source form. English-only or otherwise nonconforming primary
+summary fields fail the language gate and receive a Chinese revision record.
 
 ## Promotion state machine
 

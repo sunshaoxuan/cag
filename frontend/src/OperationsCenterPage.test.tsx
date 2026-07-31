@@ -41,6 +41,7 @@ const issue = {
   resolution_mode_confidence: 0.91,
   resolution_mode_reason: "问题位于 CAG 内部，可由受控 Agent 改进流程处理。",
   decision_brief: {
+    administrator_language: "zh-CN" as const,
     problem_summary: "知识检索会在请求线程中加载全部知识分块。",
     impact_summary: "大规模知识源会导致查询超时。",
     root_cause_summary: "查询缺少数据库侧候选召回。",

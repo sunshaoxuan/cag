@@ -138,6 +138,7 @@ export type OperationalResolutionMode =
   | "undetermined";
 
 export type OperationalDecisionBrief = {
+  administrator_language?: "zh-CN";
   problem_summary?: string;
   impact_summary?: string;
   root_cause_summary?: string;

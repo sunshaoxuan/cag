@@ -242,6 +242,10 @@ class OperationalIssueService:
                 "a bounded improvement plan, acceptance tests, rollback, and any "
                 "administrator input. Do not modify files. Return exactly one JSON "
                 "object matching this JSON Schema. Do not wrap the JSON in Markdown.\n"
+                "所有面向管理员的归纳、影响、根因、目标、实施方式说明、"
+                "改进点、验收、回滚和操作要求必须使用简体中文。代码标识、"
+                "命令、路径、接口名、错误码和必要的错误原文保持原样。"
+                "administrator_language 必须为 zh-CN。\n"
                 f"{json.dumps(OperationalPlan.model_json_schema(), ensure_ascii=False)}\n"
                 f"Issue evidence:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}"
             ),
@@ -251,6 +255,7 @@ class OperationalIssueService:
                 analysis,
                 OperationalPlan,
             )
+            self._validate_chinese_plan(structured_plan)
             plan_parse_error = None
         except ValueError as exc:
             structured_plan = None
@@ -263,31 +268,44 @@ class OperationalIssueService:
             resolution_mode = self._default_resolution_mode(boundary)
             resolution_confidence = min(confidence, 0.5)
             resolution_reason = (
-                "The planner output did not satisfy the decision schema. "
-                "A new structured plan is required before implementation approval."
+                "规划结果未通过结构化简体中文校验，需要重新生成可审核的"
+                "改进方案后才能进入实施审批。"
             )
             plan = {
+                "administrator_language": "zh-CN",
                 "structured_output_valid": False,
                 "parse_error": plan_parse_error,
-                "problem_summary": evidence["summary"],
+                "problem_summary": (
+                    f"问题中心收到一项 {evidence['severity']} 级运行异常，"
+                    f"原始摘要为：{evidence['summary']}"
+                ),
                 "impact_summary": (
-                    f"Severity {evidence['severity']} issue observed "
-                    f"{evidence['occurrence_count']} time(s)."
+                    f"该问题累计发生 {evidence['occurrence_count']} 次，"
+                    "当前影响需要结合补充证据进一步确认。"
                 ),
                 "root_cause_summary": (
-                    analysis.root_cause
-                    or "Root cause is not confirmed by structured evidence."
+                    "现有输出未形成通过结构化中文校验的根因结论。"
                 ),
                 "root_cause_confidence": 0.0,
                 "improvement_goal": (
-                    "Produce a valid, bounded and reviewable improvement plan."
+                    "生成边界明确、可执行、可验收且可回滚的中文改进方案。"
                 ),
                 "resolution_mode": resolution_mode,
                 "resolution_mode_reason": resolution_reason,
                 "resolution_mode_confidence": resolution_confidence,
-                "proposed_changes": analysis.changes,
-                "validation_plan": analysis.validation,
-                "rollback_plan": analysis.next_actions,
+                "proposed_changes": [
+                    {
+                        "area": "结构化规划",
+                        "change": "重新执行问题归纳、方案生成和独立 Review。",
+                        "reason": "本轮输出未满足中文决策记录要求。",
+                    }
+                ],
+                "validation_plan": [
+                    "确认新版决策摘要中的主要审核字段均为简体中文。"
+                ],
+                "rollback_plan": [
+                    "保留当前问题证据和历史方案版本，不进入实施流程。"
+                ],
                 "administrator_actions": [],
                 "boundary": boundary,
                 "boundary_confidence": confidence,
@@ -331,6 +349,10 @@ class OperationalIssueService:
                 "or contradictory evidence must result in revise. Do not modify files. "
                 "Return exactly one JSON object matching this JSON Schema. Do not wrap "
                 "the JSON in Markdown.\n"
+                "所有面向管理员的 Review 摘要、根因评估、阻断项、要求、"
+                "审批条件、验收计划和警告必须使用简体中文。代码标识、命令、"
+                "路径、接口名、错误码和必要的错误原文保持原样。"
+                "administrator_language 必须为 zh-CN。\n"
                 f"{json.dumps(OperationalReview.model_json_schema(), ensure_ascii=False)}\n"
                 f"Evidence:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}\n"
                 f"Plan:\n{json.dumps(plan, ensure_ascii=False, indent=2)}"
@@ -341,6 +363,7 @@ class OperationalIssueService:
                 review,
                 OperationalReview,
             )
+            self._validate_chinese_review(structured_review)
             review_parse_error = None
         except ValueError as exc:
             structured_review = None
@@ -348,32 +371,35 @@ class OperationalIssueService:
 
         if structured_review is None:
             review_payload = {
+                "administrator_language": "zh-CN",
                 "structured_output_valid": False,
                 "parse_error": review_parse_error,
                 "summary": (
-                    "The independent review output was not structurally valid. "
-                    "The plan requires revision before approval."
+                    "独立 Review 未通过结构化简体中文校验，当前方案需要"
+                    "修订后才能进入审批。"
                 ),
                 "root_cause_assessment": (
-                    review.root_cause
-                    or "No validated structured assessment is available."
+                    "当前没有通过校验的结构化根因评估。"
                 ),
                 "recommendation": "revise",
                 "blocking_findings": [
                     {
                         "code": "STRUCTURED_REVIEW_REQUIRED",
                         "severity": "critical",
-                        "title": "Independent review output is invalid",
-                        "finding": review_parse_error or "Malformed review output",
+                        "title": "独立 Review 输出不符合审核记录要求",
+                        "finding": (
+                            "Review 输出未通过结构、字段或简体中文校验，"
+                            "技术错误已保留在折叠的完整证据中。"
+                        ),
                         "required_change": (
-                            "Run the independent review again and persist a valid "
-                            "decision object."
+                            "重新执行独立 Review，并保存通过校验的中文"
+                            "决策对象。"
                         ),
                     }
                 ],
                 "approval_conditions": [],
                 "validation_plan": [],
-                "warnings": review.warnings,
+                "warnings": ["本轮 Review 输出未通过中文决策记录校验。"],
                 "raw_runtime_report": review.to_report(),
             }
         else:
@@ -399,6 +425,7 @@ class OperationalIssueService:
             }
         )
         decision_brief = {
+            "administrator_language": "zh-CN",
             "problem_summary": plan["problem_summary"],
             "impact_summary": plan["impact_summary"],
             "root_cause_summary": plan["root_cause_summary"],
@@ -1124,7 +1151,9 @@ class OperationalIssueService:
                 "This operational planning and review phase is strictly read-only. "
                 "Do not edit files, run destructive commands, create branches, commit, "
                 "push, change services, or expose secrets. Return evidence-backed "
-                "analysis through the structured runtime result."
+                "analysis through the structured runtime result. All administrator-facing "
+                "summaries and decision fields must be written in Simplified Chinese. "
+                "Keep code identifiers, commands, paths, API names and error codes unchanged."
             ),
             emit=emit,
             request_approval=None,
@@ -1334,6 +1363,71 @@ class OperationalIssueService:
         )
 
     @staticmethod
+    def _contains_chinese(value: str) -> bool:
+        return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", value))
+
+    @classmethod
+    def _validate_chinese_plan(cls, plan: OperationalPlan) -> None:
+        fields = {
+            "problem_summary": plan.problem_summary,
+            "impact_summary": plan.impact_summary,
+            "root_cause_summary": plan.root_cause_summary,
+            "improvement_goal": plan.improvement_goal,
+            "resolution_mode_reason": plan.resolution_mode_reason,
+        }
+        for index, change in enumerate(plan.proposed_changes):
+            fields[f"proposed_changes[{index}].area"] = change.area
+            fields[f"proposed_changes[{index}].change"] = change.change
+            fields[f"proposed_changes[{index}].reason"] = change.reason
+        for field_name, values in (
+            ("validation_plan", plan.validation_plan),
+            ("rollback_plan", plan.rollback_plan),
+            ("administrator_actions", plan.administrator_actions),
+        ):
+            for index, value in enumerate(values):
+                fields[f"{field_name}[{index}]"] = value
+        missing = [
+            name
+            for name, value in fields.items()
+            if not cls._contains_chinese(value)
+        ]
+        if missing:
+            raise ValueError(
+                "OperationalPlan administrator fields must use zh-CN: "
+                + ", ".join(missing)
+            )
+
+    @classmethod
+    def _validate_chinese_review(cls, review: OperationalReview) -> None:
+        fields = {
+            "summary": review.summary,
+            "root_cause_assessment": review.root_cause_assessment,
+        }
+        for index, finding in enumerate(review.blocking_findings):
+            fields[f"blocking_findings[{index}].title"] = finding.title
+            fields[f"blocking_findings[{index}].finding"] = finding.finding
+            fields[
+                f"blocking_findings[{index}].required_change"
+            ] = finding.required_change
+        for field_name, values in (
+            ("approval_conditions", review.approval_conditions),
+            ("validation_plan", review.validation_plan),
+            ("warnings", review.warnings),
+        ):
+            for index, value in enumerate(values):
+                fields[f"{field_name}[{index}]"] = value
+        missing = [
+            name
+            for name, value in fields.items()
+            if not cls._contains_chinese(value)
+        ]
+        if missing:
+            raise ValueError(
+                "OperationalReview administrator fields must use zh-CN: "
+                + ", ".join(missing)
+            )
+
+    @staticmethod
     def _default_resolution_mode(boundary: str) -> str:
         if boundary == BOUNDARY_INTERNAL:
             return RESOLUTION_AGENT
@@ -1371,29 +1465,17 @@ class OperationalIssueService:
         administrator_actions: list[str],
     ) -> str | None:
         if resolution_mode == RESOLUTION_AGENT:
-            default = (
-                "Administrator approval is required before Agent "
-                "self-improvement starts."
-            )
+            default = "Agent 自增益启动前需要管理员审批。"
         elif resolution_mode == RESOLUTION_HUMAN_CODE:
-            default = (
-                "A human engineer must implement or supervise the required "
-                "code change."
-            )
+            default = "所需代码变更必须由人工工程师实施或监督。"
         elif resolution_mode == RESOLUTION_EXTERNAL:
-            default = (
-                "An authorized operator or external owner must complete the "
-                "required action."
-            )
+            default = "所需操作必须由授权运维人员或外部责任方完成。"
         elif resolution_mode == RESOLUTION_MIXED:
-            default = (
-                "Agent implementation and an authorized human or external "
-                "action are both required."
-            )
+            default = "该方案同时需要 Agent 实施和授权人工或外部操作。"
         elif boundary == BOUNDARY_SCOPE:
-            default = "A responsible owner must accept the handoff."
+            default = "需要明确的责任方接收问题移交。"
         else:
-            default = "More evidence is required before selecting an execution route."
+            default = "选择实施路线前需要补充更多证据。"
         actions = [item.strip() for item in administrator_actions if item.strip()]
         return " ".join([default, *actions])[:8_000]
 
@@ -1484,7 +1566,7 @@ class OperationalIssueService:
             return (
                 BOUNDARY_CREDENTIAL,
                 0.96,
-                "Administrator credential or authorization action is required.",
+                "需要管理员完成凭据或授权操作。",
                 ["diagnose", "retry_after_authorization", "record_external_fix"],
             )
         if any(
@@ -1504,7 +1586,7 @@ class OperationalIssueService:
             return (
                 BOUNDARY_EXTERNAL,
                 0.88,
-                "Administrator confirmation of external service recovery is required.",
+                "需要管理员确认外部服务已经恢复。",
                 ["diagnose", "retry", "record_external_fix"],
             )
         if any(
@@ -1514,7 +1596,7 @@ class OperationalIssueService:
             return (
                 BOUNDARY_SCOPE,
                 0.95,
-                "A responsible external owner must accept the handoff.",
+                "需要外部责任方接收问题移交。",
                 ["document_handoff"],
             )
         return (

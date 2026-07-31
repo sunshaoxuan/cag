@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.0`
+Current version: `0.22.1`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.0"
+    "version": "0.22.1"
 }
 ```
 
@@ -176,27 +176,28 @@ artifacts:
   "review_recommendation": "revise",
   "blocking_finding_count": 2,
   "decision_brief": {
-    "problem_summary": "Review evidence and approval state were inconsistent.",
-    "impact_summary": "An incomplete plan could be presented for approval.",
-    "root_cause_summary": "Free-form reports were reduced by a permissive heuristic.",
-    "improvement_goal": "Use one validated decision object for UI and API gates.",
+    "administrator_language": "zh-CN",
+    "problem_summary": "Review 证据与审批状态不一致。",
+    "impact_summary": "不完整的方案可能被错误展示为可审批。",
+    "root_cause_summary": "自由格式报告被宽松规则归纳为批准。",
+    "improvement_goal": "使用同一个经过校验的决策对象驱动页面和 API 门禁。",
     "recommended_changes": [
       {
-        "area": "operations review",
-        "change": "Parse a strict reviewer schema and fail closed.",
-        "reason": "The persisted recommendation becomes authoritative."
+        "area": "问题 Review",
+        "change": "解析严格的 Review 结构，并在异常时关闭审批。",
+        "reason": "持久化的 Review 结论必须成为唯一审批依据。"
       }
     ],
     "validation_plan": [
-      "A revise recommendation hides and rejects approval."
+      "Review 要求修订时，页面隐藏审批入口，API 拒绝审批。"
     ],
     "blocking_findings": [
       {
         "code": "B1",
         "severity": "high",
-        "title": "Structured Review required",
-        "finding": "The current Review cannot be approved.",
-        "required_change": "Regenerate a valid independent Review."
+        "title": "需要结构化 Review",
+        "finding": "当前 Review 不满足审批条件。",
+        "required_change": "重新生成有效的独立 Review。"
       }
     ],
     "approval_ready": false
@@ -208,6 +209,10 @@ artifacts:
 retain the complete plan, Review and runtime evidence. Invalid or incomplete
 structured output, a `revise` recommendation, or any blocking finding produces
 `plan_revision_required`.
+
+`decision_brief.administrator_language` is `zh-CN`. Administrator-facing
+summary and decision fields use Simplified Chinese. Code identifiers, commands,
+paths, API names and error codes retain their original text.
 
 ### Approval and implementation
 
