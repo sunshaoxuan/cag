@@ -62,7 +62,7 @@ Rollback when acceptance regresses
 
 ## Operational issue entrypoint
 
-Version 0.22.3 uses the self-operations issue center as the universal failure
+Version 0.22.4 uses the self-operations issue center as the universal failure
 entrypoint. Task-learning signals continue to discover repeated capability
 patterns. Runtime failures first become an `OperationalIssue` with immutable
 occurrences, a responsibility boundary, an AI plan and an independent Review.
@@ -103,9 +103,16 @@ The planner also classifies the implementation route:
 
 The issue detail stores a compact decision brief for administrators. Raw plans,
 Reviews, command output and timeline events remain complete audit evidence.
-They stay collapsed in the management screen. A malformed plan or Review,
+Artifacts stay collapsed and timeline events load through bounded sequence
+pages in the management screen. A malformed plan or Review,
 `revise`, or any blocking finding produces `plan_revision_required` and keeps
 the approval endpoint closed.
+
+The backend publishes the current transition contract in `allowed_actions`.
+Reopen is limited to terminal, failed and revision-required states. A new cycle
+clears the prior mutable decision projection while preserving occurrences,
+artifacts and event history. Controlled release checks end in
+`validation_completed`.
 
 Decision briefs and independent Reviews use Simplified Chinese for
 administrator-facing prose. Technical identifiers and original error evidence

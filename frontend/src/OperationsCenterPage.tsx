@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   approveOperationalIssue,
   getOperationalDashboard,
   getOperationalIssue,
+  listOperationalIssueEvents,
   listOperationalIssues,
   OperationsAdminCredentials,
   OperationalDashboard,
   OperationalIssue,
+  OperationalIssueEvent,
+  OperationalIssueEventPage,
   recordOperationalImplementation,
   rejectOperationalIssue,
   reopenOperationalIssue,
@@ -26,6 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
   evaluating: "再评估中",
   closed: "已关闭",
   rejected: "已拒绝",
+  validation_completed: "验证完成",
   out_of_scope: "已移交",
   triage_failed: "分诊失败",
 };
@@ -82,6 +86,7 @@ function contentSummary(content: Record<string, unknown>): string {
 export default function OperationsCenterPage() {
   const [dashboard, setDashboard] = useState<OperationalDashboard | null>(null);
   const [issues, setIssues] = useState<OperationalIssue[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<OperationalIssue | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -97,27 +102,76 @@ export default function OperationsCenterPage() {
     () => window.sessionStorage.getItem(ADMIN_TOKEN_KEY) ?? "",
   );
   const [busy, setBusy] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [timelineEvents, setTimelineEvents] = useState<OperationalIssueEvent[]>(
+    [],
+  );
+  const [timelinePage, setTimelinePage] =
+    useState<OperationalIssueEventPage | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const selectedIdRef = useRef<string | null>(null);
+  const detailRequestRef = useRef(0);
+  const refreshRequestRef = useRef(0);
+
+  const loadIssue = useCallback(async (issueId: string) => {
+    const requestId = ++detailRequestRef.current;
+    setDetailLoading(true);
+    try {
+      const detail = await getOperationalIssue(issueId);
+      if (
+        requestId === detailRequestRef.current &&
+        selectedIdRef.current === issueId
+      ) {
+        setSelected(detail);
+        setError(null);
+      }
+    } catch (reason) {
+      if (
+        requestId === detailRequestRef.current &&
+        selectedIdRef.current === issueId
+      ) {
+        setError(
+          reason instanceof Error ? reason.message : "问题详情读取失败",
+        );
+      }
+    } finally {
+      if (requestId === detailRequestRef.current) {
+        setDetailLoading(false);
+      }
+    }
+  }, []);
 
   const refresh = useCallback(async (preserveId?: string) => {
+    const requestId = ++refreshRequestRef.current;
     try {
       const [nextDashboard, nextIssues] = await Promise.all([
         getOperationalDashboard(),
         listOperationalIssues(),
       ]);
+      if (requestId !== refreshRequestRef.current) return;
       setDashboard(nextDashboard);
       setIssues(nextIssues);
-      const targetId = preserveId ?? selected?.id ?? nextIssues[0]?.id;
+      const targetId =
+        preserveId ?? selectedIdRef.current ?? nextIssues[0]?.id ?? null;
       if (targetId) {
-        setSelected(await getOperationalIssue(targetId));
+        if (selectedIdRef.current !== targetId) {
+          selectedIdRef.current = targetId;
+          setSelectedId(targetId);
+        }
+        await loadIssue(targetId);
       } else {
+        selectedIdRef.current = null;
+        setSelectedId(null);
         setSelected(null);
       }
       setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "问题中心读取失败");
     }
-  }, [selected?.id]);
+  }, [loadIssue]);
 
   useEffect(() => {
     void refresh();
@@ -143,39 +197,52 @@ export default function OperationsCenterPage() {
   }, [boundary, issues, query, status]);
 
   async function selectIssue(issueId: string) {
-    setBusy(true);
-    try {
-      setSelected(await getOperationalIssue(issueId));
-      setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "问题详情读取失败");
-    } finally {
-      setBusy(false);
-    }
+    selectedIdRef.current = issueId;
+    setSelectedId(issueId);
+    setSelected(null);
+    setDecisionNote("");
+    setImplementationSummary("");
+    setImplementationBranch("");
+    setImplementationCommits("");
+    setActionError(null);
+    setActionMessage(null);
+    setTimelineEvents([]);
+    setTimelinePage(null);
+    await loadIssue(issueId);
   }
 
   async function decide(action: "approve" | "reject") {
     if (!selected) return;
+    const issueId = selected.id;
     setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
       const credentials = getAdminCredentials();
       const updated =
         action === "approve"
           ? await approveOperationalIssue(
-              selected.id,
+              issueId,
               decisionNote,
               credentials,
             )
           : await rejectOperationalIssue(
-              selected.id,
+              issueId,
               decisionNote || "管理员拒绝本轮改进方案",
               credentials,
             );
-      setSelected(updated);
+      if (selectedIdRef.current === issueId) {
+        setSelected(updated);
+        setActionMessage(
+          action === "approve" ? "审批已提交" : "拒绝意见已提交",
+        );
+      }
       setDecisionNote("");
-      await refresh(updated.id);
+      await refresh(selectedIdRef.current === issueId ? updated.id : undefined);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "审批操作失败");
+      setActionError(
+        reason instanceof Error ? reason.message : "审批操作失败",
+      );
     } finally {
       setBusy(false);
     }
@@ -183,10 +250,13 @@ export default function OperationsCenterPage() {
 
   async function recordImplementation() {
     if (!selected || !implementationSummary.trim()) return;
+    const issueId = selected.id;
     setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
       const updated = await recordOperationalImplementation(
-        selected.id,
+        issueId,
         {
           summary: implementationSummary.trim(),
           branch: implementationBranch.trim() || null,
@@ -197,13 +267,18 @@ export default function OperationsCenterPage() {
         },
         getAdminCredentials(),
       );
-      setSelected(updated);
+      if (selectedIdRef.current === issueId) {
+        setSelected(updated);
+        setActionMessage("改进证据已登记");
+      }
       setImplementationSummary("");
       setImplementationBranch("");
       setImplementationCommits("");
-      await refresh(updated.id);
+      await refresh(selectedIdRef.current === issueId ? updated.id : undefined);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "改进证据登记失败");
+      setActionError(
+        reason instanceof Error ? reason.message : "改进证据登记失败",
+      );
     } finally {
       setBusy(false);
     }
@@ -211,20 +286,55 @@ export default function OperationsCenterPage() {
 
   async function reopen() {
     if (!selected) return;
+    const issueId = selected.id;
     setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
       const updated = await reopenOperationalIssue(
-        selected.id,
+        issueId,
         decisionNote || "管理员要求重新评估",
         getAdminCredentials(),
       );
-      setSelected(updated);
+      if (selectedIdRef.current === issueId) {
+        setSelected(updated);
+        setActionMessage("问题已重新提交，正在等待分诊");
+      }
       setDecisionNote("");
-      await refresh(updated.id);
+      await refresh(selectedIdRef.current === issueId ? updated.id : undefined);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "重新打开失败");
+      setActionError(
+        reason instanceof Error ? reason.message : "重新打开失败",
+      );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadTimeline(reset: boolean) {
+    const issueId = selectedIdRef.current;
+    if (!issueId || timelineLoading) return;
+    setTimelineLoading(true);
+    try {
+      const page = await listOperationalIssueEvents(
+        issueId,
+        reset ? null : timelinePage?.next_before_sequence,
+      );
+      if (selectedIdRef.current !== issueId) return;
+      setTimelinePage(page);
+      setTimelineEvents((current) =>
+        reset ? page.items : [...page.items, ...current],
+      );
+    } catch (reason) {
+      if (selectedIdRef.current === issueId) {
+        setActionError(
+          reason instanceof Error ? reason.message : "问题时间线读取失败",
+        );
+      }
+    } finally {
+      if (selectedIdRef.current === issueId) {
+        setTimelineLoading(false);
+      }
     }
   }
 
@@ -232,6 +342,7 @@ export default function OperationsCenterPage() {
     ? dashboard.total -
       (dashboard.by_status.closed ?? 0) -
       (dashboard.by_status.rejected ?? 0) -
+      (dashboard.by_status.validation_completed ?? 0) -
       (dashboard.by_status.out_of_scope ?? 0)
     : 0;
   const decisionBrief = selected?.decision_brief ?? {};
@@ -397,10 +508,9 @@ export default function OperationsCenterPage() {
                 type="button"
                 key={issue.id}
                 className={`operations-item ${
-                  selected?.id === issue.id ? "is-selected" : ""
+                  selectedId === issue.id ? "is-selected" : ""
                 }`}
                 onClick={() => void selectIssue(issue.id)}
-                disabled={busy}
               >
                 <span className={`severity severity-${issue.severity}`}>
                   {issue.severity.toUpperCase()}
@@ -433,7 +543,10 @@ export default function OperationsCenterPage() {
         </aside>
 
         <section className="operations-detail" aria-label="问题详情">
-          {!selected && (
+          {!selected && detailLoading && (
+            <div className="operations-empty">正在读取问题详情…</div>
+          )}
+          {!selected && !detailLoading && (
             <div className="operations-empty">
               选择一个问题查看AI判断、审批意见和完整处理时间线。
             </div>
@@ -497,6 +610,17 @@ export default function OperationsCenterPage() {
                   <dd>{selected.evaluation_status}</dd>
                 </div>
               </dl>
+
+              {actionError && (
+                <div className="operations-action-feedback is-error" role="alert">
+                  {actionError}
+                </div>
+              )}
+              {actionMessage && (
+                <div className="operations-action-feedback is-success" role="status">
+                  {actionMessage}
+                </div>
+              )}
 
               <section className="operations-decision-brief">
                 <div className="operations-section-heading">
@@ -609,7 +733,8 @@ export default function OperationsCenterPage() {
                 </div>
               )}
 
-              {selected.status === "plan_revision_required" && (
+              {selected.status === "plan_revision_required" &&
+                selected.allowed_actions.includes("reopen") && (
                 <section className="operations-approval operations-revision">
                   <h3>方案需要修订</h3>
                   <p>
@@ -633,8 +758,8 @@ export default function OperationsCenterPage() {
               )}
 
               {selected.status === "waiting_approval" &&
-                selected.review_recommendation === "approve" &&
-                selected.blocking_finding_count === 0 && (
+                (selected.allowed_actions.includes("approve") ||
+                  selected.allowed_actions.includes("reject")) && (
                   <section className="operations-approval">
                     <h3>改进审批</h3>
                     <textarea
@@ -643,27 +768,33 @@ export default function OperationsCenterPage() {
                       placeholder="填写审批意见或需要补充的改进点"
                     />
                     <div>
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        onClick={() => void decide("approve")}
-                        disabled={busy}
-                      >
-                        批准进入改进
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-outline"
-                        onClick={() => void decide("reject")}
-                        disabled={busy}
-                      >
-                        拒绝本轮方案
-                      </button>
+                      {selected.allowed_actions.includes("approve") && (
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          onClick={() => void decide("approve")}
+                          disabled={busy}
+                        >
+                          批准进入改进
+                        </button>
+                      )}
+                      {selected.allowed_actions.includes("reject") && (
+                        <button
+                          type="button"
+                          className="button button-outline"
+                          onClick={() => void decide("reject")}
+                          disabled={busy}
+                        >
+                          拒绝本轮方案
+                        </button>
+                      )}
                     </div>
                   </section>
                 )}
 
-              {selected.status === "waiting_external" && (
+              {selected.allowed_actions.includes(
+                "record_manual_implementation",
+              ) && (
                 <section className="operations-approval">
                   <h3>登记人工或批量改进</h3>
                   <textarea
@@ -700,9 +831,8 @@ export default function OperationsCenterPage() {
                 </section>
               )}
 
-              {["closed", "rejected", "out_of_scope", "triage_failed"].includes(
-                selected.status,
-              ) && (
+              {selected.status !== "plan_revision_required" &&
+                selected.allowed_actions.includes("reopen") && (
                 <section className="operations-approval">
                   <h3>重新处理</h3>
                   <textarea
@@ -741,13 +871,27 @@ export default function OperationsCenterPage() {
                 ))}
               </section>
 
-              <details className="operations-timeline">
+              <details
+                className="operations-timeline"
+                onToggle={(event) => {
+                  if (
+                    event.currentTarget.open &&
+                    timelineEvents.length === 0 &&
+                    !timelineLoading
+                  ) {
+                    void loadTimeline(true);
+                  }
+                }}
+              >
                 <summary>
                   完整处理时间线
-                  <span>{selected.events?.length ?? 0} 条事件</span>
+                  <span>{selected.event_count} 条事件</span>
                 </summary>
+                {timelineLoading && timelineEvents.length === 0 && (
+                  <p className="operations-timeline-state">正在读取最新事件…</p>
+                )}
                 <ol>
-                  {[...(selected.events ?? [])].reverse().map((event) => (
+                  {[...timelineEvents].reverse().map((event) => (
                     <li key={event.id}>
                       <span>{event.sequence}</span>
                       <div>
@@ -758,6 +902,16 @@ export default function OperationsCenterPage() {
                     </li>
                   ))}
                 </ol>
+                {timelinePage?.has_more && (
+                  <button
+                    type="button"
+                    className="button button-outline operations-timeline-more"
+                    onClick={() => void loadTimeline(false)}
+                    disabled={timelineLoading}
+                  >
+                    {timelineLoading ? "正在加载…" : "加载更早事件"}
+                  </button>
+                )}
               </details>
             </>
           )}

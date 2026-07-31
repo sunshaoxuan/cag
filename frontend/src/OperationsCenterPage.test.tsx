@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import OperationsCenterPage from "./OperationsCenterPage";
@@ -6,7 +6,9 @@ import {
   approveOperationalIssue,
   getOperationalDashboard,
   getOperationalIssue,
+  listOperationalIssueEvents,
   listOperationalIssues,
+  reopenOperationalIssue,
 } from "./api";
 
 vi.mock("./api", async () => {
@@ -16,6 +18,7 @@ vi.mock("./api", async () => {
     approveOperationalIssue: vi.fn(),
     getOperationalDashboard: vi.fn(),
     getOperationalIssue: vi.fn(),
+    listOperationalIssueEvents: vi.fn(),
     listOperationalIssues: vi.fn(),
     recordOperationalImplementation: vi.fn(),
     rejectOperationalIssue: vi.fn(),
@@ -64,7 +67,8 @@ const issue = {
   status: "waiting_approval",
   occurrence_count: 3,
   evidence: {},
-  allowed_actions: ["plan", "review"],
+  allowed_actions: ["approve", "reject"],
+  planned_actions: ["plan", "review"],
   required_human_input: null,
   approval_status: "pending",
   approved_by: null,
@@ -79,6 +83,7 @@ const issue = {
   created_at: "2026-07-31T00:00:00Z",
   updated_at: "2026-07-31T01:00:00Z",
   closed_at: null,
+  event_count: 1,
   occurrences: [],
   artifacts: [
     {
@@ -103,15 +108,6 @@ const issue = {
       created_at: "2026-07-31T01:02:00Z",
     },
   ],
-  events: [
-    {
-      id: "event-1",
-      sequence: 1,
-      type: "issue.detected",
-      data: {},
-      created_at: "2026-07-31T01:00:00Z",
-    },
-  ],
 };
 
 describe("OperationsCenterPage", () => {
@@ -125,6 +121,20 @@ describe("OperationsCenterPage", () => {
     });
     vi.mocked(listOperationalIssues).mockResolvedValue([issue]);
     vi.mocked(getOperationalIssue).mockResolvedValue(issue);
+    vi.mocked(listOperationalIssueEvents).mockResolvedValue({
+      items: [
+        {
+          id: "event-1",
+          sequence: 1,
+          type: "issue.detected",
+          data: {},
+          created_at: "2026-07-31T01:00:00Z",
+        },
+      ],
+      total: 1,
+      has_more: false,
+      next_before_sequence: null,
+    });
     vi.mocked(approveOperationalIssue).mockResolvedValue({
       ...issue,
       status: "implementing",
@@ -155,7 +165,7 @@ describe("OperationsCenterPage", () => {
     expect(timeline).not.toHaveAttribute("open");
     fireEvent.click(screen.getByText("完整处理时间线"));
     expect(timeline).toHaveAttribute("open");
-    expect(screen.getByText("issue.detected")).toBeInTheDocument();
+    expect(await screen.findByText("issue.detected")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("填写审批意见或需要补充的改进点"), {
       target: { value: "批准隔离分支实施" },
@@ -178,5 +188,90 @@ describe("OperationsCenterPage", () => {
         },
       );
     });
+  });
+
+  it("reopens a rejected issue and shows an inline authentication error", async () => {
+    const rejectedIssue = {
+      ...issue,
+      id: "issue-rejected",
+      code: "OI-REJECTED",
+      title: "发布验证记录",
+      status: "rejected",
+      approval_status: "rejected",
+      allowed_actions: ["reopen"],
+      review_recommendation: null,
+      decision_brief: {},
+    };
+    vi.mocked(listOperationalIssues).mockResolvedValue([rejectedIssue]);
+    vi.mocked(getOperationalIssue).mockResolvedValue(rejectedIssue);
+    vi.mocked(reopenOperationalIssue).mockRejectedValue(
+      new Error("Valid operations administrator credentials are required"),
+    );
+
+    render(<OperationsCenterPage />);
+
+    expect(
+      await screen.findByRole("heading", { name: "发布验证记录" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("管理员身份"), {
+      target: { value: "operations-admin" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("管理员令牌"), {
+      target: { value: "expired-token" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "重新提交问题处理" }),
+    );
+
+    const inlineError = await screen.findByText(
+      "Valid operations administrator credentials are required",
+    );
+    expect(inlineError).toHaveAttribute("role", "alert");
+    expect(reopenOperationalIssue).toHaveBeenCalledWith(
+      rejectedIssue.id,
+      "管理员要求重新评估",
+      {
+        identity: "operations-admin",
+        token: "expired-token",
+      },
+    );
+  });
+
+  it("keeps the latest selection when an older detail request finishes later", async () => {
+    const secondIssue = {
+      ...issue,
+      id: "issue-2",
+      code: "OI-SECOND",
+      title: "第二个问题",
+    };
+    let resolveFirst: ((value: typeof issue) => void) | undefined;
+    const delayedFirst = new Promise<typeof issue>((resolve) => {
+      resolveFirst = resolve;
+    });
+    vi.mocked(listOperationalIssues).mockResolvedValue([issue, secondIssue]);
+    vi.mocked(getOperationalIssue).mockImplementation((issueId) =>
+      issueId === issue.id ? delayedFirst : Promise.resolve(secondIssue),
+    );
+
+    render(<OperationsCenterPage />);
+
+    const secondButton = await screen.findByRole("button", {
+      name: /OI-SECOND/,
+    });
+    fireEvent.click(secondButton);
+    expect(
+      await screen.findByRole("heading", { name: "第二个问题" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirst?.(issue);
+      await delayedFirst;
+    });
+    expect(
+      screen.getByRole("heading", { name: "第二个问题" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "知识检索阻塞 Gateway" }),
+    ).not.toBeInTheDocument();
   });
 });

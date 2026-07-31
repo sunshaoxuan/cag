@@ -2,17 +2,103 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from datetime import UTC, datetime
+
+from sqlalchemy import create_engine, inspect, text
 
 
-def test_alembic_upgrade_creates_phase1_schema(tmp_path: Path) -> None:
-    database_path = tmp_path / "migration.sqlite"
+def test_alembic_upgrade_and_validation_status_round_trip(tmp_path: Path) -> None:
+    database_path = tmp_path / "operations-control.sqlite"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "20260731_0018")
+
+    now = datetime.now(UTC)
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO projects (id, code, name, created_at)
+                VALUES (:id, :code, :name, :created_at)
+                """
+            ),
+            {
+                "id": "project-validation",
+                "code": "validation",
+                "name": "Validation",
+                "created_at": now,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO operational_issues (
+                    id, project_id, code, fingerprint, source_type, source_id,
+                    title, summary, severity, status, occurrence_count,
+                    evidence, allowed_actions, approval_status,
+                    evaluation_status, first_seen_at, last_seen_at,
+                    created_at, updated_at
+                ) VALUES (
+                    :id, :project_id, :code, :fingerprint, :source_type,
+                    :source_id, :title, :summary, :severity, :status,
+                    :occurrence_count, :evidence, :allowed_actions,
+                    :approval_status, :evaluation_status, :first_seen_at,
+                    :last_seen_at, :created_at, :updated_at
+                )
+                """
+            ),
+            {
+                "id": "issue-validation",
+                "project_id": "project-validation",
+                "code": "OI-VALIDATION",
+                "fingerprint": "f" * 64,
+                "source_type": "deployment-validation",
+                "source_id": "0.21.0",
+                "title": "Controlled deployment validation",
+                "summary": "Validation completed",
+                "severity": "low",
+                "status": "rejected",
+                "occurrence_count": 1,
+                "evidence": "{}",
+                "allowed_actions": "[]",
+                "approval_status": "rejected",
+                "evaluation_status": "not_started",
+                "first_seen_at": now,
+                "last_seen_at": now,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
 
     command.upgrade(config, "head")
+    with engine.connect() as connection:
+        migrated = connection.execute(
+            text(
+                """
+                SELECT status, approval_status
+                FROM operational_issues
+                WHERE id = 'issue-validation'
+                """
+            )
+        ).one()
+    assert migrated.status == "validation_completed"
+    assert migrated.approval_status == "not_requested"
 
+    command.downgrade(config, "20260731_0018")
+    with engine.connect() as connection:
+        downgraded = connection.execute(
+            text(
+                """
+                SELECT status, approval_status
+                FROM operational_issues
+                WHERE id = 'issue-validation'
+                """
+            )
+        ).one()
+    assert downgraded.status == "rejected"
+    assert downgraded.approval_status == "rejected"
     inspector = inspect(create_engine(database_url))
     tables = set(inspector.get_table_names())
     assert {

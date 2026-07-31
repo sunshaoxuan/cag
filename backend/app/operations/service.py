@@ -146,15 +146,7 @@ class OperationalIssueService:
                     **clean_evidence,
                 }
                 if issue.status in OperationalIssueStatus.TERMINAL:
-                    issue.status = OperationalIssueStatus.DETECTED
-                    issue.closed_at = None
-                    issue.closed_by = None
-                    issue.resolution = None
-                    issue.approval_status = "not_requested"
-                    issue.evaluation_status = "not_started"
-                    issue.review_recommendation = None
-                    issue.blocking_finding_count = 0
-                    issue.decision_brief = {}
+                    self._reset_for_reprocessing(issue)
 
             session.add(
                 OperationalIssueOccurrence(
@@ -1077,15 +1069,12 @@ class OperationalIssueService:
             issue = session.get(OperationalIssue, issue_id)
             if issue is None:
                 raise KeyError(issue_id)
-            issue.status = OperationalIssueStatus.DETECTED
-            issue.closed_at = None
-            issue.closed_by = None
-            issue.resolution = None
-            issue.approval_status = "not_requested"
-            issue.evaluation_status = "not_started"
-            issue.review_recommendation = None
-            issue.blocking_finding_count = 0
-            issue.decision_brief = {}
+            if issue.status not in OperationalIssueStatus.REOPENABLE:
+                raise ValueError(
+                    f"Issue in status {issue.status} cannot be reopened"
+                )
+            previous_status = issue.status
+            self._reset_for_reprocessing(issue)
             self._enqueue(
                 session,
                 issue,
@@ -1096,7 +1085,11 @@ class OperationalIssueService:
                 session,
                 issue,
                 "issue.reopened",
-                {"reopened_by": reopened_by, "reason": reason},
+                {
+                    "reopened_by": reopened_by,
+                    "reason": reason,
+                    "previous_status": previous_status,
+                },
             )
             session.commit()
             session.refresh(issue)
@@ -1155,15 +1148,44 @@ class OperationalIssueService:
                     )
                 )
             ]
-            response["events"] = [
-                self._event_response(item)
-                for item in session.scalars(
-                    select(OperationalIssueEvent)
-                    .where(OperationalIssueEvent.issue_id == issue.id)
-                    .order_by(OperationalIssueEvent.sequence)
-                )
-            ]
             return response
+
+    def list_issue_events(
+        self,
+        issue_id: str,
+        *,
+        before_sequence: int | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        with self._database.session_factory() as session:
+            issue = session.get(OperationalIssue, issue_id)
+            if issue is None:
+                raise KeyError(issue_id)
+            statement = select(OperationalIssueEvent).where(
+                OperationalIssueEvent.issue_id == issue.id
+            )
+            if before_sequence is not None:
+                statement = statement.where(
+                    OperationalIssueEvent.sequence < before_sequence
+                )
+            rows = list(
+                session.scalars(
+                    statement.order_by(OperationalIssueEvent.sequence.desc()).limit(
+                        limit + 1
+                    )
+                )
+            )
+            has_more = len(rows) > limit
+            page = rows[:limit]
+            page.reverse()
+            return {
+                "items": [self._event_response(item) for item in page],
+                "total": issue.event_sequence,
+                "has_more": has_more,
+                "next_before_sequence": (
+                    page[0].sequence if has_more and page else None
+                ),
+            }
 
     def dashboard(self) -> dict[str, Any]:
         with self._database.session_factory() as session:
@@ -1568,6 +1590,47 @@ class OperationalIssueService:
         return " ".join([default, *actions])[:8_000]
 
     @staticmethod
+    def _reset_for_reprocessing(issue: OperationalIssue) -> None:
+        issue.status = OperationalIssueStatus.DETECTED
+        issue.boundary = None
+        issue.boundary_confidence = None
+        issue.resolution_mode = None
+        issue.resolution_mode_confidence = None
+        issue.resolution_mode_reason = None
+        issue.decision_brief = {}
+        issue.review_recommendation = None
+        issue.blocking_finding_count = 0
+        issue.allowed_actions = []
+        issue.required_human_input = None
+        issue.approval_status = "not_requested"
+        issue.approved_by = None
+        issue.approval_note = None
+        issue.approved_at = None
+        issue.implementation_task_id = None
+        issue.improvement_branch = None
+        issue.evaluation_status = "not_started"
+        issue.resolution = None
+        issue.closed_by = None
+        issue.closed_at = None
+
+    @staticmethod
+    def _actions_for_status(issue: OperationalIssue) -> list[str]:
+        if issue.status == OperationalIssueStatus.WAITING_APPROVAL:
+            actions = ["reject"]
+            if (
+                issue.review_recommendation == "approve"
+                and issue.blocking_finding_count == 0
+                and bool((issue.decision_brief or {}).get("approval_ready"))
+            ):
+                actions.insert(0, "approve")
+            return actions
+        if issue.status in OperationalIssueStatus.REOPENABLE:
+            return ["reopen"]
+        if issue.status == OperationalIssueStatus.WAITING_EXTERNAL:
+            return ["record_manual_implementation"]
+        return []
+
+    @staticmethod
     def _actions_for_resolution(
         boundary: str,
         resolution_mode: str,
@@ -1715,8 +1778,8 @@ class OperationalIssueService:
             )
         return acceptance
 
-    @staticmethod
-    def _issue_summary(issue: OperationalIssue) -> dict[str, Any]:
+    @classmethod
+    def _issue_summary(cls, issue: OperationalIssue) -> dict[str, Any]:
         return {
             "id": issue.id,
             "project_id": issue.project_id,
@@ -1740,7 +1803,8 @@ class OperationalIssueService:
             "status": issue.status,
             "occurrence_count": issue.occurrence_count,
             "evidence": issue.evidence,
-            "allowed_actions": issue.allowed_actions,
+            "allowed_actions": cls._actions_for_status(issue),
+            "planned_actions": issue.allowed_actions,
             "required_human_input": issue.required_human_input,
             "approval_status": issue.approval_status,
             "approved_by": issue.approved_by,
@@ -1757,6 +1821,7 @@ class OperationalIssueService:
             "created_at": issue.created_at.isoformat(),
             "updated_at": issue.updated_at.isoformat(),
             "closed_at": issue.closed_at.isoformat() if issue.closed_at else None,
+            "event_count": issue.event_sequence,
         }
 
     @staticmethod

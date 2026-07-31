@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.22.3 development deployment
+## 0.22.4 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -37,7 +37,8 @@ console, API audit monitor, enterprise knowledge, capability governance and the
 self-operations issue center.
 The issue list and evidence remain readable for operations visibility.
 The primary issue detail is a structured decision brief. Complete runtime
-artifacts and event history remain available as collapsed audit evidence.
+artifacts remain available as collapsed audit evidence. Event history loads in
+bounded sequence pages when the timeline is expanded.
 Approval, rejection, manual implementation, manual evaluation and reopen calls
 require `X-CAG-Admin-Token` and `X-CAG-Admin-Identity`. The management page
 keeps these values in browser session storage and clears them when the browser

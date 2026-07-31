@@ -105,6 +105,23 @@ def get_issue(
         raise HTTPException(status_code=404, detail="Issue not found") from exc
 
 
+@router.get("/issues/{issue_id}/events")
+def list_issue_events(
+    issue_id: str,
+    before_sequence: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: OperationalIssueService = Depends(get_operational_issue_service),
+):
+    try:
+        return service.list_issue_events(
+            issue_id,
+            before_sequence=before_sequence,
+            limit=limit,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Issue not found") from exc
+
+
 @router.post("/issues/{issue_id}/approve")
 def approve_issue(
     issue_id: str,
@@ -113,11 +130,12 @@ def approve_issue(
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.approve(
+        issue = service.approve(
             issue_id,
             approved_by=admin_identity,
             note=request.note,
         )
+        return service.get_issue(issue.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
     except ValueError as exc:
@@ -132,11 +150,12 @@ def reject_issue(
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.reject(
+        issue = service.reject(
             issue_id,
             resolved_by=admin_identity,
             note=request.note,
         )
+        return service.get_issue(issue.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
     except ValueError as exc:
@@ -151,11 +170,12 @@ def record_implementation(
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.record_manual_implementation(
+        issue = service.record_manual_implementation(
             issue_id,
             **request.model_dump(),
             implemented_by=admin_identity,
         )
+        return service.get_issue(issue.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
     except ValueError as exc:
@@ -173,9 +193,8 @@ def record_bulk_implementations(
     results = []
     for issue_id in request.issue_ids:
         try:
-            results.append(
-                service.record_manual_implementation(issue_id, **payload)
-            )
+            issue = service.record_manual_implementation(issue_id, **payload)
+            results.append(service.get_issue(issue.id))
         except (KeyError, ValueError) as exc:
             results.append(
                 {
@@ -194,11 +213,12 @@ def record_evaluation(
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.record_manual_evaluation(
+        issue = service.record_manual_evaluation(
             issue_id,
             **request.model_dump(),
             evaluated_by=admin_identity,
         )
+        return service.get_issue(issue.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
 
@@ -211,10 +231,13 @@ def reopen_issue(
     service: OperationalIssueService = Depends(get_operational_issue_service),
 ):
     try:
-        return service.reopen(
+        issue = service.reopen(
             issue_id,
             **request.model_dump(),
             reopened_by=admin_identity,
         )
+        return service.get_issue(issue.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Issue not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

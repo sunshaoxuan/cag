@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.22.3"
+APP_VERSION = "0.22.4"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 

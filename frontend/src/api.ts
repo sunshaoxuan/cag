@@ -191,6 +191,7 @@ export type OperationalIssue = {
   occurrence_count: number;
   evidence: Record<string, unknown>;
   allowed_actions: string[];
+  planned_actions?: string[];
   required_human_input: string | null;
   approval_status: string;
   approved_by: string | null;
@@ -205,9 +206,16 @@ export type OperationalIssue = {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  event_count: number;
   occurrences?: OperationalIssueOccurrence[];
   artifacts?: OperationalIssueArtifact[];
-  events?: OperationalIssueEvent[];
+};
+
+export type OperationalIssueEventPage = {
+  items: OperationalIssueEvent[];
+  total: number;
+  has_more: boolean;
+  next_before_sequence: number | null;
 };
 
 export type OperationalDashboard = {
@@ -641,6 +649,20 @@ export function getOperationalIssue(
 ): Promise<OperationalIssue> {
   return request<OperationalIssue>(
     `/api/v1/operations/issues/${issueId}`,
+  );
+}
+
+export function listOperationalIssueEvents(
+  issueId: string,
+  beforeSequence?: number | null,
+  limit = 100,
+): Promise<OperationalIssueEventPage> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (beforeSequence) {
+    query.set("before_sequence", String(beforeSequence));
+  }
+  return request<OperationalIssueEventPage>(
+    `/api/v1/operations/issues/${issueId}/events?${query}`,
   );
 }
 

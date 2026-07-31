@@ -194,9 +194,30 @@ def test_operations_mutations_require_authenticated_admin_and_skip_deltas(
     detail = client.get(
         f"/api/v1/operations/issues/{reviewed['id']}"
     ).json()
-    event_types = [event["type"] for event in detail["events"]]
+    assert "events" not in detail
+    assert detail["event_count"] > 0
+    event_page = client.get(
+        f"/api/v1/operations/issues/{reviewed['id']}/events",
+        params={"limit": 100},
+    ).json()
+    event_types = [event["type"] for event in event_page["items"]]
     assert "ai.triage.agent.message.delta" not in event_types
     assert "ai.triage.agent.message" in event_types
+    assert event_page["total"] == detail["event_count"]
+    latest_page = client.get(
+        f"/api/v1/operations/issues/{reviewed['id']}/events",
+        params={"limit": 2},
+    ).json()
+    assert len(latest_page["items"]) == 2
+    assert latest_page["has_more"] is True
+    older_page = client.get(
+        f"/api/v1/operations/issues/{reviewed['id']}/events",
+        params={
+            "limit": 2,
+            "before_sequence": latest_page["next_before_sequence"],
+        },
+    ).json()
+    assert older_page["items"][-1]["sequence"] < latest_page["items"][0]["sequence"]
 
 
 def test_internal_issue_uses_approved_improvement_branch(
@@ -282,6 +303,7 @@ def test_issue_admin_can_reject_reopen_and_record_evaluation(
     )
     assert rejection.status_code == 200
     assert rejection.json()["status"] == "rejected"
+    assert rejection.json()["allowed_actions"] == ["reopen"]
 
     invalid_approval = client.post(
         f"/api/v1/operations/issues/{issue['id']}/approve",
@@ -305,6 +327,15 @@ def test_issue_admin_can_reject_reopen_and_record_evaluation(
         json={"reopened_by": "admin", "reason": "Updated evidence is available"},
     )
     assert reopened.status_code == 200
+    assert reopened.json()["status"] == "detected"
+    assert reopened.json()["approval_status"] == "not_requested"
+    assert reopened.json()["approved_by"] is None
+    assert reopened.json()["allowed_actions"] == []
+    second_reopen = client.post(
+        f"/api/v1/operations/issues/{issue['id']}/reopen",
+        json={"reopened_by": "admin", "reason": "Duplicate reopen attempt"},
+    )
+    assert second_reopen.status_code == 409
     reviewed_again = wait_for_issue(
         client,
         str(issue["id"]),

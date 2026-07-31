@@ -2721,6 +2721,26 @@ textarea:focus {
   font-weight: 750;
 }
 
+.operations-action-feedback {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.operations-action-feedback.is-error {
+  border: 1px solid #f0b6ad;
+  background: #fff1ef;
+  color: #a83f32;
+}
+
+.operations-action-feedback.is-success {
+  border: 1px solid #b9e3de;
+  background: #eefaf8;
+  color: #187b70;
+}
+
 .operations-human-input,
 .operations-approval {
   margin: 18px 0;
@@ -3024,6 +3044,14 @@ textarea:focus {
   color: var(--muted);
   font-size: 0.76rem;
   overflow-wrap: anywhere;
+}
+
+.operations-timeline-state {
+  padding: 10px 0 18px;
+}
+
+.operations-timeline-more {
+  margin: 6px 0 18px;
 }
 
 .operations-empty {

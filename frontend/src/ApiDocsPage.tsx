@@ -140,6 +140,36 @@ progress.addEventListener("knowledge.collection.progress", (message) => {
       "  -Body $approval",
     ].join("\n"),
   },
+  {
+    title: "分页读取问题处理时间线",
+    description:
+      "详情接口保持轻量，完整审计事件通过事件序号分页读取。使用返回的 next_before_sequence 继续向前翻页。",
+    language: "PowerShell",
+    code: [
+      "$page = Invoke-RestMethod `",
+      "  -Method Get `",
+      '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/events?limit=100"',
+      "$page.items",
+      "$older = Invoke-RestMethod `",
+      "  -Method Get `",
+      '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/events?limit=100&before_sequence=$($page.next_before_sequence)"',
+    ].join("\n"),
+  },
+  {
+    title: "重新提交可恢复的问题",
+    description:
+      "已关闭、已拒绝、验证完成、已移交、分诊失败和方案待修订可以进入新一轮分诊。",
+    language: "PowerShell",
+    code: [
+      '$body = @{reason = "证据和工具已经更新，请重新评估"} | ConvertTo-Json',
+      "Invoke-RestMethod `",
+      "  -Method Post `",
+      '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/reopen" `',
+      '  -Headers @{"X-CAG-Admin-Token" = $env:CAG_OPERATIONS_ADMIN_TOKEN; "X-CAG-Admin-Identity" = "gateway-admin"} `',
+      "  -ContentType 'application/json; charset=utf-8' `",
+      "  -Body $body",
+    ].join("\n"),
+  },
 ];
 
 function countFor(

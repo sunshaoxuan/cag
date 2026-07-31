@@ -26,6 +26,7 @@ class OperationalIssueStatus:
     EVALUATING = "evaluating"
     CLOSED = "closed"
     REJECTED = "rejected"
+    VALIDATION_COMPLETED = "validation_completed"
     OUT_OF_SCOPE = "out_of_scope"
     TRIAGE_FAILED = "triage_failed"
 
@@ -39,7 +40,15 @@ class OperationalIssueStatus:
         EVALUATING,
         TRIAGE_FAILED,
     }
-    TERMINAL = {CLOSED, REJECTED, OUT_OF_SCOPE}
+    TERMINAL = {CLOSED, REJECTED, VALIDATION_COMPLETED, OUT_OF_SCOPE}
+    REOPENABLE = {
+        CLOSED,
+        REJECTED,
+        VALIDATION_COMPLETED,
+        OUT_OF_SCOPE,
+        TRIAGE_FAILED,
+        PLAN_REVISION_REQUIRED,
+    }
 
 
 class OperationalIssue(PhysicalIdMixin, Base):

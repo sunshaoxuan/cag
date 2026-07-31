@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.3`
+Current version: `0.22.4`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.3"
+    "version": "0.22.4"
 }
 ```
 
@@ -133,6 +133,7 @@ is sanitized before persistence.
 * `GET /api/v1/operations/dashboard`
 * `GET /api/v1/operations/issues`
 * `GET /api/v1/operations/issues/{issue_id}`
+* `GET /api/v1/operations/issues/{issue_id}/events`
 
 Example:
 
@@ -179,6 +180,9 @@ artifacts:
   "resolution_mode_reason": "The bounded change is inside the CAG repository.",
   "review_recommendation": "revise",
   "blocking_finding_count": 2,
+  "event_count": 235,
+  "allowed_actions": ["reopen"],
+  "planned_actions": ["plan", "review", "request_approval"],
   "decision_brief": {
     "administrator_language": "zh-CN",
     "problem_summary": "Review 证据与审批状态不一致。",
@@ -209,10 +213,31 @@ artifacts:
 }
 ```
 
-`decision_brief` is the reviewer-facing projection. `artifacts` and `events`
-retain the complete plan, Review and runtime evidence. Invalid or incomplete
+`decision_brief` is the reviewer-facing projection. `artifacts` retain the
+complete plan and Review. Runtime evidence is read from the paginated events
+endpoint. Invalid or incomplete
 structured output, a `revise` recommendation, or any blocking finding produces
 `plan_revision_required`.
+
+`allowed_actions` is the server-authoritative list of management actions
+permitted in the current state. The UI must use this field instead of inferring
+buttons from `status`. `planned_actions` retains the implementation capabilities
+identified by the planner.
+
+The events endpoint returns the newest page in ascending sequence order:
+
+```json
+{
+  "items": [],
+  "total": 235,
+  "has_more": true,
+  "next_before_sequence": 136
+}
+```
+
+Use `limit` from 1 to 500 and pass the returned `next_before_sequence` as
+`before_sequence` to read the next older page. Issue list and detail polling do
+not transfer the complete event history.
 
 `decision_brief.administrator_language` is `zh-CN`. Administrator-facing
 summary and decision fields use Simplified Chinese. Code identifiers, commands,
@@ -272,6 +297,15 @@ AI evaluation replays the original evidence and checks validation, regression,
 performance, security, migration and rollback readiness. Passing evaluation
 closes the issue. Failed evaluation queues another triage cycle with all prior
 artifacts and events preserved.
+
+Reopen accepts only `closed`, `rejected`, `validation_completed`,
+`out_of_scope`, `triage_failed` and `plan_revision_required`. A successful
+reopen clears the prior approval, implementation, evaluation and decision
+projection, retains immutable occurrences, artifacts and events, and queues one
+new triage item. Other states return HTTP 409.
+
+Controlled deployment validation uses `validation_completed`. It remains
+auditable and does not create a false administrator rejection record.
 
 AI investigation persists completed messages, commands, tests, state changes,
 plans, Reviews and evaluations. Runtime event names ending in `.delta` are

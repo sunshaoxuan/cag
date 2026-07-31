@@ -1,6 +1,6 @@
 # ADR 0022: Governed self-operations issue center
 
-Status: Accepted for 0.21.0
+Status: Accepted for 0.21.0, control amendment accepted for 0.22.4
 
 Date: 2026-07-31
 
@@ -42,6 +42,24 @@ evidence.
 Every implementation enters independent evaluation. Passing evaluation closes
 the issue. Failed evaluation restores `detected` status and queues another
 triage cycle.
+
+## 0.22.4 control amendment
+
+The backend state machine is authoritative for administrator actions.
+`allowed_actions` contains only actions valid for the current status, while
+`planned_actions` preserves the planner's implementation capabilities.
+Reopen is limited to terminal, failed and revision-required states. It clears
+the prior mutable approval, implementation, evaluation and decision projection
+before one new triage item is queued.
+
+Controlled release verification closes as `validation_completed`. Rejection is
+reserved for an administrator decision on a real proposal.
+
+Issue detail responses exclude the runtime event collection. The dedicated
+events endpoint uses bounded, sequence-based pagination. The management UI
+polls compact issue details, rejects stale asynchronous responses, scopes
+editable input to the selected physical issue ID and displays mutation results
+next to the action that produced them.
 
 ## Boundary
 

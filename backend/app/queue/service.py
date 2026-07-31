@@ -761,7 +761,6 @@ class QueueService:
         if item.issue_id is not None:
             issue = session.get(OperationalIssue, item.issue_id)
             if issue is not None:
-                issue.status = OperationalIssueStatus.TRIAGE_FAILED
                 issue.summary = reason
 
     @staticmethod
