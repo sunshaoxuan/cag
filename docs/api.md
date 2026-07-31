@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.1`
+Current version: `0.22.2`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.1"
+    "version": "0.22.2"
 }
 ```
 
@@ -156,6 +156,10 @@ Example:
 The intake response is HTTP 202. A new or reopened issue enters the
 `operations` queue. The local Codex runtime produces a boundary decision,
 versioned plan and independent Review in read-only isolated workspaces.
+Every triage cycle receives a sequence-addressed workspace cloned from the
+current default branch, including cycles started by reopen or failed
+evaluation. Prior workspaces remain immutable evidence and are never reused
+for a new plan.
 
 Issue list query parameters include `status`, `severity`, `boundary`,
 `resolution_mode` and `limit`. `resolution_mode` is one of

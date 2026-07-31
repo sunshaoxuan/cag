@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.22.1 | Evidence |
+| Requirement | Status for 0.22.2 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -38,7 +38,7 @@ Legend:
 | Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API and recovery tests |
 | Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
-| AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, versioned artifacts and tests |
+| AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, sequence-addressed fresh workspaces, versioned artifacts and tests |
 | Structured operational decision brief | Implemented | strict planner and reviewer schemas, resolution mode, root cause, proposed changes, blockers, validation and rollback |
 | Simplified Chinese operational decisions | Implemented | `administrator_language: zh-CN`, prompt and developer instruction constraints, Chinese field validation and fail-closed fallback |
 | Fail-closed operational approval | Implemented | malformed, incomplete, revise or blocked Reviews enter `plan_revision_required`; approval repeats the gate server-side |

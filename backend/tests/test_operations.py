@@ -244,7 +244,19 @@ def test_internal_issue_uses_approved_improvement_branch(
 
 def test_issue_admin_can_reject_reopen_and_record_evaluation(
     client: TestClient,
+    monkeypatch,
 ) -> None:
+    service = client.app.state.operational_issue_service
+    workspace_manager = service._workspace_manager
+    original_prepare = workspace_manager.prepare
+    workspace_task_ids: list[str] = []
+
+    def record_prepare(*, project, task_id):
+        workspace_task_ids.append(task_id)
+        return original_prepare(project=project, task_id=task_id)
+
+    monkeypatch.setattr(workspace_manager, "prepare", record_prepare)
+
     missing = client.get("/api/v1/operations/issues/missing")
     assert missing.status_code == 404
 
@@ -321,6 +333,9 @@ def test_issue_admin_can_reject_reopen_and_record_evaluation(
     )
     assert passed_evaluation.status_code == 200
     assert passed_evaluation.json()["status"] == "closed"
+    assert len(workspace_task_ids) == 3
+    assert len(set(workspace_task_ids)) == 3
+    assert all("-s" in task_id for task_id in workspace_task_ids)
 
     dashboard = client.get("/api/v1/operations/dashboard")
     filtered = client.get(
@@ -477,7 +492,7 @@ def test_human_code_route_waits_for_manual_implementation(
             "resolution_mode_confidence": 0.95,
             "proposed_changes": [
                 {
-                    "area": "部署钩子",
+                    "area": "backend/app/api/health.py",
                     "change": "由人工实施经过审核的代码修正。",
                     "reason": "受保护路径不能直接委派给 Agent。",
                 }

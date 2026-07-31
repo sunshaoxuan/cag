@@ -143,7 +143,12 @@ an independent architecture, security, migration and regression Review.
 Both phases must return strict structured decisions. The durable decision brief
 separates problem summary, impact, root cause, improvement goal, implementation
 route, proposed changes, validation, rollback and Review blockers from raw
-runtime evidence. Versioned artifacts and the complete event timeline remain
+runtime evidence. Every triage cycle clones a sequence-addressed read-only workspace
+from the current default branch. Reopen and failed evaluation cycles therefore
+cannot reuse the source snapshot of an earlier plan. Paths, commands and other
+pure technical identifiers may remain in their source language while all
+administrator-facing decision prose must use Simplified Chinese.
+Versioned artifacts and the complete event timeline remain
 available as collapsed audit evidence.
 
 Administrator-facing decision fields use Simplified Chinese and declare

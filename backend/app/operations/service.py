@@ -203,7 +203,12 @@ class OperationalIssueService:
             if issue is None:
                 return
             issue.status = OperationalIssueStatus.TRIAGING
-            self._append_event(session, issue, "issue.triage.started", {})
+            triage_event = self._append_event(
+                session,
+                issue,
+                "issue.triage.started",
+                {},
+            )
             project = session.get(Project, issue.project_id)
             if project is None:
                 raise RuntimeError("Operational issue project is unavailable")
@@ -219,6 +224,7 @@ class OperationalIssueService:
                 "evidence": issue.evidence,
             }
             occurrence_count = issue.occurrence_count
+            triage_sequence = triage_event.sequence
             session.commit()
 
         project_config = self._project_registry.get_by_code(project_code)
@@ -227,7 +233,10 @@ class OperationalIssueService:
         workspace = await asyncio.to_thread(
             self._workspace_manager.prepare,
             project=project_config,
-            task_id=f"op-{issue_id[:8]}-t{occurrence_count}",
+            task_id=(
+                f"op-{issue_id[:8]}-t{occurrence_count}"
+                f"-s{triage_sequence}"
+            ),
         )
         analysis = await self._run_ai(
             issue_id=issue_id,
@@ -1376,7 +1385,6 @@ class OperationalIssueService:
             "resolution_mode_reason": plan.resolution_mode_reason,
         }
         for index, change in enumerate(plan.proposed_changes):
-            fields[f"proposed_changes[{index}].area"] = change.area
             fields[f"proposed_changes[{index}].change"] = change.change
             fields[f"proposed_changes[{index}].reason"] = change.reason
         for field_name, values in (
