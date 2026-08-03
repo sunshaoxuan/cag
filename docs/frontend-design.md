@@ -109,6 +109,10 @@ left pane filters physical code symbols by project, name, qualified name, path
 and kind. The right pane shows signature, line range, parser, calls, dependency
 resolution status and deterministic documentation evidence. Long symbol lists
 scroll inside the pane, keeping the selected evidence visible.
+The code search action uses the same control height as its project, query and
+kind fields, keeping the action aligned with the control row. At the mobile
+stacking breakpoint, the action remains a full-width row item without an extra
+alignment offset.
 
 The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does

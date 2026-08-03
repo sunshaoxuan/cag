@@ -1,5 +1,11 @@
 # Evidence index
 
+## Version 0.22.6
+
+* `docs/evidence/code-knowledge-search-action-0.22.6/`
+* `docs/evidence/screenshots/code-knowledge-search-action-0.22.6-desktop.png`
+* `docs/evidence/screenshots/code-knowledge-search-action-0.22.6-mobile.png`
+
 ## Version 0.21.1
 
 * `docs/evidence/self-operations-hardening-0.21.1/`

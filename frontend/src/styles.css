@@ -677,6 +677,7 @@ h1 span {
 .code-search label {
   display: grid;
   gap: 7px;
+  margin-bottom: 0;
 }
 
 .code-search label > span {
@@ -686,7 +687,7 @@ h1 span {
 }
 
 .code-search button {
-  min-height: 44px;
+  min-height: 50px;
 }
 
 .code-browser {
