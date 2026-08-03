@@ -156,6 +156,21 @@ progress.addEventListener("knowledge.collection.progress", (message) => {
     ].join("\n"),
   },
   {
+    title: "禁止本轮修改并结束问题",
+    description:
+      "等待审批、方案待修订、分诊失败和等待外部处理均可记录管理员的不修改决定。",
+    language: "PowerShell",
+    code: [
+      '$body = @{note = "当前风险不可接受，本轮不允许执行修改"} | ConvertTo-Json',
+      "Invoke-RestMethod `",
+      "  -Method Post `",
+      '  -Uri "$baseUrl/api/v1/operations/issues/$issueId/reject" `',
+      '  -Headers @{"X-CAG-Admin-Token" = $env:CAG_OPERATIONS_ADMIN_TOKEN; "X-CAG-Admin-Identity" = "gateway-admin"} `',
+      "  -ContentType 'application/json; charset=utf-8' `",
+      "  -Body $body",
+    ].join("\n"),
+  },
+  {
     title: "重新提交可恢复的问题",
     description:
       "已关闭、已拒绝、验证完成、已移交、分诊失败和方案待修订可以进入新一轮分诊。",

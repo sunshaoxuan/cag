@@ -228,13 +228,15 @@ export default function OperationsCenterPage() {
             )
           : await rejectOperationalIssue(
               issueId,
-              decisionNote || "管理员拒绝本轮改进方案",
+              decisionNote || "管理员决定结束本问题，本轮不允许执行修改",
               credentials,
             );
       if (selectedIdRef.current === issueId) {
         setSelected(updated);
         setActionMessage(
-          action === "approve" ? "审批已提交" : "拒绝意见已提交",
+          action === "approve"
+            ? "审批已提交，问题已进入受控改进流程"
+            : "问题已结束，本轮不允许修改",
         );
       }
       setDecisionNote("");
@@ -564,6 +566,156 @@ export default function OperationsCenterPage() {
                 </span>
               </header>
 
+              <section
+                className={`operations-approval operations-admin-decision ${
+                  selected.status === "plan_revision_required" ||
+                  selected.status === "triage_failed"
+                    ? "operations-revision"
+                    : ""
+                }`}
+                aria-label="管理员决策"
+              >
+                <div className="operations-admin-decision-heading">
+                  <div>
+                    <p>ADMINISTRATOR DECISION</p>
+                    <h3>管理员决策</h3>
+                  </div>
+                  <span>已发生 {selected.occurrence_count} 次</span>
+                </div>
+                <p className="operations-admin-decision-summary">
+                  发生次数用于表示影响和优先级，不改变管理员的决策权限。
+                  {selected.status === "plan_revision_required" &&
+                    " 当前 Review 存在阻断项，可以要求继续修订，也可以结束处理并明确禁止本轮修改。"}
+                  {selected.status === "waiting_approval" &&
+                    " 当前方案已通过独立 Review，可以批准进入受控改进，也可以结束处理并禁止修改。"}
+                  {selected.status === "triage_failed" &&
+                    " 本轮 AI 分析失败，可以重新调查，也可以结束处理并禁止修改。"}
+                  {selected.status === "waiting_external" &&
+                    " 当前需要登记人工或外部处理结果，也可以结束处理并禁止修改。"}
+                  {["detected", "triaging"].includes(selected.status) &&
+                    " AI 正在形成可审核方案，完成后将在这里显示可执行决策。"}
+                  {["implementing", "evaluating"].includes(selected.status) &&
+                    " 已批准的流程正在执行，完成后将在这里显示再评估结果。"}
+                </p>
+
+                {actionError && (
+                  <div
+                    className="operations-action-feedback is-error"
+                    role="alert"
+                  >
+                    {actionError}
+                  </div>
+                )}
+                {actionMessage && (
+                  <div
+                    className="operations-action-feedback is-success"
+                    role="status"
+                  >
+                    {actionMessage}
+                  </div>
+                )}
+
+                {(selected.allowed_actions.includes("approve") ||
+                  selected.allowed_actions.includes("reject") ||
+                  selected.allowed_actions.includes("reopen")) && (
+                  <textarea
+                    value={decisionNote}
+                    onChange={(event) => setDecisionNote(event.target.value)}
+                    placeholder={
+                      selected.status === "plan_revision_required"
+                        ? "填写修订重点，或说明禁止修改并结束的原因"
+                        : selected.status === "waiting_approval"
+                          ? "填写审批意见，或说明禁止修改并结束的原因"
+                          : "填写重新处理或结束处理的原因"
+                    }
+                  />
+                )}
+
+                <div className="operations-admin-decision-buttons">
+                  {selected.allowed_actions.includes("approve") && (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void decide("approve")}
+                      disabled={busy}
+                    >
+                      {selected.resolution_mode === "agent_self_improvement"
+                        ? "批准 Agent 自增益"
+                        : "批准进入改进流程"}
+                    </button>
+                  )}
+                  {selected.allowed_actions.includes("reopen") && (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void reopen()}
+                      disabled={busy}
+                    >
+                      {selected.status === "plan_revision_required"
+                        ? "要求修订并重新 Review"
+                        : selected.status === "triage_failed"
+                          ? "重新调查问题"
+                          : "重新提交问题处理"}
+                    </button>
+                  )}
+                  {selected.allowed_actions.includes("reject") && (
+                    <button
+                      type="button"
+                      className="button button-outline operations-decision-reject"
+                      onClick={() => void decide("reject")}
+                      disabled={busy}
+                    >
+                      不允许修改并结束
+                    </button>
+                  )}
+                </div>
+
+                {selected.allowed_actions.includes(
+                  "record_manual_implementation",
+                ) && (
+                  <div className="operations-manual-decision">
+                    <h4>登记人工或外部改进</h4>
+                    <textarea
+                      value={implementationSummary}
+                      onChange={(event) =>
+                        setImplementationSummary(event.target.value)
+                      }
+                      placeholder="说明完成的凭据、外部系统或批量改进"
+                    />
+                    <div className="operations-implementation-fields">
+                      <input
+                        value={implementationBranch}
+                        onChange={(event) =>
+                          setImplementationBranch(event.target.value)
+                        }
+                        placeholder="关联分支，可留空"
+                      />
+                      <input
+                        value={implementationCommits}
+                        onChange={(event) =>
+                          setImplementationCommits(event.target.value)
+                        }
+                        placeholder="提交哈希，以空格或逗号分隔"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void recordImplementation()}
+                      disabled={busy || !implementationSummary.trim()}
+                    >
+                      登记结果并进入独立再评估
+                    </button>
+                  </div>
+                )}
+
+                {selected.allowed_actions.length === 0 && (
+                  <p className="operations-admin-decision-pending">
+                    当前没有待管理员执行的状态变更，问题进度仍可在下方完整时间线中查看。
+                  </p>
+                )}
+              </section>
+
               <dl className="operations-facts">
                 <div>
                   <dt>责任边界</dt>
@@ -610,17 +762,6 @@ export default function OperationsCenterPage() {
                   <dd>{selected.evaluation_status}</dd>
                 </div>
               </dl>
-
-              {actionError && (
-                <div className="operations-action-feedback is-error" role="alert">
-                  {actionError}
-                </div>
-              )}
-              {actionMessage && (
-                <div className="operations-action-feedback is-success" role="status">
-                  {actionMessage}
-                </div>
-              )}
 
               <section className="operations-decision-brief">
                 <div className="operations-section-heading">
@@ -731,124 +872,6 @@ export default function OperationsCenterPage() {
                   <strong>需要管理员处理</strong>
                   <p>{selected.required_human_input}</p>
                 </div>
-              )}
-
-              {selected.status === "plan_revision_required" &&
-                selected.allowed_actions.includes("reopen") && (
-                <section className="operations-approval operations-revision">
-                  <h3>方案需要修订</h3>
-                  <p>
-                    当前 Review 存在阻断项，审批入口保持关闭。补充证据后可重新执行
-                    AI 规划和独立 Review。
-                  </p>
-                  <textarea
-                    value={decisionNote}
-                    onChange={(event) => setDecisionNote(event.target.value)}
-                    placeholder="填写重新规划原因或需要补充的重点"
-                  />
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    onClick={() => void reopen()}
-                    disabled={busy}
-                  >
-                    重新规划与 Review
-                  </button>
-                </section>
-              )}
-
-              {selected.status === "waiting_approval" &&
-                (selected.allowed_actions.includes("approve") ||
-                  selected.allowed_actions.includes("reject")) && (
-                  <section className="operations-approval">
-                    <h3>改进审批</h3>
-                    <textarea
-                      value={decisionNote}
-                      onChange={(event) => setDecisionNote(event.target.value)}
-                      placeholder="填写审批意见或需要补充的改进点"
-                    />
-                    <div>
-                      {selected.allowed_actions.includes("approve") && (
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          onClick={() => void decide("approve")}
-                          disabled={busy}
-                        >
-                          批准进入改进
-                        </button>
-                      )}
-                      {selected.allowed_actions.includes("reject") && (
-                        <button
-                          type="button"
-                          className="button button-outline"
-                          onClick={() => void decide("reject")}
-                          disabled={busy}
-                        >
-                          拒绝本轮方案
-                        </button>
-                      )}
-                    </div>
-                  </section>
-                )}
-
-              {selected.allowed_actions.includes(
-                "record_manual_implementation",
-              ) && (
-                <section className="operations-approval">
-                  <h3>登记人工或批量改进</h3>
-                  <textarea
-                    value={implementationSummary}
-                    onChange={(event) =>
-                      setImplementationSummary(event.target.value)
-                    }
-                    placeholder="说明完成的凭据、外部系统或批量改进"
-                  />
-                  <div className="operations-implementation-fields">
-                    <input
-                      value={implementationBranch}
-                      onChange={(event) =>
-                        setImplementationBranch(event.target.value)
-                      }
-                      placeholder="关联分支，可留空"
-                    />
-                    <input
-                      value={implementationCommits}
-                      onChange={(event) =>
-                        setImplementationCommits(event.target.value)
-                      }
-                      placeholder="提交哈希，以空格或逗号分隔"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    onClick={() => void recordImplementation()}
-                    disabled={busy || !implementationSummary.trim()}
-                  >
-                    进入独立再评估
-                  </button>
-                </section>
-              )}
-
-              {selected.status !== "plan_revision_required" &&
-                selected.allowed_actions.includes("reopen") && (
-                <section className="operations-approval">
-                  <h3>重新处理</h3>
-                  <textarea
-                    value={decisionNote}
-                    onChange={(event) => setDecisionNote(event.target.value)}
-                    placeholder="填写重新打开原因"
-                  />
-                  <button
-                    type="button"
-                    className="button button-outline"
-                    onClick={() => void reopen()}
-                    disabled={busy}
-                  >
-                    重新提交问题处理
-                  </button>
-                </section>
               )}
 
               <section className="operations-artifacts">

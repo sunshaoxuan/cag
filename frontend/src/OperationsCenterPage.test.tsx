@@ -8,6 +8,7 @@ import {
   getOperationalIssue,
   listOperationalIssueEvents,
   listOperationalIssues,
+  rejectOperationalIssue,
   reopenOperationalIssue,
 } from "./api";
 
@@ -167,16 +168,19 @@ describe("OperationsCenterPage", () => {
     expect(timeline).toHaveAttribute("open");
     expect(await screen.findByText("issue.detected")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("填写审批意见或需要补充的改进点"), {
-      target: { value: "批准隔离分支实施" },
-    });
+    fireEvent.change(
+      screen.getByPlaceholderText("填写审批意见，或说明禁止修改并结束的原因"),
+      {
+        target: { value: "批准隔离分支实施" },
+      },
+    );
     fireEvent.change(screen.getByPlaceholderText("管理员身份"), {
       target: { value: "security-admin" },
     });
     fireEvent.change(screen.getByPlaceholderText("管理员令牌"), {
       target: { value: "session-secret" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "批准进入改进" }));
+    fireEvent.click(screen.getByRole("button", { name: "批准 Agent 自增益" }));
 
     await waitFor(() => {
       expect(approveOperationalIssue).toHaveBeenCalledWith(
@@ -184,6 +188,76 @@ describe("OperationsCenterPage", () => {
         "批准隔离分支实施",
         {
           identity: "security-admin",
+          token: "session-secret",
+        },
+      );
+    });
+  });
+
+  it("keeps administrator decisions visible for a repeated revision issue", async () => {
+    const revisionIssue = {
+      ...issue,
+      id: "issue-revision",
+      code: "OI-REVISION",
+      title: "重复失败的问题",
+      status: "plan_revision_required",
+      occurrence_count: 100,
+      approval_status: "revision_required",
+      review_recommendation: "revise" as const,
+      blocking_finding_count: 2,
+      allowed_actions: ["reopen", "reject"],
+      decision_brief: {
+        ...issue.decision_brief,
+        approval_ready: false,
+        review_recommendation: "revise" as const,
+        blocking_findings: [
+          {
+            code: "B1",
+            title: "需要修订",
+            finding: "方案证据不足。",
+            required_change: "补充验证证据。",
+          },
+        ],
+      },
+    };
+    vi.mocked(listOperationalIssues).mockResolvedValue([revisionIssue]);
+    vi.mocked(getOperationalIssue).mockResolvedValue(revisionIssue);
+    vi.mocked(rejectOperationalIssue).mockResolvedValue({
+      ...revisionIssue,
+      status: "rejected",
+      approval_status: "rejected",
+      allowed_actions: ["reopen"],
+    });
+
+    render(<OperationsCenterPage />);
+
+    expect(
+      await screen.findByRole("heading", { name: "管理员决策" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("已发生 100 次")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "要求修订并重新 Review" }),
+    ).toBeInTheDocument();
+    fireEvent.change(
+      screen.getByPlaceholderText("填写修订重点，或说明禁止修改并结束的原因"),
+      { target: { value: "当前风险不可接受，禁止本轮修改" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("管理员身份"), {
+      target: { value: "operations-admin" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("管理员令牌"), {
+      target: { value: "session-secret" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "不允许修改并结束" }),
+    );
+
+    await waitFor(() => {
+      expect(rejectOperationalIssue).toHaveBeenCalledWith(
+        revisionIssue.id,
+        "当前风险不可接受，禁止本轮修改",
+        {
+          identity: "operations-admin",
           token: "session-secret",
         },
       );

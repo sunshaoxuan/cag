@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.4`
+Current version: `0.22.5`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.4"
+    "version": "0.22.5"
 }
 ```
 
@@ -181,7 +181,7 @@ artifacts:
   "review_recommendation": "revise",
   "blocking_finding_count": 2,
   "event_count": 235,
-  "allowed_actions": ["reopen"],
+  "allowed_actions": ["reopen", "reject"],
   "planned_actions": ["plan", "review", "request_approval"],
   "decision_brief": {
     "administrator_language": "zh-CN",
@@ -278,6 +278,12 @@ Approval request:
 The server accepts approval only when `review_recommendation` is `approve`,
 `blocking_finding_count` is zero and `decision_brief.approval_ready` is true.
 Clients receive HTTP 409 when any gate is unmet.
+
+The administrator can reject a pending, revision-required, triage-failed or
+external-action issue. Rejection records the authenticated administrator,
+reason and immutable `issue.rejected` event, closes the current cycle and
+forbids the proposed modification. A future occurrence or explicit reopen can
+start a new audited cycle.
 
 Approved CAG-internal issues create a standard Task with runtime profile
 `self-improvement-candidate`, balanced Harness and a

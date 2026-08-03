@@ -58,6 +58,8 @@ copy the One人事 logo, photography, illustrations or product claims.
 | `/knowledge` | Managed local, network, Git, GitLab and SVN sources with live collection SSE |
 | `/code-knowledge` | Code symbols, relationships, parser evidence and linked documentation |
 | `/memory` | Governed task memory candidates and product-level promotion |
+| `/operations` | Operational issue decisions, self-improvement approval, revision, no-modification closure and audit evidence |
+| `/api-docs` | Online API contracts and copyable integration examples |
 | `/capabilities` | Skill, Tool, Validator, promotion and standards control governance |
 
 Port 5173 is the unified CAG visual management console. The overview, API
@@ -111,6 +113,15 @@ scroll inside the pane, keeping the selected evidence visible.
 The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
 not resolve the Gateway as the browser machine's loopback address.
+
+Starting with version 0.22.5, the Operations route places one administrator
+decision panel immediately below the issue title. It remains present for every
+issue status. Occurrence count is shown as impact context and never hides
+authority. The panel presents only server-authoritative actions: approve an
+approval-ready self-improvement plan, request a new plan and Review, record
+external implementation evidence, reject the current cycle with an explicit
+no-modification decision, or explain that an active AI or evaluation step must
+finish first.
 
 ## Responsive and accessibility rules
 

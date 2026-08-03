@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.22.4 development deployment
+## 0.22.5 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -43,6 +43,11 @@ Approval, rejection, manual implementation, manual evaluation and reopen calls
 require `X-CAG-Admin-Token` and `X-CAG-Admin-Identity`. The management page
 keeps these values in browser session storage and clears them when the browser
 session ends.
+The issue detail places the administrator decision panel before the AI brief.
+Occurrence count never removes authority. Approval-ready issues can enter the
+governed improvement workflow, while pending, revision-required,
+triage-failed and external-action issues can be closed with an explicit
+no-modification decision.
 The independent Code Knowledge route exposes governed structural facts without
 placing code graph controls on the source maintenance page.
 Browser API and SSE requests use the same 5173 origin. Nginx forwards `/api`

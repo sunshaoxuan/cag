@@ -49,6 +49,12 @@ class OperationalIssueStatus:
         TRIAGE_FAILED,
         PLAN_REVISION_REQUIRED,
     }
+    REJECTABLE = {
+        WAITING_APPROVAL,
+        PLAN_REVISION_REQUIRED,
+        TRIAGE_FAILED,
+        WAITING_EXTERNAL,
+    }
 
 
 class OperationalIssue(PhysicalIdMixin, Base):

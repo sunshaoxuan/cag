@@ -1,6 +1,6 @@
 # ADR 0022: Governed self-operations issue center
 
-Status: Accepted for 0.21.0, control amendment accepted for 0.22.4
+Status: Accepted for 0.21.0, control amendments accepted through 0.22.5
 
 Date: 2026-07-31
 
@@ -60,6 +60,21 @@ events endpoint uses bounded, sequence-based pagination. The management UI
 polls compact issue details, rejects stale asynchronous responses, scopes
 editable input to the selected physical issue ID and displays mutation results
 next to the action that produced them.
+
+## 0.22.5 administrator decision amendment
+
+Issue occurrence count measures repeated impact and never grants or removes
+administrator authority. The management page places one status-aware decision
+panel before the AI decision brief so long plans and evidence cannot hide the
+available action.
+
+Approval continues to require an approval-ready independent Review with zero
+blockers. Revision-required and triage-failed issues expose both a new
+planning cycle and an authenticated rejection. Waiting-external issues expose
+implementation evidence and rejection. Rejection records that the
+administrator closed the current cycle and prohibited the proposed
+modification. It does not erase evidence or prevent a later audited occurrence
+or explicit reopen from creating a new cycle.
 
 ## Boundary
 

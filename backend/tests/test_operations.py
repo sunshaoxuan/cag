@@ -470,6 +470,7 @@ def test_review_blockers_require_plan_revision_and_prevent_approval(
         assert reviewed["resolution_mode"] == "agent_self_improvement"
         assert reviewed["review_recommendation"] == "revise"
         assert reviewed["blocking_finding_count"] == 1
+        assert reviewed["allowed_actions"] == ["reopen", "reject"]
         assert reviewed["decision_brief"]["approval_ready"] is False
         assert reviewed["decision_brief"]["blocking_findings"][0]["code"] == "B1"
 
@@ -478,6 +479,14 @@ def test_review_blockers_require_plan_revision_and_prevent_approval(
             json={"note": "approve despite blocker"},
         )
         assert approval.status_code == 409
+        rejection = local_client.post(
+            f"/api/v1/operations/issues/{issue['id']}/reject",
+            json={"note": "管理员决定结束处理，本轮不允许修改"},
+        )
+        assert rejection.status_code == 200
+        assert rejection.json()["status"] == "rejected"
+        assert rejection.json()["approval_status"] == "rejected"
+        assert rejection.json()["allowed_actions"] == ["reopen"]
 
 
 def test_malformed_review_fails_closed_with_visible_decision_brief(
@@ -574,6 +583,10 @@ def test_human_code_route_waits_for_manual_implementation(
         assert approval.status_code == 200
         assert approval.json()["status"] == "waiting_external"
         assert approval.json()["implementation_task_id"] is None
+        assert approval.json()["allowed_actions"] == [
+            "record_manual_implementation",
+            "reject",
+        ]
 
 
 def test_english_administrator_summary_fails_closed_to_chinese_brief(
@@ -660,3 +673,4 @@ def test_operational_runtime_failure_creates_chinese_decision_brief(
             "RUNTIME_PROCESSING_FAILED"
         )
         assert "请查看折叠日志" in failed["required_human_input"]
+        assert failed["allowed_actions"] == ["reopen", "reject"]

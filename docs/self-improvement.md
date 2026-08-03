@@ -62,7 +62,7 @@ Rollback when acceptance regresses
 
 ## Operational issue entrypoint
 
-Version 0.22.4 uses the self-operations issue center as the universal failure
+Version 0.22.5 uses the self-operations issue center as the universal failure
 entrypoint. Task-learning signals continue to discover repeated capability
 patterns. Runtime failures first become an `OperationalIssue` with immutable
 occurrences, a responsibility boundary, an AI plan and an independent Review.
@@ -91,6 +91,12 @@ individually or in batches and receive the same evaluation gate.
 Administrator state transitions require a configured operations token and an
 authenticated identity header. Runtime token deltas remain transient while
 completed messages, tool activity and lifecycle evidence remain durable.
+
+The administrator decision panel is always placed before the AI brief. The
+occurrence counter communicates impact and does not determine authority.
+Approval-ready plans may enter self-improvement. Pending, revision-required,
+triage-failed and external-action cases can be rejected with a reason, closing
+the current cycle without executing the proposed modification.
 
 The planner also classifies the implementation route:
 

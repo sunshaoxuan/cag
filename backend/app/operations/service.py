@@ -712,8 +712,10 @@ class OperationalIssueService:
             issue = session.get(OperationalIssue, issue_id)
             if issue is None:
                 raise KeyError(issue_id)
-            if issue.status != OperationalIssueStatus.WAITING_APPROVAL:
-                raise ValueError("Issue is not waiting for approval")
+            if issue.status not in OperationalIssueStatus.REJECTABLE:
+                raise ValueError(
+                    f"Issue in status {issue.status} cannot be rejected"
+                )
             issue.approval_status = "rejected"
             issue.status = OperationalIssueStatus.REJECTED
             issue.resolution = note
@@ -1624,10 +1626,15 @@ class OperationalIssueService:
             ):
                 actions.insert(0, "approve")
             return actions
+        if issue.status in {
+            OperationalIssueStatus.PLAN_REVISION_REQUIRED,
+            OperationalIssueStatus.TRIAGE_FAILED,
+        }:
+            return ["reopen", "reject"]
+        if issue.status == OperationalIssueStatus.WAITING_EXTERNAL:
+            return ["record_manual_implementation", "reject"]
         if issue.status in OperationalIssueStatus.REOPENABLE:
             return ["reopen"]
-        if issue.status == OperationalIssueStatus.WAITING_EXTERNAL:
-            return ["record_manual_implementation"]
         return []
 
     @staticmethod

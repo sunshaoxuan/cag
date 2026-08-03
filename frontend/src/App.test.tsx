@@ -719,6 +719,9 @@ describe("One Agent Gateway conversation page", () => {
     expect(
       screen.getByRole("link", { name: "交互式 OpenAPI" }),
     ).toHaveAttribute("href", "/docs");
+    expect(
+      screen.getByRole("heading", { name: "禁止本轮修改并结束问题" }),
+    ).toBeInTheDocument();
 
     const copyButtons = screen.getAllByRole("button", { name: "复制" });
     fireEvent.click(copyButtons[0]);
@@ -730,7 +733,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.22.4")).toBeInTheDocument();
+    expect(screen.getByText("v0.22.5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
