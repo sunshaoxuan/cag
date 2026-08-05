@@ -8,11 +8,11 @@ Codex agent in an isolated workspace, streams structured events, pauses for
 approvals, and stores auditable results. The web application is an API test,
 monitoring and governance client.
 
-Version 0.6.0 adds the governed parallel Agent Harness around the enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. ChatGPT-authenticated Codex remains the engineering Agent runtime. CAG owns child scheduling, single-writer enforcement, Artifact persistence, approval and unified SSE.
+Version 0.6.0 adds the governed parallel Agent Harness around the enterprise knowledge plane. Local Ollama performs embedding, retrieval support and memory extraction. The locally installed Codex app-server, authenticated through ChatGPT or a Codex API Key, remains the engineering Agent runtime. CAG owns child scheduling, single-writer enforcement, Artifact persistence, approval and unified SSE.
 
 ## 2. Runtime decision
 
-The production direction is a local Codex runtime authenticated through the user's existing ChatGPT subscription session.
+The production direction is a local Codex runtime authenticated through the user's existing ChatGPT session or Codex API Key session.
 
 Primary integration:
 
@@ -36,14 +36,14 @@ Current production-path integration:
 
 * One local `codex app-server --stdio` child process is started per Gateway task.
 * The Gateway performs protocol initialization and then calls `account/read`.
-* The task is rejected unless the reported account type is `chatgpt`.
+* The task is accepted for `chatgpt` or `apiKey` authentication. API Key sessions may return an empty account object with `requiresOpenaiAuth=false`.
 * A one-turn Task without a Conversation uses an ephemeral Codex thread.
 * The first Task in a Conversation starts a persisted Codex thread.
 * Later Tasks resume the persisted Codex thread in their new isolated workspaces.
 * App-server notifications map into durable Gateway events and a structured final report.
-* The Gateway never reads the Codex credential store.
+* The Gateway never reads the Codex credential store or copies an API Key into its environment.
 
-The detailed decision and verified local capability are recorded in [ADR 0001](adr/0001-local-codex-runtime.md).
+The current authentication decision and verified local capability are recorded in [ADR 0024](adr/0024-local-codex-api-key-authentication.md).
 
 ## 3. Logical architecture
 
@@ -137,7 +137,7 @@ count while every occurrence retains its own physical ID, event ID, evidence
 and timestamp.
 
 The `operations` queue has an independent Worker pool. Triage runs the local
-ChatGPT-authenticated Codex runtime twice in read-only mode. The first run
+Codex runtime authenticated through ChatGPT or an API Key twice in read-only mode. The first run
 classifies the boundary and drafts an improvement plan. The second run performs
 an independent architecture, security, migration and regression Review.
 Both phases must return strict structured decisions. The durable decision brief
@@ -239,7 +239,7 @@ PostgreSQL, so Redis connection loss affects pickup latency without changing
 the durable job record.
 
 The Windows host uses a long-running Task Scheduler supervisor under the
-interactive ChatGPT-authenticated user. It starts at system startup and
+interactive user who owns the local Codex ChatGPT or API Key session. It starts at system startup and
 sign-in, checks the all-interface listener and `/health/ready`, starts a missing
 Gateway, and restarts a recognized unhealthy Gateway after a bounded failure
 threshold. Unexpected port owners are logged and left untouched.
@@ -273,7 +273,7 @@ Feedback controls are frontend projections over the complete CAG event sequence.
 
 ### Local Codex app-server runtime
 
-The adapter communicates through stdio JSONL. It declares the experimental API capability required by `runtimeWorkspaceRoots`, verifies ChatGPT authentication and selects `thread/start` or `thread/resume` from the CAG Conversation mapping.
+The adapter communicates through stdio JSONL. It declares the experimental API capability required by `runtimeWorkspaceRoots`, verifies that the local Codex app-server reports either ChatGPT or API Key authentication, and selects `thread/start` or `thread/resume` from the CAG Conversation mapping.
 
 ### Structural code knowledge
 

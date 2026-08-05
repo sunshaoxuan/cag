@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.22.6 | Evidence |
+| Requirement | Status for 0.22.7 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -50,7 +50,7 @@ Legend:
 | Visual self-operations management | Implemented | `/operations` top decision panel, occurrence-independent authority, server-authoritative actions, stale-response protection, issue-scoped forms, inline mutation feedback and paginated evidence timeline |
 | Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
-| Local Codex app-server runtime | Implemented | Fake protocol tests and live subscription Gateway smoke |
+| Local Codex app-server runtime | Implemented | Fake protocol tests, ChatGPT and API Key account/read tests, live local app-server verification |
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
 | CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |

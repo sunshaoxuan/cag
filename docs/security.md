@@ -9,20 +9,21 @@ authentication, project authorization, HTTPS and distributed rate limiting
 remain open production controls, so deployments must define the reachable
 network boundary at the host firewall or upstream proxy.
 
-## 2. Codex subscription credentials
+## 2. Codex local authentication
 
-The runtime reuses the locally saved Codex CLI session created by `codex login` with ChatGPT.
+The runtime reuses the locally saved Codex CLI session created by `codex login`
+with ChatGPT or a Codex API Key.
 
 Rules:
 
 * The Gateway checks only whether Codex reports an authenticated state.
-* Phase 3 requires app-server `account/read` to report account type `chatgpt`.
+* The app-server accepts account type `chatgpt` or `apiKey`; API Key sessions may report an empty account with `requiresOpenaiAuth=false`.
 * The Gateway does not open or parse `auth.json`.
 * The Gateway does not copy credential files into task workspaces or containers.
 * Credential contents never enter prompts, logs, events, artifacts or database rows.
 * Codex app-server is started locally and is not exposed directly to untrusted networks.
 * A remote app-server listener requires TLS and transport authentication.
-* `OPENAI_API_KEY` is neither read nor accepted as the Phase 3 authentication boundary.
+* CAG does not read or store the Codex API Key, and `OPENAI_API_KEY` remains outside the local Codex authentication boundary.
 
 ## 3. Secrets
 
@@ -154,7 +155,7 @@ Runtime Profile names are validated against each Project YAML allowlist. Formal 
 
 ## 10. Current limitations
 
-The ChatGPT-authenticated local Codex runtime, persistent Conversations, CAG
+The locally authenticated Codex runtime, persistent Conversations, CAG
 SSE, command policy, persistent approvals, restricted candidate path, knowledge
 Secret Scanner and durable API action audit are implemented. Caller identity
 authentication, project authorization, durable distributed queueing and

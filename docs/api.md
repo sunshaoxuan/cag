@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.6`
+Current version: `0.22.7`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.6"
+    "version": "0.22.7"
 }
 ```
 

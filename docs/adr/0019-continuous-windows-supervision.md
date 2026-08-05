@@ -11,8 +11,8 @@ retry. The Gateway child could remain available after the scheduled action
 reported `Ready`, while a later child exit left port 8000 offline.
 
 The host runtime uses the locally installed Codex authenticated through the
-current user's ChatGPT subscription. The supervisor therefore needs the same
-interactive user identity.
+current user's ChatGPT or API Key session. The supervisor therefore needs the
+same interactive user identity.
 
 ## Decision
 
@@ -35,7 +35,7 @@ queue leases preserve admitted 0.17 work across recovery. Startup continues to
 perform the guarded legacy migration, Redis readiness check and frontend
 refresh.
 
-Automatic startup that requires ChatGPT subscription credentials becomes fully
+Automatic startup that requires local Codex credentials becomes fully
 operational when the configured Windows user has an interactive session.
 
 ## Validation

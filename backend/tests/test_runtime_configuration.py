@@ -33,6 +33,10 @@ def test_codex_runtime_can_be_selected(settings) -> None:
     app.state.database.dispose()
 
 
+def test_codex_runtime_allows_chatgpt_or_api_key_by_default(settings) -> None:
+    assert settings.codex_require_chatgpt_auth is False
+
+
 def test_unknown_runtime_provider_is_rejected(settings) -> None:
     with pytest.raises(ValueError, match="Unsupported runtime provider"):
         create_app(

@@ -2,6 +2,26 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.22.7
+
+发布日期：2026-08-05
+
+### Added
+
+* 本地 Codex 运行时同时支持 ChatGPT 登录和 Codex API Key 登录。
+* app-server API Key 会话在 account/read 返回空 account 且 `requiresOpenaiAuth=false` 时被识别为 `apiKey`。
+
+### Changed
+
+* 受监督启动脚本接受 `Logged in using ChatGPT` 和 `Logged in using an API key` 两种登录状态。
+* `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH=false` 表示允许两种本地 Codex 登录方式，仍不读取或保存 API Key。
+* API Key 登录状态会在启动前被识别，并通过环境配置传递给 app-server 运行时。
+
+### Validation
+
+* 新增 ChatGPT、API Key、API Key 空 account 响应和 ChatGPT-only 门禁测试。
+* 完成后端完整测试、前端测试、生产构建、PowerShell 解析和本机 app-server account/read 验证。
+
 ## 0.22.6
 
 发布日期：2026-08-04

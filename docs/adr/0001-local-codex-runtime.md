@@ -1,12 +1,12 @@
-# ADR 0001: Use local Codex with ChatGPT subscription authentication
+# ADR 0001: Use local Codex authentication
 
-Status: Accepted
+Status: Superseded by ADR 0024 for the current authentication policy
 
 Date: 2026-07-27
 
 ## Context
 
-The Gateway must invoke the Codex/ChatGPT capability already available on the local machine through a ChatGPT subscription. It is not an OpenAI Platform API Key based service.
+The original Phase 1 boundary required the Codex/ChatGPT capability already available on the local machine through a ChatGPT subscription. The current policy is defined by ADR 0024 and adds Codex API Key login support.
 
 The official Codex documentation states that ChatGPT sign-in provides subscription access for local Codex clients. It also states that `codex exec` reuses saved CLI authentication and that `codex app-server` is intended for deep product integrations needing authentication, conversation history, approvals and streamed events.
 
@@ -26,7 +26,7 @@ On 2026-07-27:
 
 * Executable: `C:\Users\Administrator\.codex\plugins\.plugin-appserver\codex.exe`
 * Version: `codex-cli 0.146.0-alpha.3.1`
-* Login result: `Logged in using ChatGPT`
+* Login result at the time: `Logged in using ChatGPT`
 * `codex app-server --help` exposes stdio, Unix socket and WebSocket transports.
 * `codex exec --help` exposes JSONL, output schema, sandbox, working directory and resume functions.
 
@@ -45,9 +45,9 @@ The WindowsApps desktop executable cannot be started directly from the current P
 
 App-server schemas are generated from the installed Codex version and stored with the Gateway adapter tests. Version upgrades require schema regeneration and adapter compatibility tests.
 
-## Rejected option
+## Historical rejected option
 
-Direct Responses API integration with `OPENAI_API_KEY` belongs to a separate deployment mode and is outside the requested default architecture.
+Direct Responses API integration with a CAG-managed `OPENAI_API_KEY` belongs to a separate deployment mode and remains outside the default architecture.
 
 ## Rollback
 

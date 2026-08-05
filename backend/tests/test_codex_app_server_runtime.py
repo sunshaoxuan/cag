@@ -21,6 +21,7 @@ def execute_runtime(
     persistent_conversation: bool = True,
     conversation_thread_id: str | None = None,
     developer_instructions: str | None = None,
+    require_chatgpt_auth: bool = False,
 ) -> tuple[object, list[tuple[str, dict[str, object]]]]:
     command = [sys.executable, str(FIXTURE_SERVER), account_type]
     command.append(mode)
@@ -28,6 +29,7 @@ def execute_runtime(
         command=command,
         startup_timeout_seconds=5,
         turn_timeout_seconds=5,
+        require_chatgpt_auth=require_chatgpt_auth,
     )
     events: list[tuple[str, dict[str, object]]] = []
 
@@ -185,14 +187,46 @@ def test_codex_app_server_declines_approval_until_phase5(
     assert "approval.resolved" in [event_type for event_type, _ in events]
 
 
-def test_codex_app_server_rejects_api_key_authentication(
+def test_codex_app_server_accepts_api_key_authentication(
+    tmp_path: Path,
+) -> None:
+    result, events = execute_runtime(tmp_path, account_type="apiKey")
+
+    assert result.summary == "LOCAL_CODEX_FIXTURE_OK"
+    assert events[0][1]["authentication"] == "apiKey"
+
+
+def test_codex_app_server_accepts_api_key_session_without_account_payload(
+    tmp_path: Path,
+) -> None:
+    result, events = execute_runtime(tmp_path, account_type="apiKey-empty")
+
+    assert result.summary == "LOCAL_CODEX_FIXTURE_OK"
+    assert events[0][1]["authentication"] == "apiKey"
+
+
+def test_codex_app_server_rejects_api_key_when_chatgpt_only_is_requested(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(
         CodexAppServerError,
         match="authenticated through ChatGPT",
     ):
-        execute_runtime(tmp_path, account_type="apiKey")
+        execute_runtime(
+            tmp_path,
+            account_type="apiKey",
+            require_chatgpt_auth=True,
+        )
+
+
+def test_codex_app_server_rejects_unknown_authentication(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        CodexAppServerError,
+        match="supported types are ChatGPT or API key",
+    ):
+        execute_runtime(tmp_path, account_type="unknown")
 
 
 def test_codex_app_server_handles_non_approval_server_requests(

@@ -1,12 +1,12 @@
-# ADR 0004: Local app-server with ChatGPT authentication
+# ADR 0004: Local app-server authentication
 
-Status: Accepted
+Status: Superseded by ADR 0024 for the current authentication policy
 
 Date: 2026-07-27
 
 ## Context
 
-The Gateway must use the locally installed Codex already authenticated by the user's ChatGPT subscription. An OpenAI Platform API Key changes the authentication and billing boundary and is outside the requested architecture.
+The original Phase 3 implementation used the locally installed Codex authenticated by the user's ChatGPT subscription. API Key login support is now defined by ADR 0024.
 
 Codex app-server exposes a JSONL protocol for account state, threads, turns, approvals and streamed items.
 
@@ -18,7 +18,7 @@ The adapter:
 
 1. Sends `initialize` and the `initialized` notification.
 2. Calls `account/read`.
-3. Requires account type `chatgpt`.
+3. Accepts account type `chatgpt` or `apiKey`; current API Key sessions can report an empty account with `requiresOpenaiAuth=false`.
 4. Starts an ephemeral thread in the isolated task workspace.
 5. Sets `runtimeWorkspaceRoots` to that workspace.
 6. Starts one turn with the task Prompt.
@@ -32,8 +32,8 @@ Phase 3 uses approval policy `never`. Approval callbacks are declined and record
 
 ## Consequences
 
-* The Gateway reuses the current ChatGPT subscription login.
-* API Key account state is rejected.
+* The Gateway reuses the current local Codex login.
+* CAG does not read or store the API Key.
 * Credential files remain private to Codex.
 * Each task has process-level failure isolation.
 * Per-task process startup adds latency.

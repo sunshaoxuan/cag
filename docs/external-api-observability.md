@@ -2,7 +2,7 @@
 
 ## 定位
 
-CAG 的主入口是 HTTP API。React 网页使用同一组 API，承担调用测试、运行监控和治理操作。外部业务系统无需打开网页，也无需持有 OpenAI API Key。Codex 运行时继续使用本机 ChatGPT 订阅认证。
+CAG 的主入口是 HTTP API。React 网页使用同一组 API，承担调用测试、运行监控和治理操作。外部业务系统无需打开网页，也无需持有 OpenAI API Key。Codex 运行时使用本机 Codex 登录状态，可以是 ChatGPT 订阅认证或 Codex API Key 认证。API Key 保留在 Codex 管理的本地凭据边界内。
 
 当前本机启动脚本监听 `0.0.0.0:8000`，Docker Compose 也将 8000 端口发布到全部主机接口。同一台机器使用 `http://127.0.0.1:8000`，跨机器调用使用 `http://<CAG主机IP>:8000`。当前版本尚未实现调用者认证、项目授权、HTTPS 和分布式限流，网络边界需要由部署环境控制。
 

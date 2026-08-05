@@ -46,7 +46,7 @@ copy the One人事 logo, photography, illustrations or product claims.
 | Orange commercial action | Start task, send, approve and index actions |
 | Turquoise data layer | Knowledge vectors, SSE and completed runtime state |
 | Floating product navigation | Overview, conversation, knowledge and governance routes |
-| Product proof chips | Subscription Codex, 1024-dimensional vectors and full SSE |
+| Product proof chips | Local Codex Agent runtime, 1024-dimensional vectors and full SSE |
 
 ## Routed information architecture
 

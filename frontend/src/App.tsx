@@ -1508,7 +1508,7 @@ export default function App() {
                 </a>
               </div>
               <ul className="hero-proof" aria-label="运行能力">
-                <li>订阅 Codex</li>
+                <li>本地 Codex Agent</li>
                 <li>1024 维向量</li>
                 <li>完整 SSE</li>
               </ul>

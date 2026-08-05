@@ -22,7 +22,7 @@ for raw_line in sys.stdin:
     elif method == "initialized":
         continue
     elif method == "account/read":
-        account = {"type": account_type}
+        account = {} if account_type == "apiKey-empty" else {"type": account_type}
         if account_type == "chatgpt":
             account.update({"email": None, "planType": "pro"})
         send(
@@ -30,7 +30,7 @@ for raw_line in sys.stdin:
                 "id": request_id,
                 "result": {
                     "account": account,
-                    "requiresOpenaiAuth": True,
+                    "requiresOpenaiAuth": account_type != "apiKey-empty",
                 },
             }
         )

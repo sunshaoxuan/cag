@@ -27,7 +27,7 @@ existing lease, heartbeat, retry and recovery mechanism. Redis remains an
 optional wake-up optimization. The `operations` queue receives a separate
 Worker pool.
 
-Triage invokes the local ChatGPT-authenticated Codex runtime in a read-only
+Triage invokes the locally authenticated Codex runtime in a read-only
 isolated workspace. One run classifies and plans. A second independent run
 reviews architecture, security, migration and regression coverage. Both
 outputs become versioned artifacts.

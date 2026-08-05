@@ -35,6 +35,14 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Not Match 'agent_gateway\.db'
     }
 
+    It "accepts ChatGPT and API key Codex login modes" {
+        $content = Get-Content -Raw -LiteralPath $runScript
+        $content | Should Match 'Logged in using ChatGPT'
+        $content | Should Match 'Logged in using an API key'
+        $content | Should Match 'AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH = "false"'
+        $content | Should Match 'authenticated through \$authMode'
+    }
+
     It "keeps the old SQLite path inside the explicit migration tool" {
         $content = Get-Content -Raw -LiteralPath $migrationScript
         $content | Should Match 'agent_gateway\.db'

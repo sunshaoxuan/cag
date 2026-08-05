@@ -2,7 +2,7 @@
 
 ## Boundary
 
-The enterprise knowledge plane belongs to One Agent Gateway. Ollama supplies local model inference and Codex supplies the ChatGPT-authenticated engineering Agent. Frontends call CAG APIs and SSE only.
+The enterprise knowledge plane belongs to One Agent Gateway. Ollama supplies local model inference and Codex supplies the locally authenticated engineering Agent. The local Codex session may use ChatGPT or a Codex API Key. Frontends call CAG APIs and SSE only.
 
 ## Modular RAG
 

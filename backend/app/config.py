@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.22.6"
+APP_VERSION = "0.22.7"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     codex_executable: Path | None = None
     codex_startup_timeout_seconds: int = Field(default=30, ge=5, le=300)
     codex_turn_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
-    codex_require_chatgpt_auth: bool = True
+    # True keeps the legacy ChatGPT-only policy. The managed host runner sets
+    # this to false so local Codex may use either ChatGPT or API-key auth.
+    codex_require_chatgpt_auth: bool = False
     harness_max_parallel_agents: int = Field(default=3, ge=1, le=8)
     harness_agent_timeout_seconds: int = Field(default=900, ge=30, le=7_200)
     approval_timeout_seconds: int = Field(default=300, ge=1, le=3_600)

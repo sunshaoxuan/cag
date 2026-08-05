@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.22.6 development deployment
+## 0.22.7 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -8,7 +8,8 @@ Requirements:
 
 * Docker Desktop with Docker Compose.
 * Available ports 8000, 5173 and local-only 5432.
-* No OpenAI Platform API Key.
+* Codex local login through ChatGPT or a Codex API Key.
+* CAG does not receive, read or store the Codex API Key.
 * A high-entropy `AGENT_GATEWAY_OPERATIONS_ADMIN_TOKEN` stored in ignored
   local configuration or the service environment.
 
@@ -114,11 +115,11 @@ The cloned commit SHA is persisted with the Task. Named volumes are retained by 
 
 ## Local Codex runtime prerequisites
 
-Local subscription execution requires:
+Local Codex execution requires:
 
 1. A supported local Codex CLI.
-2. A completed `codex login` ChatGPT browser flow.
-3. `codex login status` reporting `Logged in using ChatGPT`.
+2. A completed Codex login flow using ChatGPT or an API Key.
+3. `codex login status` reporting `Logged in using ChatGPT` or `Logged in using an API key`.
 4. `codex app-server` support.
 5. A private `CODEX_HOME` policy that prevents task workspaces from reading credential material.
 
@@ -128,7 +129,7 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT login status, PostgreSQL connectivity and the pgvector extension, then starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT or API Key login status, PostgreSQL connectivity and the pgvector extension, then starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
 For a continuously supervised host deployment, register and start the Windows
 background task:
@@ -139,7 +140,7 @@ background task:
 
 Use the same script with `status`, `stop` or `uninstall` to inspect, stop or
 remove the background task. The task starts at Windows startup and at sign-in
-under the current interactive user identity so the local ChatGPT
+under the current interactive user identity so the local Codex
 authentication remains available. Task Scheduler retries the supervisor up to
 999 times at one-minute intervals. The supervisor checks `/health/ready` every
 15 seconds, restarts a recognized Gateway after four consecutive failures, and
@@ -178,7 +179,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_CODEX_EXECUTABLE` | Callable local Codex executable |
 | `AGENT_GATEWAY_CODEX_STARTUP_TIMEOUT_SECONDS` | Protocol initialization timeout |
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
-| `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | Reject non-ChatGPT account types |
+| `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | `true` enforces ChatGPT only; `false` allows ChatGPT or API Key local Codex sessions |
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
 | `AGENT_GATEWAY_QUEUE_OPERATIONS_WORKERS` | Independent self-operations issue Worker count |
 | `AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR` | Managed Git and SVN source snapshot directory |

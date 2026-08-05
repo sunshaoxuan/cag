@@ -12,6 +12,9 @@ class CodexAppServerError(RuntimeError):
     pass
 
 
+SUPPORTED_AUTHENTICATION_TYPES = frozenset({"chatgpt", "apiKey"})
+
+
 class CodexAppServerRuntime:
     def __init__(
         self,
@@ -19,7 +22,7 @@ class CodexAppServerRuntime:
         command: Sequence[str],
         startup_timeout_seconds: int = 30,
         turn_timeout_seconds: int = 900,
-        require_chatgpt_auth: bool = True,
+        require_chatgpt_auth: bool = False,
     ) -> None:
         if not command:
             raise ValueError("Codex app-server command cannot be empty")
@@ -27,6 +30,18 @@ class CodexAppServerRuntime:
         self._startup_timeout_seconds = startup_timeout_seconds
         self._turn_timeout_seconds = turn_timeout_seconds
         self._require_chatgpt_auth = require_chatgpt_auth
+
+    @staticmethod
+    def _authentication_type(account_result: dict[str, Any]) -> str | None:
+        account = account_result.get("account") or {}
+        account_type = account.get("type")
+        if account_type in SUPPORTED_AUTHENTICATION_TYPES:
+            return account_type
+        # Current Codex app-server API-key sessions intentionally return an
+        # empty account object while declaring that OpenAI auth is not needed.
+        if account_type is None and account_result.get("requiresOpenaiAuth") is False:
+            return "apiKey"
+        return account_type
 
     async def execute(
         self,
@@ -341,11 +356,18 @@ class CodexAppServerRuntime:
                 {"refreshToken": False},
                 timeout=self._startup_timeout_seconds,
             )
-            account = account_result.get("account") or {}
-            account_type = account.get("type")
+            account_type = self._authentication_type(account_result)
             if self._require_chatgpt_auth and account_type != "chatgpt":
                 raise CodexAppServerError(
                     "Local Codex must be authenticated through ChatGPT"
+                )
+            if (
+                not self._require_chatgpt_auth
+                and account_type not in SUPPORTED_AUTHENTICATION_TYPES
+            ):
+                raise CodexAppServerError(
+                    "Local Codex authentication is unavailable; "
+                    "supported types are ChatGPT or API key"
                 )
             await emit(
                 "runtime.connected",

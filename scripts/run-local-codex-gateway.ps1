@@ -36,12 +36,20 @@ $loginOutput = & $CodexExecutable login status 2>&1
 $loginExitCode = $LASTEXITCODE
 $ErrorActionPreference = $savedErrorActionPreference
 $loginStatus = $loginOutput | Out-String
-if ($loginExitCode -ne 0 -or $loginStatus -notmatch "Logged in using ChatGPT") {
-    throw "Local Codex is not authenticated through ChatGPT."
+$authMode = $null
+if ($loginExitCode -eq 0 -and $loginStatus -match "Logged in using ChatGPT") {
+    $authMode = "ChatGPT"
+}
+elseif ($loginExitCode -eq 0 -and $loginStatus -match "Logged in using an API key") {
+    $authMode = "API key"
+}
+else {
+    throw "Local Codex is not authenticated through ChatGPT or an API key."
 }
 
 $env:AGENT_GATEWAY_RUNTIME_PROVIDER = "codex-app-server"
 $env:AGENT_GATEWAY_CODEX_EXECUTABLE = $CodexExecutable
+$env:AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH = "false"
 $env:AGENT_GATEWAY_PROJECTS_DIR = Join-Path $repositoryRoot "projects"
 $env:AGENT_GATEWAY_WORKSPACE_ROOT = Join-Path $repositoryRoot "workspaces"
 if (-not $env:AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT) {
@@ -62,7 +70,7 @@ if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS) {
     )
 }
 
-Write-Host "Starting One Agent Gateway with the local ChatGPT-authenticated Codex runtime."
+Write-Host "Starting One Agent Gateway with the local Codex runtime authenticated through $authMode."
 Write-Host "Gateway listener: http://0.0.0.0:$Port"
 Write-Host "Local access: http://127.0.0.1:$Port"
 
