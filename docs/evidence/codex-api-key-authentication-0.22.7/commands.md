@@ -64,3 +64,9 @@ Task SSE event runtime.connected
 provider: local-codex-app-server
 authentication: apiKey
 ```
+
+The post-push release smoke used task
+`835b1672-bae0-41dd-8d62-5a759ef474d2` and returned
+`API_KEY_RELEASE_SMOKE_OK`. Its durable `runtime.connected` event again
+reported `local-codex-app-server` with `authentication=apiKey`, and the task
+completed without file changes.

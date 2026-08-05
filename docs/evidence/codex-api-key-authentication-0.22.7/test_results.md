@@ -30,3 +30,10 @@ Redis startup checks, and idempotent managed start.
 The real local Codex app-server task used `read-only-analysis`, returned the
 fixed smoke marker, reported `authentication=apiKey` in CAG SSE, and completed
 without modifying the workspace.
+
+After the `a987a49` release push, task
+`835b1672-bae0-41dd-8d62-5a759ef474d2` returned
+`API_KEY_RELEASE_SMOKE_OK` with the same `local-codex-app-server` and `apiKey`
+runtime evidence. The supervisor briefly observed readiness timeouts while an
+existing operations queue lease was being processed, then the Gateway returned
+to ready state without data loss.
