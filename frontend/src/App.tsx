@@ -251,6 +251,9 @@ const REJECTION_REASON_LABELS: Record<string, string> = {
   file_read_error: "文件读取失败",
   pdf_unreadable: "PDF 无法解析或已加密",
   office_archive_invalid: "Office 文件结构损坏",
+  temporary_office_file: "Office 临时文件已跳过",
+  spreadsheet_cell_limit_exceeded: "工作簿有效单元格超过限制",
+  spreadsheet_text_limit_exceeded: "工作簿提取文本超过限制",
   extractor_unavailable: "内容提取器不可用",
   extractor_rejected: "内容提取失败",
 };
@@ -545,6 +548,15 @@ export default function App() {
     useState<string | null>(null);
   const [knowledgeInventories, setKnowledgeInventories] = useState<
     Record<string, KnowledgeSourceEntryPage>
+  >({});
+  const [knowledgeInventoryDrafts, setKnowledgeInventoryDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [knowledgeInventoryQueries, setKnowledgeInventoryQueries] = useState<
+    Record<string, string>
+  >({});
+  const [knowledgeInventoryErrors, setKnowledgeInventoryErrors] = useState<
+    Record<string, string | null>
   >({});
   const [knowledgeMode, setKnowledgeMode] = useState("assist");
   const [harnessProfile, setHarnessProfile] = useState("single");
@@ -1232,24 +1244,78 @@ export default function App() {
     }
   }
 
+  async function loadKnowledgeInventory(
+    sourceId: string,
+    offset: number,
+    query: string,
+  ) {
+    setKnowledgeBusy(sourceId);
+    setKnowledgeInventoryErrors((current) => ({
+      ...current,
+      [sourceId]: null,
+    }));
+    try {
+      const inventory = await listKnowledgeSourceEntries(
+        sourceId,
+        100,
+        offset,
+        query,
+      );
+      setKnowledgeInventories((current) => ({
+        ...current,
+        [sourceId]: inventory,
+      }));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setKnowledgeInventoryErrors((current) => ({
+        ...current,
+        [sourceId]: message,
+      }));
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }
+
   async function handleKnowledgeInventoryToggle(sourceId: string) {
     if (expandedInventorySourceId === sourceId) {
       setExpandedInventorySourceId(null);
       return;
     }
-    setKnowledgeBusy(sourceId);
-    try {
-      const inventory = await listKnowledgeSourceEntries(sourceId);
-      setKnowledgeInventories((current) => ({
-        ...current,
-        [sourceId]: inventory,
-      }));
-      setExpandedInventorySourceId(sourceId);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setKnowledgeBusy(null);
-    }
+    setKnowledgeInventoryDrafts((current) => ({
+      ...current,
+      [sourceId]: "",
+    }));
+    setKnowledgeInventoryQueries((current) => ({
+      ...current,
+      [sourceId]: "",
+    }));
+    setExpandedInventorySourceId(sourceId);
+    await loadKnowledgeInventory(sourceId, 0, "");
+  }
+
+  async function handleKnowledgeInventorySearch(
+    event: FormEvent,
+    sourceId: string,
+  ) {
+    event.preventDefault();
+    const query = (knowledgeInventoryDrafts[sourceId] ?? "").trim();
+    setKnowledgeInventoryQueries((current) => ({
+      ...current,
+      [sourceId]: query,
+    }));
+    await loadKnowledgeInventory(sourceId, 0, query);
+  }
+
+  async function handleKnowledgeInventoryClear(sourceId: string) {
+    setKnowledgeInventoryDrafts((current) => ({
+      ...current,
+      [sourceId]: "",
+    }));
+    setKnowledgeInventoryQueries((current) => ({
+      ...current,
+      [sourceId]: "",
+    }));
+    await loadKnowledgeInventory(sourceId, 0, "");
   }
 
   async function handleKnowledgeRejectionToggle(ingestionId: string) {
@@ -2355,13 +2421,62 @@ export default function App() {
                               条
                             </strong>
                             <small>
-                              展示前{" "}
-                              {knowledgeInventories[
-                                source.id
-                              ].items.length.toLocaleString()}{" "}
-                              条
+                              {knowledgeInventories[source.id].total === 0
+                                ? "当前没有匹配文件"
+                                : `显示 ${(
+                                    knowledgeInventories[source.id].offset + 1
+                                  ).toLocaleString()} 至 ${Math.min(
+                                    knowledgeInventories[source.id].offset +
+                                      knowledgeInventories[source.id].items.length,
+                                    knowledgeInventories[source.id].total,
+                                  ).toLocaleString()} 条`}
                             </small>
                           </div>
+                          <form
+                            className="source-inventory-search"
+                            onSubmit={(event) =>
+                              handleKnowledgeInventorySearch(event, source.id)
+                            }
+                          >
+                            <label>
+                              <span>文件路径搜索</span>
+                              <input
+                                aria-label={`${source.name}文件路径搜索`}
+                                value={
+                                  knowledgeInventoryDrafts[source.id] ?? ""
+                                }
+                                onChange={(event) =>
+                                  setKnowledgeInventoryDrafts((current) => ({
+                                    ...current,
+                                    [source.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder="输入文件名或相对路径"
+                              />
+                            </label>
+                            <button
+                              type="submit"
+                              disabled={knowledgeBusy !== null}
+                            >
+                              查询
+                            </button>
+                            <button
+                              type="button"
+                              className="button-quiet"
+                              disabled={knowledgeBusy !== null}
+                              onClick={() =>
+                                handleKnowledgeInventoryClear(source.id)
+                              }
+                            >
+                              清除
+                            </button>
+                          </form>
+                          {knowledgeInventoryErrors[source.id] && (
+                            <p className="source-inventory-error">
+                              文件资产加载失败：
+                              {knowledgeInventoryErrors[source.id]}
+                            </p>
+                          )}
                           <div className="source-inventory-table-wrap">
                             <table>
                               <thead>
@@ -2370,6 +2485,8 @@ export default function App() {
                                   <th>相对路径</th>
                                   <th>大小</th>
                                   <th>状态</th>
+                                  <th>处理器</th>
+                                  <th>处理时间</th>
                                   <th>最后发现</th>
                                 </tr>
                               </thead>
@@ -2393,12 +2510,67 @@ export default function App() {
                                               item.processing_status
                                             ] ?? item.processing_status}
                                       </td>
+                                      <td>
+                                        {item.extractor
+                                          ? `${item.extractor}${
+                                              item.extractor_version
+                                                ? ` ${item.extractor_version}`
+                                                : ""
+                                            }`
+                                          : "尚无处理证据"}
+                                      </td>
+                                      <td>
+                                        {item.processed_at
+                                          ? formatTime(item.processed_at)
+                                          : "尚未处理"}
+                                      </td>
                                       <td>{formatTime(item.last_seen_at)}</td>
                                     </tr>
                                   ),
                                 )}
                               </tbody>
                             </table>
+                          </div>
+                          <div className="source-inventory-pagination">
+                            <button
+                              type="button"
+                              className="button-quiet"
+                              disabled={
+                                knowledgeBusy !== null ||
+                                knowledgeInventories[source.id].offset === 0
+                              }
+                              onClick={() =>
+                                loadKnowledgeInventory(
+                                  source.id,
+                                  Math.max(
+                                    0,
+                                    knowledgeInventories[source.id].offset - 100,
+                                  ),
+                                  knowledgeInventoryQueries[source.id] ?? "",
+                                )
+                              }
+                            >
+                              上一页
+                            </button>
+                            <button
+                              type="button"
+                              className="button-quiet"
+                              disabled={
+                                knowledgeBusy !== null ||
+                                knowledgeInventories[source.id].offset +
+                                  knowledgeInventories[source.id].items.length >=
+                                  knowledgeInventories[source.id].total
+                              }
+                              onClick={() =>
+                                loadKnowledgeInventory(
+                                  source.id,
+                                  knowledgeInventories[source.id].offset + 100,
+                                  knowledgeInventoryQueries[source.id] ?? "",
+                                )
+                              }
+                            >
+                              下一页
+                            </button>
                           </div>
                         </section>
                       )}

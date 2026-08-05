@@ -145,6 +145,9 @@ class KnowledgeService:
             git_executable=settings.git_executable,
             svn_executable=settings.svn_executable,
             max_file_bytes=settings.knowledge_max_file_bytes,
+            max_spreadsheet_cells=(
+                settings.knowledge_max_spreadsheet_cells
+            ),
         )
         self._scheduler_running = False
 
@@ -644,6 +647,7 @@ class KnowledgeService:
             duplicate_files = collected.duplicate_files
             document_fingerprints: dict[str, str] = {}
             document_modes: dict[str, str] = {}
+            document_extractors: dict[str, tuple[str, str | None]] = {}
             for document in collected.documents:
                 scan = scan_knowledge_text(document.text)
                 safe_text = scan.safe_text
@@ -665,9 +669,14 @@ class KnowledgeService:
                     embedding_dimensions=(
                         self._settings.ollama_embedding_dimensions
                     ),
+                    processor_variant=document.processor_variant,
                 )
                 document_fingerprints[document.path] = fingerprint
                 document_modes[document.path] = processing_mode
+                document_extractors[document.path] = (
+                    document.extractor,
+                    document.extractor_version,
+                )
                 if processing_mode == "code":
                     analysis = analyze_code(document.path, safe_text)
                     code_analysis_by_path[document.path] = analysis
@@ -924,6 +933,10 @@ class KnowledgeService:
                         entry.relative_path
                     ]
                     entry.processed_at = processed_at
+                    (
+                        entry.extractor,
+                        entry.extractor_version,
+                    ) = document_extractors[entry.relative_path]
                 for relative_path in sorted(changed_code_paths):
                     document = document_by_path.get(relative_path)
                     if document is None:
@@ -1152,32 +1165,84 @@ class KnowledgeService:
         ingestion_id: str,
         items: tuple[CollectionRejection, ...],
     ) -> None:
+        merged: dict[str, CollectionRejection] = {}
+        for item in items:
+            current = merged.get(item.relative_path)
+            if current is None or (
+                current.disposition == "skipped"
+                and item.disposition == "rejected"
+            ):
+                merged[item.relative_path] = item
+            elif current.disposition == item.disposition:
+                merged[item.relative_path] = item
+        unique_items = tuple(merged.values())
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
                 raise KeyError(ingestion_id)
-            for item in items:
-                session.add(
-                    KnowledgeIngestionRejection(
-                        ingestion_id=ingestion_id,
-                        relative_path=item.relative_path,
-                        entry_kind=item.entry_kind,
-                        disposition=item.disposition,
-                        extension=item.extension,
-                        file_size=item.file_size,
-                        reason_code=item.reason_code,
-                        extractor=item.extractor,
-                        error_type=item.error_type,
-                        error_message=item.error_message,
+            paths = [item.relative_path for item in unique_items]
+            existing_rejections = {
+                item.relative_path: item
+                for item in session.scalars(
+                    select(KnowledgeIngestionRejection).where(
+                        KnowledgeIngestionRejection.ingestion_id
+                        == ingestion_id,
+                        KnowledgeIngestionRejection.relative_path.in_(paths),
                     )
                 )
-            ingestion.rejected_files += sum(
-                item.disposition == "rejected" for item in items
-            )
-            ingestion.skipped_files += sum(
-                item.disposition == "skipped" for item in items
-            )
-            paths = [item.relative_path for item in items]
+            }
+            rejected_delta = 0
+            skipped_delta = 0
+            final_items: dict[str, CollectionRejection] = {}
+            preserve_entry_versions: set[str] = set()
+            for item in unique_items:
+                record = existing_rejections.get(item.relative_path)
+                if record is None:
+                    record = KnowledgeIngestionRejection(
+                        ingestion_id=ingestion_id,
+                        relative_path=item.relative_path,
+                    )
+                    session.add(record)
+                    if item.disposition == "rejected":
+                        rejected_delta += 1
+                    else:
+                        skipped_delta += 1
+                    selected = item
+                elif (
+                    record.disposition == "rejected"
+                    and item.disposition == "skipped"
+                ):
+                    preserve_entry_versions.add(item.relative_path)
+                    selected = CollectionRejection(
+                        relative_path=record.relative_path,
+                        entry_kind=record.entry_kind,
+                        disposition=record.disposition,
+                        extension=record.extension,
+                        file_size=record.file_size,
+                        reason_code=record.reason_code,
+                        extractor=record.extractor,
+                        error_type=record.error_type,
+                        error_message=record.error_message,
+                    )
+                else:
+                    selected = item
+                    if (
+                        record.disposition == "skipped"
+                        and item.disposition == "rejected"
+                    ):
+                        skipped_delta -= 1
+                        rejected_delta += 1
+                record.entry_kind = selected.entry_kind
+                record.disposition = selected.disposition
+                record.extension = selected.extension
+                record.file_size = selected.file_size
+                record.reason_code = selected.reason_code
+                record.extractor = selected.extractor
+                record.error_type = selected.error_type
+                record.error_message = selected.error_message
+                final_items[selected.relative_path] = selected
+            ingestion.rejected_files += rejected_delta
+            ingestion.skipped_files += skipped_delta
             entries = {
                 item.relative_path: item
                 for item in session.scalars(
@@ -1188,13 +1253,16 @@ class KnowledgeService:
                     )
                 )
             }
-            for item in items:
+            for item in final_items.values():
                 entry = entries.get(item.relative_path)
                 if entry is None:
                     continue
                 if item.disposition == "rejected":
                     entry.processing_status = "rejected"
                 entry.reason_code = item.reason_code
+                entry.extractor = item.extractor
+                if item.relative_path not in preserve_entry_versions:
+                    entry.extractor_version = item.extractor_version
             session.commit()
 
     def _archive_ingestion_rejections(

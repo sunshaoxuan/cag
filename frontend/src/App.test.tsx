@@ -332,6 +332,11 @@ describe("One Agent Gateway conversation page", () => {
             "/api/v1/knowledge/sources/source-1/entries?",
           )
         ) {
+          const entryUrl = new URL(url, "http://localhost");
+          const entryOffset = Number(
+            entryUrl.searchParams.get("offset") ?? "0",
+          );
+          const entryQuery = entryUrl.searchParams.get("query") ?? "";
           return jsonResponse({
             items: [
               {
@@ -345,6 +350,8 @@ describe("One Agent Gateway conversation page", () => {
                 processing_mode: "metadata_only",
                 processing_status: "metadata_only",
                 reason_code: "metadata_only_policy",
+                extractor: "filesystem",
+                extractor_version: null,
                 present: true,
                 last_seen_ingestion_id: "ingestion-history-1",
                 processor_fingerprint: null,
@@ -355,9 +362,9 @@ describe("One Agent Gateway conversation page", () => {
                 removed_at: null,
               },
             ],
-            total: 5,
+            total: entryQuery ? 1 : 205,
             limit: 100,
-            offset: 0,
+            offset: entryOffset,
             summary: {
               total: 5,
               code: 1,
@@ -733,7 +740,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.22.7")).toBeInTheDocument();
+    expect(screen.getByText("v0.22.8")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -824,6 +831,37 @@ describe("One Agent Gateway conversation page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("3.34 GB")).toBeInTheDocument();
     expect(screen.getAllByText("仅登记元数据").length).toBeGreaterThan(0);
+    expect(screen.getByText("filesystem")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetch).mock.calls.some(([input]) =>
+          String(input).includes("offset=100"),
+        ),
+      ).toBe(true),
+    );
+    const inventorySearch = screen.getByLabelText(
+      "产品文档文件路径搜索",
+    );
+    fireEvent.change(inventorySearch, {
+      target: { value: "historical.zip" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "查询" }));
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetch).mock.calls.some(([input]) =>
+          String(input).includes("query=historical.zip"),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "清除" }));
+    expect(inventorySearch).toHaveValue("");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "下一页" }),
+      ).not.toBeDisabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "运行历史" }));
     expect(await screen.findByText("自动同步")).toBeInTheDocument();
     expect(screen.getByText(/变化 2 · 删除 1/)).toBeInTheDocument();

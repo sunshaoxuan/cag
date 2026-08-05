@@ -176,7 +176,8 @@ GET /api/v1/knowledge/sources/{source_id}/entries
 The endpoint supports `limit`, `offset`, `processing_mode`, `present` and
 `query`. Each item includes relative path, entry kind, extension, 64-bit file
 size, modified time, processing mode, status, reason, current presence,
-fingerprints and first, last, processed or removed timestamps.
+fingerprints, `extractor`, `extractor_version` and first, last, processed or
+removed timestamps.
 
 Processing modes are:
 
@@ -190,6 +191,19 @@ Processing modes are:
 ZIP, DUMP, backup, binary and files over the configured size limit use
 `metadata_only`. A processor-policy change updates the fingerprint so unchanged
 bytes can be reconsidered on a later ingestion.
+
+XLSX document entries use the `openpyxl` extractor and
+`xlsx_semantic_v1` processor variant. The extracted text contains ordered sheet
+headers and populated cell coordinates. Formulas retain their expression and
+include the last cached value when the workbook supplies one. The extractor
+does not calculate formulas. Workbooks exceeding the populated-cell or output
+budget are rejected with `spreadsheet_cell_limit_exceeded` or
+`spreadsheet_text_limit_exceeded`. Office lock files beginning with `~$` are
+skipped with `temporary_office_file`.
+
+Repeated rejection callbacks for one ingestion and path update one audit row.
+Rejected outcomes take precedence over skipped outcomes and counters describe
+unique final paths.
 
 The source list response includes:
 

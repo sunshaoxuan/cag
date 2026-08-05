@@ -548,6 +548,8 @@ def source_entry_response(item: KnowledgeSourceEntry) -> dict[str, Any]:
         "processing_mode": item.processing_mode,
         "processing_status": item.processing_status,
         "reason_code": item.reason_code,
+        "extractor": item.extractor,
+        "extractor_version": item.extractor_version,
         "present": item.present,
         "last_seen_ingestion_id": item.last_seen_ingestion_id,
         "processor_fingerprint": item.processor_fingerprint,

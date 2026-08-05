@@ -71,6 +71,9 @@ class CollectedDocument:
     language: str
     encoding: str
     processing_mode: str
+    extractor: str
+    extractor_version: str | None = None
+    processor_variant: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,7 @@ class CollectionRejection:
     file_size: int | None
     reason_code: str
     extractor: str
+    extractor_version: str | None = None
     error_type: str | None = None
     error_message: str | None = None
 
@@ -131,6 +135,7 @@ class SourceConnectorManager:
         git_executable: str,
         svn_executable: str,
         max_file_bytes: int,
+        max_spreadsheet_cells: int = 250_000,
     ) -> None:
         self._cache_root = cache_root.resolve()
         self._allowed_roots = allowed_roots
@@ -139,6 +144,7 @@ class SourceConnectorManager:
         self._git = git_executable
         self._svn = svn_executable
         self._max_file_bytes = max_file_bytes
+        self._max_spreadsheet_cells = max_spreadsheet_cells
 
     @staticmethod
     def normalized_source_key(
@@ -459,6 +465,7 @@ class SourceConnectorManager:
                             language="path",
                             encoding="path-metadata",
                             processing_mode="path_only",
+                            extractor="path-semantic",
                         )
                     )
                     continue
@@ -468,7 +475,13 @@ class SourceConnectorManager:
                 file_size: int | None = None
                 try:
                     file_size = path.stat().st_size
-                    extracted = extract_text_with_metadata(path)
+                    extracted = extract_text_with_metadata(
+                        path,
+                        max_spreadsheet_cells=(
+                            self._max_spreadsheet_cells
+                        ),
+                        max_output_characters=self._max_file_bytes,
+                    )
                     text = normalize_text(extracted.text)
                 except (
                     UnicodeDecodeError,
@@ -518,6 +531,9 @@ class SourceConnectorManager:
                         language=path.suffix.lstrip(".").lower() or "text",
                         encoding=extracted.encoding,
                         processing_mode=processing_mode,
+                        extractor=extracted.extractor,
+                        extractor_version=extracted.extractor_version,
+                        processor_variant=extracted.processor_variant,
                     )
                 )
             directories_scanned += 1
@@ -538,6 +554,9 @@ class SourceConnectorManager:
 
     @staticmethod
     def _rejection_reason(path: Path, error: Exception) -> str:
+        configured_reason = getattr(error, "reason_code", None)
+        if isinstance(configured_reason, str):
+            return configured_reason
         if isinstance(error, UnicodeDecodeError):
             return "encoding_unsupported"
         if isinstance(error, zipfile.BadZipFile):
@@ -557,7 +576,9 @@ class SourceConnectorManager:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             return "pdf"
-        if suffix in {".docx", ".pptx", ".xlsx", ".odt"}:
+        if suffix == ".xlsx":
+            return "openpyxl"
+        if suffix in {".docx", ".pptx", ".odt"}:
             return "office-xml"
         if suffix in SUPPORTED_EXTENSIONS:
             return "text"
@@ -599,11 +620,30 @@ class SourceConnectorManager:
                 extension=path.suffix.lower(),
                 file_size=file_size,
                 reason_code=reason_code,
-                extractor=cls._extractor_name(path),
+                extractor=(
+                    "filesystem"
+                    if disposition == "skipped"
+                    else cls._extractor_name(path)
+                ),
+                extractor_version=(
+                    cls._extractor_version(path)
+                    if disposition == "rejected"
+                    else None
+                ),
                 error_type=type(error).__name__ if error is not None else None,
                 error_message=error_message,
             )
         )
+
+    @staticmethod
+    def _extractor_version(path: Path) -> str | None:
+        if path.suffix.lower() != ".xlsx":
+            return None
+        try:
+            import openpyxl
+        except ImportError:
+            return None
+        return openpyxl.__version__
 
     @staticmethod
     def _report_observation(

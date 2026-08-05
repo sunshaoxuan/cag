@@ -45,6 +45,18 @@ Supported input includes source code, scripts, configuration, Markdown, common
 text formats, CSV, PDF, DOCX, PPTX, XLSX and ODT. Build outputs, dependencies
 and repository metadata are excluded.
 
+XLSX files use openpyxl in read-only mode with external workbook links
+disabled. The semantic representation preserves workbook sheet order, sheet
+name and visibility, populated cell coordinates, normalized values, formulas
+and cached formula values when present. Dates use ISO text and embedded line
+breaks are escaped. Images, charts, macros and style-only information remain
+outside the knowledge text. Hidden sheets remain eligible for indexing.
+
+One workbook is limited to 250000 populated cells by default. Extracted text
+also remains inside the configured file-size character budget. A limit breach
+creates a stable rejection reason. Office lock files whose names begin with
+`~$` remain visible in the source inventory and are skipped as temporary files.
+
 Version 0.18.0 records every discovered entry in a durable source asset
 inventory. ZIP, DUMP, backup, binary and files above the default ten-megabyte
 policy limit keep file presence, relative path, 64-bit size and processing
@@ -58,6 +70,11 @@ includes the routing policy, processing mode, processor version, embedding
 model and vector dimensions. A changed fingerprint gives an unchanged file a
 new processing opportunity. A matching content hash and fingerprint reuses the
 existing chunks and vectors.
+
+The XLSX processor adds `xlsx_semantic_v1` to its fingerprint. Existing
+non-XLSX document fingerprints retain their previous payload, so the parser
+upgrade reprocesses spreadsheets while unchanged ordinary documents continue
+to reuse stored vectors.
 
 Product-scoped knowledge follows the stable Product physical ID. ProductVersion
 records remain release and provenance metadata. A Project version change keeps
@@ -83,6 +100,9 @@ directly. Memory candidate governance has its own `/memory` page.
 Every collection outcome outside the accepted document set is auditable.
 Rejected and skipped entries are stored with source-relative path, stable
 reason code, file metadata, extractor identity and sanitized exception detail.
+Persistence merges repeated paths inside and across buffer flushes. A rejected
+outcome has priority over a skipped outcome and ingestion counters represent
+unique final paths.
 The database supports paged operational queries and CSV export. Each run also
 produces a gzip JSONL snapshot with a SHA 256 receipt. Database rows and
 compressed archives use separate retention windows so the searchable working

@@ -86,6 +86,22 @@ def test_alembic_upgrade_and_validation_status_round_trip(tmp_path: Path) -> Non
     assert migrated.status == "validation_completed"
     assert migrated.approval_status == "not_requested"
 
+    head_inspector = inspect(create_engine(database_url))
+    source_entry_columns = {
+        column["name"]
+        for column in head_inspector.get_columns("knowledge_source_entries")
+    }
+    assert {"extractor", "extractor_version"} <= source_entry_columns
+    command.downgrade(config, "20260731_0019")
+    xlsx_evidence_downgraded = inspect(create_engine(database_url))
+    assert "extractor" not in {
+        column["name"]
+        for column in xlsx_evidence_downgraded.get_columns(
+            "knowledge_source_entries"
+        )
+    }
+    command.upgrade(config, "head")
+
     command.downgrade(config, "20260731_0018")
     with engine.connect() as connection:
         downgraded = connection.execute(

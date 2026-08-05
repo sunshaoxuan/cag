@@ -1,11 +1,12 @@
 import asyncio
-from datetime import timedelta
+from datetime import date, timedelta
 import gzip
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+from threading import Event
 import zipfile
 
 import pytest
@@ -18,7 +19,11 @@ from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
 from app.knowledge.resources import build_resource_uri
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
-from app.knowledge.connectors import SourceConfig, SourceConnectorManager
+from app.knowledge.connectors import (
+    CollectionRejection,
+    SourceConfig,
+    SourceConnectorManager,
+)
 from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
     KnowledgeCipher,
@@ -1100,6 +1105,321 @@ def test_office_document_extraction(tmp_path: Path) -> None:
     assert "Enterprise guide" in extract_text(document)
 
 
+def test_xlsx_semantic_extraction_preserves_structure_and_formula_cache(
+    tmp_path: Path,
+) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "導入準備.xlsx"
+    workbook = Workbook()
+    parameters = workbook.active
+    parameters.title = "生成パラメータ"
+    parameters.append(["カテゴリ", "値", "補足", "合計"])
+    parameters.append(["JAVA", 1, 2, "=SUM(B2:C2)"])
+    parameters["A3"] = "Apache\nTomcat"
+    parameters["B3"] = date(2026, 8, 5)
+    parameters.merge_cells("A4:B4")
+    parameters["A4"] = "結合セル"
+    hidden = workbook.create_sheet("入力")
+    hidden.sheet_state = "hidden"
+    hidden["A1"] = "インライン文字列"
+    hidden["B1"] = True
+    workbook.save(workbook_path)
+    workbook.close()
+
+    rewritten = tmp_path / "cached.xlsx"
+    with zipfile.ZipFile(workbook_path) as source, zipfile.ZipFile(
+        rewritten,
+        "w",
+    ) as target:
+        for item in source.infolist():
+            payload = source.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                xml = payload.decode("utf-8")
+                xml = xml.replace(
+                    "<f>SUM(B2:C2)</f><v />",
+                    "<f>SUM(B2:C2)</f><v>3</v>",
+                )
+                payload = xml.encode("utf-8")
+            target.writestr(item, payload)
+    rewritten.replace(workbook_path)
+
+    from app.knowledge.extractors import extract_text_with_metadata
+
+    extracted = extract_text_with_metadata(workbook_path)
+
+    assert extracted.extractor == "openpyxl"
+    assert extracted.extractor_version == "3.1.5"
+    assert extracted.processor_variant == "xlsx_semantic_v1"
+    assert "[sheet] index=1 name=生成パラメータ state=visible" in extracted.text
+    assert "[sheet] index=2 name=入力 state=hidden" in extracted.text
+    assert "A2\tvalue=JAVA" in extracted.text
+    assert "D2\tformula==SUM(B2:C2)\tcached_value=3" in extracted.text
+    assert "A3\tvalue=Apache\\nTomcat" in extracted.text
+    assert "B3\tvalue=2026-08-05T00:00:00" in extracted.text
+    assert "A4\tvalue=結合セル" in extracted.text
+    assert "B1\tvalue=TRUE" in extracted.text
+
+
+def test_xlsx_semantic_extraction_enforces_cell_and_text_limits(
+    tmp_path: Path,
+) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "bounded.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["A", "B"])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    from app.knowledge.extractors import (
+        SpreadsheetExtractionLimitError,
+        extract_text_with_metadata,
+    )
+
+    with pytest.raises(SpreadsheetExtractionLimitError) as cells:
+        extract_text_with_metadata(
+            workbook_path,
+            max_spreadsheet_cells=1,
+        )
+    assert cells.value.reason_code == "spreadsheet_cell_limit_exceeded"
+
+    with pytest.raises(SpreadsheetExtractionLimitError) as text_limit:
+        extract_text_with_metadata(
+            workbook_path,
+            max_output_characters=20,
+        )
+    assert (
+        text_limit.value.reason_code
+        == "spreadsheet_text_limit_exceeded"
+    )
+
+
+def test_xlsx_semantic_extraction_rejects_xml_entities(
+    tmp_path: Path,
+) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "unsafe.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "SAFE"
+    workbook.save(workbook_path)
+    workbook.close()
+    rewritten = tmp_path / "unsafe-rewritten.xlsx"
+    with zipfile.ZipFile(workbook_path) as source, zipfile.ZipFile(
+        rewritten,
+        "w",
+    ) as target:
+        for item in source.infolist():
+            payload = source.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                payload = (
+                    b'<!DOCTYPE worksheet [<!ENTITY injected "EXPANDED">]>'
+                    + payload.replace(b"SAFE", b"&injected;")
+                )
+            target.writestr(item, payload)
+    rewritten.replace(workbook_path)
+
+    from app.knowledge.extractors import extract_text_with_metadata
+
+    with pytest.raises(ValueError, match="invalid XML"):
+        extract_text_with_metadata(workbook_path)
+
+
+def test_temporary_office_file_is_skipped_before_extraction(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "office-source"
+    root.mkdir()
+    temporary = root / "~$共有メモ.xlsx"
+    temporary.write_bytes(b"not-an-office-archive")
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+    rejections: list[CollectionRejection] = []
+
+    result = manager.collect(
+        SourceConfig(
+            id="temporary-office-source",
+            source_type="local_directory",
+            location=str(root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        rejection=rejections.append,
+    )
+
+    assert result.skipped_files == 1
+    assert result.rejected_files == 0
+    assert rejections[0].reason_code == "temporary_office_file"
+    assert rejections[0].extractor == "filesystem"
+
+
+def test_rejection_persistence_is_idempotent_across_flushes(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Idempotent audit source",
+                "root_path": str(tmp_path),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+
+    with app.state.database.session_factory() as session:
+        ingestion = KnowledgeIngestion(
+            source_id=source["id"],
+            status="running",
+        )
+        entry = KnowledgeSourceEntry(
+            source_id=source["id"],
+            relative_path="duplicate.xlsx",
+            processing_mode="document",
+        )
+        session.add_all((ingestion, entry))
+        session.commit()
+        ingestion_id = ingestion.id
+
+    skipped = CollectionRejection(
+        relative_path="duplicate.xlsx",
+        entry_kind="file",
+        disposition="skipped",
+        extension=".xlsx",
+        file_size=10,
+        reason_code="temporary_office_file",
+        extractor="filesystem",
+    )
+    rejected = CollectionRejection(
+        relative_path="duplicate.xlsx",
+        entry_kind="file",
+        disposition="rejected",
+        extension=".xlsx",
+        file_size=10,
+        reason_code="office_archive_invalid",
+        extractor="openpyxl",
+        extractor_version="3.1.5",
+        error_type="BadZipFile",
+        error_message="invalid archive",
+    )
+    service._persist_ingestion_rejections(
+        ingestion_id,
+        (skipped, skipped),
+    )
+    service._persist_ingestion_rejections(
+        ingestion_id,
+        (skipped, rejected, rejected),
+    )
+    service._persist_ingestion_rejections(ingestion_id, (skipped,))
+
+    with app.state.database.session_factory() as session:
+        ingestion = session.get(KnowledgeIngestion, ingestion_id)
+        assert ingestion is not None
+        assert ingestion.skipped_files == 0
+        assert ingestion.rejected_files == 1
+        records = list(
+            session.scalars(
+                select(KnowledgeIngestionRejection).where(
+                    KnowledgeIngestionRejection.ingestion_id
+                    == ingestion_id
+                )
+            )
+        )
+        assert len(records) == 1
+        assert records[0].disposition == "rejected"
+        assert records[0].reason_code == "office_archive_invalid"
+        entry = session.scalar(
+            select(KnowledgeSourceEntry).where(
+                KnowledgeSourceEntry.source_id == source["id"],
+                KnowledgeSourceEntry.relative_path == "duplicate.xlsx",
+            )
+        )
+        assert entry is not None
+        assert entry.processing_status == "rejected"
+        assert entry.extractor == "openpyxl"
+        assert entry.extractor_version == "3.1.5"
+
+
+def test_interactive_worker_remains_available_during_knowledge_ingestion(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "slow-knowledge-source"
+    source_root.mkdir()
+    (source_root / "guide.md").write_text(
+        "# Slow knowledge fixture",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    original_ingest = service.ingest
+    knowledge_started = Event()
+    knowledge_release = Event()
+
+    async def delayed_ingest(ingestion_id: str) -> None:
+        knowledge_started.set()
+        await asyncio.to_thread(knowledge_release.wait, 5)
+        await original_ingest(ingestion_id)
+
+    service.ingest = delayed_ingest  # type: ignore[method-assign]
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Slow knowledge source",
+                "root_path": str(source_root),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert knowledge_started.wait(2)
+        created = client.post(
+            "/api/v1/tasks",
+            headers={
+                "X-CAG-Client-ID": "worker-isolation-test",
+                "X-Request-ID": "interactive-during-knowledge",
+            },
+            json={
+                "project_id": "test-project",
+                "prompt": "Confirm interactive worker availability",
+                "knowledge_mode": "off",
+            },
+        )
+        assert created.status_code == 202
+        task = wait_for_task(client, created.json()["id"])
+        queue_status = client.get("/api/v1/queue/status")
+        assert task["status"] == "completed"
+        assert queue_status.status_code == 200
+        assert queue_status.json()["configured_workers"] == {
+            "interactive": 1,
+            "knowledge": 1,
+            "operations": 1,
+        }
+        knowledge_release.set()
+        completed = wait_for_ingestion(client, ingestion["id"])
+        assert completed["status"] == "completed"
+
+
 def test_encrypted_pdf_is_rejected_without_stopping_collection(
     tmp_path: Path,
 ) -> None:
@@ -1361,7 +1681,16 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         )
         assert entries["service.py"]["processing_mode"] == "code"
         assert entries["guide.md"]["processing_mode"] == "document"
+        assert entries["guide.md"]["extractor"] == "text"
         assert entries["warning.txt"]["processing_mode"] == "path_only"
+        filtered_inventory = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/entries",
+            params={"query": "historical", "limit": 1, "offset": 0},
+        ).json()
+        assert filtered_inventory["total"] == 1
+        assert filtered_inventory["items"][0]["relative_path"] == (
+            "historical.zip"
+        )
 
         with app.state.database.session_factory() as session:
             documents = list(

@@ -292,6 +292,12 @@ class KnowledgeSourceEntry(PhysicalIdMixin, Base):
     reason_code: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    extractor: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    extractor_version: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
     present: Mapped[bool] = mapped_column(
         Boolean, default=True, index=True
     )

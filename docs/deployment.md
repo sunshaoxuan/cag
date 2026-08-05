@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.22.7 development deployment
+## 0.22.8 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -184,6 +184,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_QUEUE_OPERATIONS_WORKERS` | Independent self-operations issue Worker count |
 | `AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR` | Managed Git and SVN source snapshot directory |
 | `AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` | Maximum accepted source file size |
+| `AGENT_GATEWAY_KNOWLEDGE_MAX_SPREADSHEET_CELLS` | Maximum populated cells extracted from one XLSX workbook, default 250000 |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_LEASE_SECONDS` | Database lease duration for one claimed source |

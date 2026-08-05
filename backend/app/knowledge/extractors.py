@@ -1,7 +1,9 @@
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import date, datetime, time
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 
@@ -49,22 +51,46 @@ SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | {".pdf"}
 class ExtractedText:
     text: str
     encoding: str
+    extractor: str
+    extractor_version: str | None = None
+    processor_variant: str | None = None
+
+
+class SpreadsheetExtractionLimitError(ValueError):
+    def __init__(self, reason_code: str, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 def extract_text(path: Path) -> str:
     return extract_text_with_metadata(path).text
 
 
-def extract_text_with_metadata(path: Path) -> ExtractedText:
+def extract_text_with_metadata(
+    path: Path,
+    *,
+    max_spreadsheet_cells: int = 250_000,
+    max_output_characters: int = 10_000_000,
+) -> ExtractedText:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
         raw = path.read_bytes()
         encoding = detect_text_encoding(raw)
-        return ExtractedText(raw.decode(encoding), encoding)
+        return ExtractedText(raw.decode(encoding), encoding, "text")
+    if suffix == ".xlsx":
+        return _extract_xlsx(
+            path,
+            max_cells=max_spreadsheet_cells,
+            max_characters=max_output_characters,
+        )
     if suffix in OFFICE_EXTENSIONS:
-        return ExtractedText(_extract_zipped_xml(path), "office-xml")
+        return ExtractedText(
+            _extract_zipped_xml(path),
+            "office-xml",
+            "office-xml",
+        )
     if suffix == ".pdf":
-        return ExtractedText(_extract_pdf(path), "pdf-text")
+        return ExtractedText(_extract_pdf(path), "pdf-text", "pypdf")
     raise ValueError(f"Unsupported knowledge file type: {suffix}")
 
 
@@ -118,6 +144,125 @@ def _extract_zipped_xml(path: Path) -> str:
             if text:
                 parts.append(text)
     return "\n".join(parts)
+
+
+def _xlsx_value(value: Any) -> str:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    text = str(value)
+    return (
+        text.replace("\\", "\\\\")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
+
+
+def _extract_xlsx(
+    path: Path,
+    *,
+    max_cells: int,
+    max_characters: int,
+) -> ExtractedText:
+    try:
+        import openpyxl
+    except ImportError as exc:
+        raise RuntimeError(
+            "XLSX indexing requires the openpyxl package"
+        ) from exc
+
+    formula_workbook = None
+    value_workbook = None
+    lines: list[str] = [f"[workbook] name={_xlsx_value(path.name)}"]
+    character_count = len(lines[0])
+    populated_cells = 0
+
+    def append_line(line: str) -> None:
+        nonlocal character_count
+        next_count = character_count + len(line) + 1
+        if next_count > max_characters:
+            raise SpreadsheetExtractionLimitError(
+                "spreadsheet_text_limit_exceeded",
+                "Spreadsheet extracted text exceeds the configured limit",
+            )
+        lines.append(line)
+        character_count = next_count
+
+    try:
+        formula_workbook = openpyxl.load_workbook(
+            path,
+            read_only=True,
+            data_only=False,
+            keep_links=False,
+        )
+        value_workbook = openpyxl.load_workbook(
+            path,
+            read_only=True,
+            data_only=True,
+            keep_links=False,
+        )
+        for sheet_index, formula_sheet in enumerate(
+            formula_workbook.worksheets,
+            start=1,
+        ):
+            value_sheet = value_workbook[formula_sheet.title]
+            append_line(
+                "[sheet] "
+                f"index={sheet_index} "
+                f"name={_xlsx_value(formula_sheet.title)} "
+                f"state={formula_sheet.sheet_state}"
+            )
+            formula_rows = formula_sheet.iter_rows()
+            value_rows = value_sheet.iter_rows()
+            for formula_row, value_row in zip(
+                formula_rows,
+                value_rows,
+                strict=False,
+            ):
+                for formula_cell, value_cell in zip(
+                    formula_row,
+                    value_row,
+                    strict=False,
+                ):
+                    if formula_cell.value is None:
+                        continue
+                    populated_cells += 1
+                    if populated_cells > max_cells:
+                        raise SpreadsheetExtractionLimitError(
+                            "spreadsheet_cell_limit_exceeded",
+                            "Spreadsheet populated cell count exceeds "
+                            "the configured limit",
+                        )
+                    coordinate = formula_cell.coordinate
+                    if formula_cell.data_type == "f":
+                        formula = _xlsx_value(formula_cell.value)
+                        line = f"{coordinate}\tformula={formula}"
+                        if value_cell.value is not None:
+                            line += (
+                                "\tcached_value="
+                                + _xlsx_value(value_cell.value)
+                            )
+                    else:
+                        line = (
+                            f"{coordinate}\tvalue="
+                            + _xlsx_value(formula_cell.value)
+                        )
+                    append_line(line)
+    finally:
+        if formula_workbook is not None:
+            formula_workbook.close()
+        if value_workbook is not None:
+            value_workbook.close()
+
+    return ExtractedText(
+        "\n".join(lines),
+        "xlsx-semantic",
+        "openpyxl",
+        openpyxl.__version__,
+        "xlsx_semantic_v1",
+    )
 
 
 def _extract_pdf(path: Path) -> str:

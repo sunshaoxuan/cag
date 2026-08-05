@@ -338,6 +338,12 @@ dimensions. Content hash plus this fingerprint controls reuse. A changed
 fingerprint reprocesses an unchanged file, while a matching fingerprint keeps
 the existing chunks and vectors.
 
+XLSX uses a bounded, read-only openpyxl adapter that emits deterministic sheet
+and cell records. Its processor variant changes only spreadsheet fingerprints.
+Office lock files are audited before extraction. Rejection persistence performs
+path-level merge and priority resolution before committing, so repeated
+collector callbacks cannot violate the ingestion and path uniqueness rule.
+
 Each document records its producing ingestion. Embeddings are prepared before a
 single replacement transaction commits documents, chunks, code facts and the
 successful ingestion receipt. Existing knowledge remains visible during a

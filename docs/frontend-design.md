@@ -129,6 +129,13 @@ finish first.
 
 ## Responsive and accessibility rules
 
+The Knowledge source file inventory provides source-scoped relative-path
+search, clear, previous and next controls. Each page requests 100 rows from the
+existing source entry endpoint and preserves the active query while paging.
+The table exposes processing mode, status, extractor identity, processed time
+and last-seen time. A failed request remains inside the source inventory and
+keeps the entered query available for retry.
+
 The desktop hero uses two columns and the work console uses paired cards. At
 1080 pixels the hero and console collapse to one column. At 760 pixels actions,
 proof chips, governance grids and form controls stack. Focus rings use the

@@ -1366,6 +1366,40 @@ h1 span {
   margin-bottom: 10px;
 }
 
+.source-inventory-search {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.source-inventory-search label {
+  display: grid;
+  flex: 1 1 320px;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.source-inventory-search input {
+  width: 100%;
+}
+
+.source-inventory-error {
+  margin: 0 0 10px;
+  color: #a8321c;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.source-inventory-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .source-inventory-table-wrap {
   overflow-x: auto;
 }

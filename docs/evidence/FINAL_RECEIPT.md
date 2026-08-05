@@ -1,39 +1,43 @@
 # Current release receipt
 
-Version: 0.8.2
+Version: 0.22.8
 
-Date: 2026-07-28
+Date: 2026-08-05
 
 Branch: `master`
 
+Status: pre-deployment validation passed
+
 ## Delivered
 
-* Port 5173 is the unified CAG visual management console.
-* The console retains API testing, API audit, enterprise knowledge and
-  capability governance in one routed application.
-* Browser API and SSE requests use same-origin `/api` URLs.
-* Frontend Nginx proxies `/api` to the host ChatGPT-authenticated Gateway.
-* LAN browsers no longer resolve the Gateway as their own loopback address.
-* HTML entry responses disable caching and hashed assets use immutable caching.
+* Bounded semantic XLSX extraction with sheets, coordinates, formulas and
+  cached values.
+* Idempotent rejection persistence and unique final-path counters.
+* Temporary Office file routing and stable spreadsheet limit reasons.
+* Durable source-entry extractor evidence.
+* Knowledge page file path search, clear and 100-row pagination.
+* Interactive and knowledge Worker isolation regression.
 
-## Verified
+## Verified before deployment
 
-* 62 backend tests passed with 88.69 percent coverage.
-* 10 frontend tests and the production build passed.
-* Compose configuration, frontend image build and `nginx -t` passed.
-* LAN management console project API returned one project.
-* Overview rendered 12 traces, 2 knowledge sources and 18 capabilities.
-* API audit rendered 12 traces and received 3,500 SSE events.
+* 129 backend tests passed and 2 environment-dependent integration tests were
+  skipped with 86.06 percent coverage.
+* 17 frontend tests and the production build passed.
+* The target workbook produced 14 sheets, 1001 populated cells, 47 formulas,
+  47 cached values and expected Java, Apache and Tomcat text.
+* Isolated 8001 and 5174 runtime acceptance passed.
+* Desktop and narrow screenshots passed visual inspection.
 * Browser console contained zero warnings and errors.
-* Screenshot evidence was saved.
 
-## Runtime boundary
+## Pending production gate
 
-Codex app-server remains a private local child process. Port 5173 exposes the
-management frontend and its same-origin Gateway proxy. Port 8000 remains the
-direct external API endpoint.
+The release becomes complete after commit and push, managed production
+cutover, schema 0020 application, live browser verification and a successful
+full UPDS ingestion with target workbook retrieval evidence.
 
 ## Rollback
 
-Deploy the prior `cag-frontend` image and recreate only the frontend service.
-The host Gateway, database, task history and Codex runtime require no rollback.
+Restore the 0.22.7 application commit and rebuild the frontend. Downgrade
+Alembic to 20260731_0019. The downgrade removes only nullable source-entry
+extractor evidence. Existing documents, vectors, ingestion history and active
+knowledge generation remain stored.

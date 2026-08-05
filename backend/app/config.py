@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.22.7"
+APP_VERSION = "0.22.8"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     )
     knowledge_max_file_bytes: int = Field(
         default=10_000_000, ge=1_024, le=100_000_000
+    )
+    knowledge_max_spreadsheet_cells: int = Field(
+        default=250_000, ge=1_000, le=2_000_000
     )
     knowledge_scheduler_enabled: bool = True
     knowledge_scheduler_poll_seconds: int = Field(

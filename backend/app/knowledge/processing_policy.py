@@ -59,6 +59,15 @@ def classify_file(
 ) -> FileProcessingDecision:
     path = PurePosixPath(relative_path)
     suffix = path.suffix.lower()
+    if path.name.startswith("~$") and suffix in {
+        ".docx",
+        ".pptx",
+        ".xlsx",
+    }:
+        return FileProcessingDecision(
+            "metadata_only",
+            "temporary_office_file",
+        )
     if suffix in METADATA_ONLY_EXTENSIONS:
         return FileProcessingDecision(
             "metadata_only",
@@ -88,6 +97,7 @@ def processor_fingerprint(
     *,
     embedding_model: str,
     embedding_dimensions: int,
+    processor_variant: str | None = None,
 ) -> str:
     processor_version = {
         "code": CODE_PROCESSOR_VERSION,
@@ -101,6 +111,8 @@ def processor_fingerprint(
         "embedding_model": embedding_model,
         "embedding_dimensions": embedding_dimensions,
     }
+    if processor_variant is not None:
+        payload["variant"] = processor_variant
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()

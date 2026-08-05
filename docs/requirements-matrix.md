@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.22.7 | Evidence |
+| Requirement | Status for 0.22.8 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -35,7 +35,7 @@ Legend:
 | External task API trace contract | Implemented | Trace ID, client request ID, request hash, source and idempotency tests |
 | Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
 | PostgreSQL plus Redis durable gateway queue | Implemented | QueueItem, QueueWorker, `FOR UPDATE SKIP LOCKED`, Redis wake, lease recovery and queue API tests |
-| Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API and recovery tests |
+| Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API, recovery tests and interactive completion during delayed knowledge ingestion |
 | Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, sequence-addressed fresh workspaces, versioned artifacts and tests |
@@ -68,8 +68,8 @@ Legend:
 | Source collection stage SSE | Implemented | Durable collection, cleaning, indexing and Source Memory events |
 | Scalable folder traversal feedback | Implemented | Breadth-first directory queue, per-directory progress SSE, single-flight guard and browser evidence |
 | File-level ingestion rejection audit | Implemented | Durable path and reason records, paged API, CSV export, gzip JSONL archive and retention tests |
-| Durable knowledge source entry inventory | Implemented | `KnowledgeSourceEntry`, source entry API, management table and migration tests |
-| Policy-routed knowledge processing | Implemented | Metadata-only archive and dump routing, path-only empty files, document extraction and structural code routing tests |
+| Durable knowledge source entry inventory | Implemented | `KnowledgeSourceEntry`, path search and pagination API, processor evidence, management table and migration tests |
+| Policy-routed knowledge processing | Implemented | Metadata-only archive and dump routing, temporary Office filtering, path-only empty files, semantic XLSX extraction and structural code routing tests |
 | Processor policy reprocessing | Implemented | Processor fingerprints, legacy code backfill and unchanged document vector reuse tests |
 | 64-bit knowledge file sizes | Implemented | PostgreSQL `BIGINT` migration and sparse large-file ingestion test |
 | Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |

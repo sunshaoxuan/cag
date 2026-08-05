@@ -329,6 +329,8 @@ export type KnowledgeSourceEntry = {
   processing_mode: "code" | "document" | "metadata_only" | "path_only";
   processing_status: string;
   reason_code: string | null;
+  extractor: string | null;
+  extractor_version: string | null;
   present: boolean;
   last_seen_ingestion_id: string | null;
   processor_fingerprint: string | null;
@@ -821,12 +823,14 @@ export function listKnowledgeSourceEntries(
   sourceId: string,
   limit = 100,
   offset = 0,
+  queryText = "",
 ): Promise<KnowledgeSourceEntryPage> {
   const query = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
     present: "true",
   });
+  if (queryText.trim()) query.set("query", queryText.trim());
   return request<KnowledgeSourceEntryPage>(
     `/api/v1/knowledge/sources/${sourceId}/entries?${query}`,
   );
