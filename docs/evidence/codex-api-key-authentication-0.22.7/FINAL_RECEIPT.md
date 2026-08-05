@@ -22,6 +22,7 @@ process and does not become a direct OpenAI API client.
 
 ## Release state
 
-The source changes are ready for the required `master` commit and push after
-the final diff review. The live Gateway already reports version 0.22.7 from the
-supervised process.
+The implementation was committed to `master` as `a987a49` and the post-push
+evidence update was committed as `ff53157`. Both commits are present on
+`origin/master`. The live Gateway reports version 0.22.7 from the supervised
+process.
