@@ -586,6 +586,7 @@ class OperationalIssueService:
                     issue,
                     job_type="operational_triage",
                     priority=self._priority(issue.severity),
+                    force_new=True,
                 )
                 event_type = "issue.evaluation.failed"
             self._append_event(
@@ -1048,6 +1049,7 @@ class OperationalIssueService:
                     issue,
                     job_type="operational_triage",
                     priority=self._priority(issue.severity),
+                    force_new=True,
                 )
                 event_type = "issue.evaluation.failed"
             self._append_event(
@@ -1082,6 +1084,7 @@ class OperationalIssueService:
                 issue,
                 job_type="operational_triage",
                 priority=self._priority(issue.severity),
+                force_new=True,
             )
             self._append_event(
                 session,
@@ -1300,18 +1303,20 @@ class OperationalIssueService:
         *,
         job_type: str,
         priority: int,
+        force_new: bool = False,
     ) -> QueueItem:
-        existing = session.scalar(
-            select(QueueItem).where(
-                QueueItem.issue_id == issue.id,
-                QueueItem.job_type == job_type,
-                QueueItem.status.in_(
-                    (QueueItemStatus.QUEUED, QueueItemStatus.LEASED)
+        if not force_new:
+            existing = session.scalar(
+                select(QueueItem).where(
+                    QueueItem.issue_id == issue.id,
+                    QueueItem.job_type == job_type,
+                    QueueItem.status.in_(
+                        (QueueItemStatus.QUEUED, QueueItemStatus.LEASED)
+                    ),
                 ),
             )
-        )
-        if existing is not None:
-            return existing
+            if existing is not None:
+                return existing
         item = QueueItem(
             queue_name="operations",
             job_type=job_type,

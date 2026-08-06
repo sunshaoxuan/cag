@@ -1,6 +1,19 @@
 # Deployment
 
-## 0.23.0 development deployment
+## 0.24.0 development deployment
+
+Install the pinned Windows OCR runtime before starting the supervised API and
+worker processes:
+
+```powershell
+.\scripts\install-ocr-runtime.ps1
+```
+
+The script installs Tesseract through Winget, verifies pinned Japanese language
+data by SHA 256, writes ignored local OCR settings and confirms `jpn` plus `eng`.
+Rollback stops CAG, runs `winget uninstall --id UB-Mannheim.TesseractOCR`, and
+removes the three `AGENT_GATEWAY_KNOWLEDGE_OCR_*` values from
+`backend\.env.local`.
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -191,7 +204,9 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_KNOWLEDGE_CANDIDATE_LIMIT` | Maximum bounded candidates retained per retrieval channel |
 | `AGENT_GATEWAY_KNOWLEDGE_FAST_TIMEOUT_SECONDS` | Overall indexed fast-search deadline |
 | `AGENT_GATEWAY_KNOWLEDGE_BALANCED_TIMEOUT_SECONDS` | Overall balanced-search deadline |
-| `AGENT_GATEWAY_KNOWLEDGE_DEEP_TIMEOUT_SECONDS` | Overall deep-search and extraction deadline |
+| `AGENT_GATEWAY_KNOWLEDGE_DEEP_TIMEOUT_SECONDS` | Overall deep-search deadline |
+| `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_EXTRACTION_TIMEOUT_SECONDS` | Overall scoped customer extraction deadline, default 900 seconds |
+| `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_DOCUMENT_TIMEOUT_SECONDS` | Per document customer extraction deadline, default 15 seconds |
 | `AGENT_GATEWAY_KNOWLEDGE_STATEMENT_TIMEOUT_MS` | PostgreSQL timeout for each retrieval transaction |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |
@@ -225,7 +240,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260806_0021` and then
+The normal Windows launcher applies Alembic revision `20260806_0024` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

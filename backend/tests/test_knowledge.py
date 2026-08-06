@@ -1,7 +1,8 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import time
 from threading import Event
+import uuid
 import zipfile
 
 import pytest
@@ -18,6 +20,9 @@ from sqlalchemy import delete, func, select
 
 from app.config import Settings
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
+from app.knowledge.ocr import OcrResult
+from app.knowledge.provenance_backfill import backfill_raw_content_hashes
+from app.knowledge.extractors import extract_text_with_metadata
 from app.knowledge.resources import build_resource_uri
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
@@ -26,6 +31,11 @@ from app.knowledge.connectors import (
     SourceConfig,
     SourceConnectorManager,
 )
+from app.knowledge.customer_ledger_contracts import (
+    customer_ledger_schema_registry,
+    value_matches_schema,
+)
+from app.knowledge.extraction import _parse_datetime
 from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
     KnowledgeCipher,
@@ -40,7 +50,12 @@ from app.models import (
     CodeSymbol,
     KnowledgeChunk,
     KnowledgeDocument,
+    KnowledgeEmbeddingCache,
+    KnowledgeDocumentVersion,
+    KnowledgeExtractionTaskDocument,
+    KnowledgeFieldConflict,
     KnowledgeIngestion,
+    KnowledgeProcessingVersion,
     KnowledgeIngestionRejection,
     KnowledgeSource,
     KnowledgeSourceEntry,
@@ -117,13 +132,27 @@ class FailingEmbeddingOllama(FakeOllamaClient):
         raise OllamaError("forced embedding failure")
 
 
+class FailingSecondBatchOllama(FakeOllamaClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.failed = False
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.calls == 2 and not self.failed:
+            self.failed = True
+            raise OllamaError("forced transient embedding failure")
+        return await super().embed(texts)
+
+
 class CustomerExtractionFakeOllama(FakeOllamaClient):
     def __init__(self, *, authoritative_citation: bool = True) -> None:
         super().__init__()
         self.authoritative_citation = authoritative_citation
 
     async def structured_generate(self, prompt: str, schema: dict) -> dict:
-        if "candidates" not in schema.get("properties", {}):
+        if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -133,15 +162,239 @@ class CustomerExtractionFakeOllama(FakeOllamaClient):
             else "00000000-0000-0000-0000-000000000000"
         )
         return {
-            "candidates": [
+            "fields": [
                 {
-                    "candidate_type": "contracts",
-                    "values": {"contract_code": "C-9330"},
+                    "field_code": "contract_code",
+                    "value": "C-9330",
+                    "option_id": None,
                     "confidence": 0.98,
                     "evidence_chunk_ids": [chunk_id],
+                    "effective_from": None,
+                    "effective_to": None,
                 }
             ]
         }
+
+
+class RemoteAccessExtractionFakeOllama(FakeOllamaClient):
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        self.generated.append(prompt)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        remote = next(item for item in evidence if "SSH" in item["text"])
+        return {
+            "fields": [
+                {
+                    "field_code": "remote_access",
+                    "value": [
+                        {
+                            "connection_type": "SSH",
+                            "purpose": "support remote access",
+                            "notes": None,
+                        }
+                    ],
+                    "option_id": None,
+                    "confidence": 0.95,
+                    "evidence_chunk_ids": [remote["chunk_id"]],
+                    "effective_from": None,
+                    "effective_to": None,
+                },
+                {
+                    "field_code": "repositories",
+                    "value": [
+                        {
+                            "repository_type": "SVN",
+                            "name": None,
+                            "purpose": None,
+                        }
+                    ],
+                    "option_id": None,
+                    "confidence": 0.5,
+                    "evidence_chunk_ids": [remote["chunk_id"]],
+                    "effective_from": None,
+                    "effective_to": None,
+                },
+            ]
+        }
+
+
+class ConflictingFieldFakeOllama(FakeOllamaClient):
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        item = evidence[0]
+        value = "A" if "first" in item["path"] else "B"
+        return {
+            "fields": [
+                {
+                    "field_code": "organization_name",
+                    "value": value,
+                    "option_id": None,
+                    "confidence": 0.9,
+                    "evidence_chunk_ids": [item["chunk_id"]],
+                    "effective_from": None,
+                    "effective_to": None,
+                }
+            ]
+        }
+
+
+class TemporalFieldFakeOllama(FakeOllamaClient):
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        chunk_id = evidence[0]["chunk_id"]
+        return {
+            "fields": [
+                {
+                    "field_code": "maintenance_contact",
+                    "value": "legacy-desk",
+                    "option_id": None,
+                    "confidence": 0.95,
+                    "evidence_chunk_ids": [chunk_id],
+                    "effective_from": "2025-01-01T00:00:00Z",
+                    "effective_to": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "field_code": "maintenance_contact",
+                    "value": "current-desk",
+                    "option_id": None,
+                    "confidence": 0.96,
+                    "evidence_chunk_ids": [chunk_id],
+                    "effective_from": "2026-01-01T00:00:00Z",
+                    "effective_to": None,
+                },
+            ]
+        }
+
+
+class PartiallyFailingExtractionFakeOllama(FakeOllamaClient):
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        item = evidence[0]
+        if "timeout" in item["path"]:
+            raise TimeoutError("forced per-document model timeout")
+        if "broken" in item["path"]:
+            raise ValueError("forced per-document extraction failure")
+        return {
+            "fields": [
+                {
+                    "field_code": "organization_name",
+                    "value": "筑波大学",
+                    "option_id": None,
+                    "confidence": 0.95,
+                    "evidence_chunk_ids": [item["chunk_id"]],
+                    "effective_from": None,
+                    "effective_to": None,
+                }
+            ]
+        }
+
+
+def scoped_extraction_request(
+    source: dict,
+    *,
+    code: str,
+    name: str,
+    fields: list[dict],
+) -> dict:
+    return {
+        "schema_version": 1,
+        "project_id": source["project_id"],
+        "knowledge_source_id": source["id"],
+        "analysis_template": {
+            "code": "ORGANIZATION_PROFILE_ENRICHMENT",
+            "version": 1,
+        },
+        "subject": {
+            "type": "organization",
+            "external_system": "ONEOPS",
+            "external_id": "11111111-1111-4111-8111-111111111111",
+            "code": code,
+            "official_name": name,
+            "short_name": None,
+            "aliases": [],
+        },
+        "scope_policy": {"resolution": "catalog", "coverage": "exhaustive"},
+        "analysis_context": {
+            "as_of": "2026-08-06T09:00:00Z",
+            "learning_processing_selection": "active",
+            "business_knowledge_selection": "applicable_at",
+        },
+        "ingestion_policy": {
+            "mode": "prepare_required_versions",
+            "retry_failed_documents": True,
+        },
+        "requested_fields": fields,
+        "result_policy": {
+            "mode": "candidates_only",
+            "require_evidence": True,
+            "report_conflicts": True,
+            "minimum_confidence": 0.7,
+            "allow_automatic_overwrite": False,
+            "allow_delete": False,
+        },
+    }
+
+
+def extraction_headers(key: str) -> dict[str, str]:
+    return {
+        "X-CAG-Source": "oneops-customer-scan",
+        "X-CAG-Client-ID": "oneops-test",
+        "X-Request-ID": str(uuid.uuid4()),
+        "Idempotency-Key": key,
+    }
+
+
+def test_customer_ledger_schema_registry_validates_nested_values() -> None:
+    registry = customer_ledger_schema_registry()
+    contract = registry["CUSTOMER_CONTRACT_V1"]
+    assert value_matches_schema(
+        [{"item_type": "SERVICE", "service_name": "運用支援"}],
+        contract,
+    )
+    assert not value_matches_schema([], contract)
+    assert not value_matches_schema([{"service_name": "missing type"}], contract)
+    assert not value_matches_schema(
+        [{"item_type": "SERVICE", "unknown": "value"}], contract
+    )
+    assert value_matches_schema(None, {"type": ["string", "null"]})
+    assert not value_matches_schema(1, {"type": "string"})
+    assert value_matches_schema(1.5, {"type": "number"})
+    assert not value_matches_schema(True, {"type": "number"})
+    assert value_matches_schema(2, {"type": "integer"})
+    assert not value_matches_schema(True, {"type": "integer"})
+    assert value_matches_schema(False, {"type": "boolean"})
+    assert not value_matches_schema("false", {"type": "boolean"})
+    assert not value_matches_schema("UNKNOWN", {"type": "string", "enum": ["ACTIVE"]})
+
+
+def test_customer_extraction_datetime_parser_normalizes_utc() -> None:
+    assert _parse_datetime(None) is None
+    assert _parse_datetime("invalid") is None
+    assert _parse_datetime("2026-08-06T09:00:00").tzinfo == timezone.utc
+    assert _parse_datetime("2026-08-06T18:00:00+09:00") == datetime(
+        2026, 8, 6, 9, 0, tzinfo=timezone.utc
+    )
+
+
+def wait_for_extraction(client: TestClient, task_id: str) -> dict:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        response = client.get(
+            f"/api/v1/knowledge/extractions/customer-ledger/{task_id}"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] in {"review_required", "completed", "failed"}:
+            return payload
+        time.sleep(0.05)
+    raise AssertionError("customer extraction did not finish")
 
 
 class CapturingKnowledgeRuntime:
@@ -230,6 +483,49 @@ def test_invalid_cipher_key_is_rejected() -> None:
         KnowledgeCipher(b"short")
 
 
+def test_multilingual_connection_credentials_are_redacted() -> None:
+    source = (
+        "SSHによるサポート接続\n"
+        "ユーザ名：operator-name\n"
+        "パスワード：secret-japanese-value\n"
+        "接続先：internal.example.invalid\n"
+        "LDAPデータ参照を使用する\n"
+    )
+
+    scan = scan_knowledge_text(source)
+
+    assert scan.secret_detected is True
+    assert "secret-japanese-value" not in scan.safe_text
+    assert "operator-name" not in scan.safe_text
+    assert "internal.example.invalid" not in scan.safe_text
+    assert "SSH" in scan.safe_text
+    assert "LDAP" in scan.safe_text
+
+
+def test_long_customer_prompt_prioritizes_physical_identity_terms() -> None:
+    query = (
+        "顧客情報スキャンを実行してください。\n"
+        "対象組織機関 Code: 0276\n"
+        "正式名: 滋賀大学\n"
+        "最終回答は organizationCode, organizationName, "
+        "introductionStartDate, maintenanceStartDate を持つ JSON。"
+    )
+
+    terms = KnowledgeService._lexical_search_terms(query, set())
+
+    assert terms[:2] == ["0276", "滋賀大学"]
+
+
+def test_embedding_path_includes_governed_source_subpath() -> None:
+    embedded = KnowledgeService._embedding_text(
+        "V6/６．リモート接続情報/接続方法.txt",
+        "SSH support",
+        "し_0276_滋賀大学",
+    )
+
+    assert "し_0276_滋賀大学/V6/６．リモート接続情報" in embedded
+
+
 def test_fake_ollama_embeddings_and_memory() -> None:
     provider = FakeOllamaClient(dimensions=8)
     vectors = asyncio.run(provider.embed(["alpha", "beta"]))
@@ -242,6 +538,111 @@ def test_fake_ollama_embeddings_and_memory() -> None:
         )
     )
     assert output["memories"][0]["kind"] == "procedural"
+
+
+def test_streamed_raw_file_hash_uses_original_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "original.bin"
+    source.write_bytes(b"original-file-bytes")
+
+    assert SourceConnectorManager._sha256_file(source) == hashlib.sha256(
+        b"original-file-bytes"
+    ).hexdigest()
+
+
+def test_raw_hash_backfill_is_resumable_and_rejects_changed_files(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "provenance-source"
+    source_root.mkdir()
+    stable = source_root / "stable.txt"
+    stable.write_bytes(b"stable bytes")
+    changed = source_root / "changed.txt"
+    changed.write_bytes(b"original bytes")
+    stable_stat = stable.stat()
+    changed_stat = changed.stat()
+    app = create_app(settings=knowledge_settings(settings, tmp_path))
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Provenance source",
+                "root_path": str(source_root),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        with app.state.database.session_factory() as session:
+            session.add_all(
+                [
+                    KnowledgeSourceEntry(
+                        source_id=source["id"],
+                        relative_path="stable.txt",
+                        entry_kind="file",
+                        file_size=stable_stat.st_size,
+                        modified_at=datetime.fromtimestamp(
+                            stable_stat.st_mtime,
+                            tz=timezone.utc,
+                        ),
+                        processing_mode="document",
+                        processing_status="indexed",
+                    ),
+                    KnowledgeSourceEntry(
+                        source_id=source["id"],
+                        relative_path="changed.txt",
+                        entry_kind="file",
+                        file_size=changed_stat.st_size,
+                        modified_at=datetime.fromtimestamp(
+                            changed_stat.st_mtime,
+                            tz=timezone.utc,
+                        ),
+                        processing_mode="document",
+                        processing_status="indexed",
+                    ),
+                ]
+            )
+            session.commit()
+
+        changed.write_bytes(b"replacement bytes")
+        result = backfill_raw_content_hashes(
+            app.state.database,
+            source["id"],
+            workers=2,
+            batch_size=1,
+        )
+
+        assert result == {
+            "pending": 2,
+            "processed": 2,
+            "hashed": 1,
+            "source_changed": 1,
+            "read_failed": 0,
+            "unsafe_path": 0,
+        }
+        with app.state.database.session_factory() as session:
+            entries = {
+                item.relative_path: item
+                for item in session.scalars(
+                    select(KnowledgeSourceEntry).where(
+                        KnowledgeSourceEntry.source_id == source["id"]
+                    )
+                )
+            }
+            assert entries["stable.txt"].raw_content_hash == hashlib.sha256(
+                b"stable bytes"
+            ).hexdigest()
+            assert entries["changed.txt"].raw_content_hash is None
+
+        repeated = backfill_raw_content_hashes(
+            app.state.database,
+            source["id"],
+            workers=2,
+            batch_size=1,
+        )
+        assert repeated["pending"] == 1
+        assert repeated["source_changed"] == 1
 
 
 def test_resource_uris_preserve_origin_revision_and_path(tmp_path: Path) -> None:
@@ -425,6 +826,17 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         )
         assert search.status_code == 200
         assert search.json()["results"][0]["path"] == "README.md"
+        source_entry_id = search.json()["results"][0]["source_entry_id"]
+        with app.state.database.session_factory() as session:
+            document = session.scalar(select(KnowledgeDocument))
+            entry = session.get(KnowledgeSourceEntry, source_entry_id)
+            assert document is not None
+            assert entry is not None
+            assert document.source_entry_id == entry.id
+            assert document.canonical_path == entry.relative_path
+            assert entry.raw_content_hash == hashlib.sha256(
+                (project_repository / "README.md").read_bytes()
+            ).hexdigest()
         resource_uri = search.json()["results"][0]["resource_uri"]
         assert resource_uri.startswith("file:")
         assert resource_uri.endswith("/README.md")
@@ -561,48 +973,131 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
 
         created = client.post(
             "/api/v1/knowledge/extractions/customer-ledger",
-            json={
-                "project_id": "test-project",
-                "organization_code": "9330",
-                "official_name": "岡山市立総合医療センター",
-                "requested_sections": ["contracts"],
-            },
+            headers=extraction_headers("customer-9330-first"),
+            json=scoped_extraction_request(
+                source,
+                code="9330",
+                name="岡山市立総合医療センター",
+                fields=[
+                    {
+                        "code": "contract_code",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
         )
         assert created.status_code == 202
-        completed = wait_for_task(
-            client,
-            created.json()["id"],
-            timeout_seconds=10,
-        )
-        assert completed["status"] == "completed"
-        report = completed["final_report"]
+        report = wait_for_extraction(client, created.json()["id"])
+        assert report["status"] == "review_required"
         assert report["schema_version"] == 1
-        assert report["learning_gap"] is False
-        assert report["candidates"][0]["candidate_id"]
-        assert report["candidates"][0]["validation_status"] == "valid"
-        assert report["candidates"][0]["evidence_chunk_ids"] == [
-            report["citations"][0]["chunk_id"]
-        ]
-        assert report["citations"][0]["generation_id"] == ingestion["id"]
+        assert report["coverage"]["coverage_rate"] == 1.0
+        assert report["field_candidates"][0]["id"]
+        assert report["field_candidates"][0]["field_code"] == "contract_code"
+        assert report["field_candidates"][0]["value"] == "C-9330"
+        assert report["field_candidates"][0]["evidence"][0]["chunk_id"]
+        assert report["versions"]["source_generation_id"] == ingestion["id"]
+        with app.state.database.session_factory() as session:
+            task_document = session.scalar(
+                select(KnowledgeExtractionTaskDocument)
+            )
+            assert task_document.document_version_id is not None
+            assert task_document.processing_version_id is not None
+            processing = session.get(
+                KnowledgeProcessingVersion,
+                task_document.processing_version_id,
+            )
+            assert processing.status == "active"
+        forbidden_ingestion = client.post(
+            f"/api/v1/knowledge/scopes/{report['scope']['id']}/ingestions",
+            headers={
+                "X-CAG-Client-Role": "user",
+                "Idempotency-Key": "repair-forbidden",
+            },
+            json={
+                "reason": "ORGANIZATION_PROFILE_ENRICHMENT",
+                "mode": "prepare_required_versions",
+                "retry_statuses": ["failed"],
+            },
+        )
+        assert forbidden_ingestion.status_code == 403
+        scoped_ingestion = client.post(
+            f"/api/v1/knowledge/scopes/{report['scope']['id']}/ingestions",
+            headers={
+                "X-CAG-Client-Role": "system-admin",
+                "Idempotency-Key": "repair-9330",
+            },
+            json={
+                "reason": "ORGANIZATION_PROFILE_ENRICHMENT",
+                "mode": "prepare_required_versions",
+                "retry_statuses": ["observed", "metadata_only", "empty_text", "failed"],
+            },
+        )
+        assert scoped_ingestion.status_code == 202
+        scoped_ingestion_id = scoped_ingestion.json()["id"]
+        assert wait_for_ingestion(client, scoped_ingestion_id)["status"] == "completed"
+        replayed_scope_ingestion = client.post(
+            f"/api/v1/knowledge/scopes/{report['scope']['id']}/ingestions",
+            headers={
+                "X-CAG-Client-Role": "system-admin",
+                "Idempotency-Key": "repair-9330",
+            },
+            json={
+                "reason": "ORGANIZATION_PROFILE_ENRICHMENT",
+                "mode": "prepare_required_versions",
+                "retry_statuses": [
+                    "observed",
+                    "metadata_only",
+                    "empty_text",
+                    "failed",
+                ],
+            },
+        )
+        assert replayed_scope_ingestion.status_code == 202
+        assert replayed_scope_ingestion.json()["id"] == scoped_ingestion_id
+        assert replayed_scope_ingestion.json()["created"] is False
+        conflicting_scope_ingestion = client.post(
+            f"/api/v1/knowledge/scopes/{report['scope']['id']}/ingestions",
+            headers={
+                "X-CAG-Client-Role": "system-admin",
+                "Idempotency-Key": "repair-9330",
+            },
+            json={
+                "reason": "ORGANIZATION_PROFILE_ENRICHMENT",
+                "mode": "prepare_required_versions",
+                "retry_statuses": ["failed"],
+            },
+        )
+        assert conflicting_scope_ingestion.status_code == 409
+        assert conflicting_scope_ingestion.json()["detail"]["code"] == (
+            "IDEMPOTENCY_CONFLICT"
+        )
+        with app.state.database.session_factory() as session:
+            ingestion_record = session.get(KnowledgeIngestion, scoped_ingestion_id)
+            assert ingestion_record.analysis_scope_id == report["scope"]["id"]
+            assert ingestion_record.scope_prefix == "お_9330_岡山市立総合医療センター"
 
         provider.authoritative_citation = False
         rejected = client.post(
             "/api/v1/knowledge/extractions/customer-ledger",
-            json={
-                "project_id": "test-project",
-                "organization_code": "9330",
-                "requested_sections": ["contracts"],
-            },
+            headers=extraction_headers("customer-9330-rejected"),
+            json=scoped_extraction_request(
+                source,
+                code="9330",
+                name="岡山市立総合医療センター",
+                fields=[
+                    {
+                        "code": "contract_code",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
         )
-        rejected_report = wait_for_task(
-            client,
-            rejected.json()["id"],
-            timeout_seconds=10,
-        )["final_report"]
-        assert rejected_report["candidates"] == []
-        assert rejected_report["learning_gap"] is True
-        assert rejected_report["validation_errors"][0]["reasons"] == [
-            "citation_not_authoritative"
+        rejected_report = wait_for_extraction(client, rejected.json()["id"])
+        assert rejected_report["field_candidates"] == []
+        assert rejected_report["unresolved_fields"] == [
+            {"field_code": "contract_code", "reason_code": "EVIDENCE_NOT_FOUND"}
         ]
 
         async def blocking_search(**_: object) -> list:
@@ -624,7 +1119,344 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
             started = time.monotonic()
             assert client.get("/health/live").status_code == 200
             assert time.monotonic() - started < 0.5
-            assert pending.result().status_code == 200
+        assert pending.result().status_code == 200
+
+
+def test_customer_remote_access_is_semantic_cited_and_does_not_guess_svn(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    customer = project_repository / "し_0276_滋賀大学" / "６．リモート接続情報"
+    customer.mkdir(parents=True)
+    (customer / "リモート接続方法.txt").write_text(
+        "サポート用SSH接続\n"
+        "LDAPデータ参照\n"
+        "ユーザ名：operator-name\n"
+        "パスワード：secret-value\n",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    provider = RemoteAccessExtractionFakeOllama()
+    service._provider = provider
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Customer remote access",
+                "root_path": str(project_repository),
+                "subpath": "し_0276_滋賀大学",
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("customer-0276"),
+            json=scoped_extraction_request(
+                source,
+                code="0276",
+                name="滋賀大学",
+                fields=[
+                    {
+                        "code": "remote_access",
+                        "type": "object_list",
+                        "required": False,
+                        "schema_ref": "CUSTOMER_REMOTE_ACCESS_V1",
+                    },
+                    {
+                        "code": "repositories",
+                        "type": "object_list",
+                        "required": False,
+                        "schema_ref": "CUSTOMER_REPOSITORY_V1",
+                    },
+                ],
+            ),
+        )
+        report = wait_for_extraction(client, created.json()["id"])
+
+    assert report["status"] != "failed", report.get("error")
+    assert [item["field_code"] for item in report["field_candidates"]] == [
+        "remote_access"
+    ]
+    assert report["field_candidates"][0]["evidence"][0]["canonical_path"].startswith(
+        "し_0276_滋賀大学/"
+    )
+    assert report["field_candidates"][0]["value"][0]["connection_type"] == "SSH"
+    assert report["unresolved_fields"] == [
+        {"field_code": "repositories", "reason_code": "EVIDENCE_NOT_FOUND"}
+    ]
+    assert "secret-value" not in provider.generated[-1]
+    assert "operator-name" not in provider.generated[-1]
+
+
+def test_scoped_extraction_idempotency_and_scope_errors_are_stable(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    for name in ("a_0408_筑波大学", "b_0408_筑波大学"):
+        directory = project_repository / name
+        directory.mkdir()
+        (directory / "ledger.txt").write_text("筑波大学", encoding="utf-8")
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = CustomerExtractionFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Ambiguous customer source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        request = scoped_extraction_request(
+            source,
+            code="0408",
+            name="筑波大学",
+            fields=[
+                {"code": "contract_code", "type": "string", "required": True}
+            ],
+        )
+        headers = extraction_headers("ambiguous-0408")
+        invalid_request = dict(request)
+        invalid_request["scope_policy"] = {
+            "resolution": "path",
+            "coverage": "exhaustive",
+        }
+        invalid = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("invalid-0408"),
+            json=invalid_request,
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()["detail"]["code"] == "REQUEST_SCHEMA_INVALID"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=headers,
+            json=request,
+        )
+        replay = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=headers,
+            json=request,
+        )
+        assert replay.status_code == 202
+        assert replay.json()["id"] == created.json()["id"]
+        changed = dict(request)
+        changed["result_policy"] = {**request["result_policy"], "minimum_confidence": 0.8}
+        conflict = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=headers,
+            json=changed,
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["code"] == "IDEMPOTENCY_CONFLICT"
+        failed = wait_for_extraction(client, created.json()["id"])
+        assert failed["status"] == "failed"
+        assert failed["error"]["code"] == "SCOPE_AMBIGUOUS"
+        assert len(failed["error"]["details"]["candidates"]) == 2
+
+
+def test_scoped_extraction_reports_same_priority_value_conflicts(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    customer = project_repository / "つ_0408_筑波大学" / "資料"
+    customer.mkdir(parents=True)
+    (customer / "first.txt").write_text("組織名 A", encoding="utf-8")
+    (customer / "second.txt").write_text("組織名 B", encoding="utf-8")
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = ConflictingFieldFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Tsukuba source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("conflict-0408"),
+            json=scoped_extraction_request(
+                source,
+                code="0408",
+                name="筑波大学",
+                fields=[
+                    {
+                        "code": "organization_name",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
+        )
+        report = wait_for_extraction(client, created.json()["id"])
+        assert report["status"] == "review_required"
+        assert len(report["field_candidates"]) == 2
+        assert report["conflicts"][0]["id"]
+        assert report["conflicts"][0]["reason_code"] == (
+            "SAME_PRIORITY_DIFFERENT_VALUES"
+        )
+        with app.state.database.session_factory() as session:
+            assert session.scalar(select(func.count(KnowledgeFieldConflict.id))) == 1
+
+
+def test_scoped_extraction_selects_business_version_at_analysis_time(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    customer = project_repository / "つ_0408_筑波大学"
+    customer.mkdir(parents=True)
+    (customer / "maintenance.txt").write_text(
+        "2025 legacy-desk, 2026 current-desk",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = TemporalFieldFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Temporal customer source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        request = scoped_extraction_request(
+            source,
+            code="0408",
+            name="筑波大学",
+            fields=[
+                {
+                    "code": "maintenance_contact",
+                    "type": "string",
+                    "required": True,
+                }
+            ],
+        )
+        request["analysis_context"]["as_of"] = "2025-06-01T00:00:00Z"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("temporal-0408-2025"),
+            json=request,
+        )
+        assert created.status_code == 202
+        report = wait_for_extraction(client, created.json()["id"])
+
+    assert report["status"] == "review_required"
+    assert len(report["field_candidates"]) == 1
+    selected = report["field_candidates"][0]
+    assert selected["value"] == "legacy-desk"
+    assert selected["block_version_id"]
+    assert selected["effective_from"] == "2025-01-01T00:00:00+00:00"
+    assert selected["effective_to"] == "2026-01-01T00:00:00+00:00"
+    assert len(report["applicability_exclusions"]) == 1
+    excluded = report["applicability_exclusions"][0]
+    assert excluded["block_version_id"]
+    assert excluded["reason_code"] == "OUTSIDE_ANALYSIS_AS_OF"
+    assert excluded["effective_from"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_scoped_extraction_reports_document_timeout_as_partial_result(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    customer = project_repository / "つ_0408_筑波大学"
+    customer.mkdir(parents=True)
+    (customer / "timeout.txt").write_text("筑波大学 timeout", encoding="utf-8")
+    (customer / "broken.txt").write_text("筑波大学 broken", encoding="utf-8")
+    (customer / "ready.txt").write_text("筑波大学", encoding="utf-8")
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = PartiallyFailingExtractionFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Partial extraction source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("partial-timeout-0408"),
+            json=scoped_extraction_request(
+                source,
+                code="0408",
+                name="筑波大学",
+                fields=[
+                    {
+                        "code": "organization_name",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
+        )
+        assert created.status_code == 202
+        report = wait_for_extraction(client, created.json()["id"])
+
+    assert report["status"] == "review_required"
+    assert report["error_code"] == "EXTRACTION_PARTIAL"
+    assert report["coverage"] == {
+        "total_documents": 3,
+        "ready_documents": 3,
+        "analyzed_documents": 1,
+        "failed_documents": 2,
+        "excluded_documents": 0,
+        "coverage_rate": 0.333333,
+    }
+    assert report["field_candidates"][0]["value"] == "筑波大学"
+    assert {item["reason_code"] for item in report["document_failures"]} == {
+        "EXTRACTION_FAILED",
+        "MODEL_TIMEOUT",
+    }
 
 
 def test_code_knowledge_graph_is_idempotent_and_searchable(
@@ -789,6 +1621,13 @@ def test_product_knowledge_survives_version_rollover_and_failed_refresh(
             )
             assert learned_document is not None
             assert learned_document.generation_ingestion_id == first["id"]
+            active_processing_before_failure = session.scalar(
+                select(KnowledgeProcessingVersion).where(
+                    KnowledgeProcessingVersion.status == "active"
+                )
+            )
+            assert active_processing_before_failure is not None
+            active_processing_id = active_processing_before_failure.id
 
         project_path = active_settings.projects_dir / "test-project.yaml"
         project_config = yaml.safe_load(
@@ -835,6 +1674,21 @@ def test_product_knowledge_survives_version_rollover_and_failed_refresh(
         assert second_result["status"] == "failed"
         service._provider = FakeOllamaClient()
 
+        with app.state.database.session_factory() as session:
+            active_processing_after_failure = list(
+                session.scalars(
+                    select(KnowledgeProcessingVersion).where(
+                        KnowledgeProcessingVersion.status == "active"
+                    )
+                )
+            )
+            assert [item.id for item in active_processing_after_failure] == [
+                active_processing_id
+            ]
+            assert session.scalar(
+                select(func.count(KnowledgeProcessingVersion.id))
+            ) == 1
+
         after_failure = next(
             item
             for item in client.get("/api/v1/knowledge/sources").json()
@@ -852,6 +1706,56 @@ def test_product_knowledge_survives_version_rollover_and_failed_refresh(
             },
         ).json()
         assert preserved["results"][0]["path"] == "messages.sql"
+
+
+def test_failed_embedding_refresh_resumes_from_durable_checkpoints(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    source_dir = project_repository / "checkpoint-source"
+    source_dir.mkdir()
+    (source_dir / "large-guide.txt").write_text(
+        "multilingual remote access knowledge\n" * 2_000,
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(
+        settings,
+        project_repository.parent,
+    )
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    provider = FailingSecondBatchOllama()
+    service._provider = provider
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Embedding checkpoint source",
+                "root_path": str(source_dir),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        first = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, first["id"])["status"] == "failed"
+        assert len(provider.embedded_texts) == 8
+
+        second = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        completed = wait_for_ingestion(client, second["id"])
+
+    assert completed["status"] == "completed"
+    assert completed["chunks_written"] > 8
+    assert len(provider.embedded_texts) == completed["chunks_written"]
+    with app.state.database.session_factory() as session:
+        assert session.scalar(
+            select(func.count(KnowledgeEmbeddingCache.id))
+        ) == completed["chunks_written"]
 
 
 def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
@@ -905,8 +1809,8 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
         ingestion = wait_for_ingestion(client, started.json()["id"])
         assert ingestion["status"] == "completed"
         assert ingestion["files_seen"] == 2
-        assert ingestion["duplicate_files"] == 1
-        assert ingestion["chunks_written"] == 1
+        assert ingestion["duplicate_files"] == 0
+        assert ingestion["chunks_written"] == 2
 
         events = client.get(
             f"/api/v1/knowledge/ingestions/{ingestion['id']}/events",
@@ -966,7 +1870,10 @@ def test_managed_sources_deduplicate_files_store_credentials_and_emit_stages(
         assert client.delete(
             f"/api/v1/knowledge/sources/{source['id']}"
         ).status_code == 204
-        assert client.get("/api/v1/knowledge/sources").json() == []
+        retained = client.get("/api/v1/knowledge/sources").json()
+        assert len(retained) == 1
+        assert retained[0]["enabled"] is False
+        assert retained[0]["status"] == "disabled"
 
 
 def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
@@ -1048,7 +1955,32 @@ def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
                     )
                 )
             )
-        assert paths == {"GUIDE.md"}
+            active_paths = {path for path in paths if "#history/" not in path}
+            historical_paths = {path for path in paths if "#history/" in path}
+            historical_chunks = session.scalar(
+                select(func.count(KnowledgeChunk.id)).where(
+                    KnowledgeChunk.scope == "archive"
+                )
+            )
+            document_versions = session.scalar(
+                select(func.count(KnowledgeDocumentVersion.id))
+            )
+            active_processing_versions = session.scalar(
+                select(func.count(KnowledgeProcessingVersion.id)).where(
+                    KnowledgeProcessingVersion.status == "active"
+                )
+            )
+            superseded_processing_versions = session.scalar(
+                select(func.count(KnowledgeProcessingVersion.id)).where(
+                    KnowledgeProcessingVersion.status == "superseded"
+                )
+            )
+        assert active_paths == {"GUIDE.md"}
+        assert len(historical_paths) == 1
+        assert historical_chunks == 1
+        assert document_versions >= 2
+        assert active_processing_versions == 1
+        assert superseded_processing_versions >= 1
 
 
 def test_scheduler_lease_prevents_duplicate_claim_and_failure_is_retried(
@@ -1627,12 +2559,45 @@ def test_encrypted_pdf_is_rejected_without_stopping_collection(
 
     assert result.files_seen == 2
     assert result.rejected_files == 1
-    assert [document.path for document in result.documents] == ["README.md"]
+    assert [document.path for document in result.documents] == [
+        "encrypted.pdf",
+        "README.md",
+    ]
+    assert result.documents[0].processing_mode == "path_only"
     assert len(rejections) == 1
     assert rejections[0].relative_path == "encrypted.pdf"
     assert rejections[0].reason_code == "pdf_unreadable"
     assert rejections[0].error_type == "ValueError"
     assert rejections[0].error_message
+
+
+def test_image_pdf_uses_ocr_metadata(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    class FakeOcrEngine:
+        def extract_pdf(self, path: Path) -> OcrResult:
+            assert path.name == "scan.pdf"
+            return OcrResult(
+                text="[OCR page 1]\n滋賀大学 保守契約",
+                engine="fake-ocr",
+                engine_version="1.0",
+                languages="jpn+eng",
+                pages=1,
+            )
+
+    pdf = tmp_path / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with pdf.open("wb") as stream:
+        writer.write(stream)
+
+    extracted = extract_text_with_metadata(pdf, ocr_engine=FakeOcrEngine())
+
+    assert extracted.extractor == "fake-ocr"
+    assert extracted.encoding == "pdf-ocr"
+    assert extracted.extractor_version == "1.0"
+    assert extracted.processor_variant == "pdf_ocr_v1:jpn+eng:1"
+    assert "滋賀大学" in extracted.text
 
 
 def test_ingestion_persists_and_exports_file_level_rejection_audit(
@@ -1780,6 +2745,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
 def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
     settings: Settings,
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     source_root = tmp_path / "routed-source"
     source_root.mkdir()
@@ -1799,6 +2765,11 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
     archive = source_root / "historical.zip"
     with archive.open("wb") as stream:
         stream.truncate(3_337_986_743)
+    monkeypatch.setattr(
+        SourceConnectorManager,
+        "_sha256_file",
+        staticmethod(lambda _path: "a" * 64),
+    )
 
     active_settings = knowledge_settings(settings, tmp_path)
     app = create_app(settings=active_settings)
@@ -1851,6 +2822,10 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         assert entries["guide.md"]["processing_mode"] == "document"
         assert entries["guide.md"]["extractor"] == "text"
         assert entries["warning.txt"]["processing_mode"] == "path_only"
+        assert all(
+            item["raw_content_hash"] == "a" * 64
+            for item in entries.values()
+        )
         filtered_inventory = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/entries",
             params={"query": "historical", "limit": 1, "offset": 0},
@@ -1875,6 +2850,16 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
             )
             assert code_document.processing_mode == "code"
             assert code_document.processor_fingerprint
+            original_processing = session.scalar(
+                select(KnowledgeProcessingVersion)
+                .join(KnowledgeDocumentVersion)
+                .where(
+                    KnowledgeDocumentVersion.document_id == code_document.id,
+                    KnowledgeProcessingVersion.status == "active",
+                )
+            )
+            assert original_processing is not None
+            original_processing_id = original_processing.id
             session.execute(
                 delete(CodeSymbol).where(
                     CodeSymbol.document_id == code_document.id
@@ -1891,7 +2876,7 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         second_result = wait_for_ingestion(client, second["id"])
         assert second_result["status"] == "completed"
         assert second_result["changed_files"] == 1
-        assert second_result["unchanged_files"] == 2
+        assert second_result["unchanged_files"] == 4
         assert second_result["vectors_reused"] >= 2
 
     with app.state.database.session_factory() as session:
@@ -1904,6 +2889,26 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         assert code_document is not None
         assert code_document.processing_mode == "code"
         assert code_document.processor_fingerprint
+        processing_versions = list(
+            session.scalars(
+                select(KnowledgeProcessingVersion)
+                .join(KnowledgeDocumentVersion)
+                .where(
+                    KnowledgeDocumentVersion.source_entry_id
+                    == code_document.source_entry_id
+                )
+            )
+        )
+        active_processing = next(
+            item for item in processing_versions if item.status == "active"
+        )
+        superseded_processing = next(
+            item
+            for item in processing_versions
+            if item.id == original_processing_id
+        )
+        assert superseded_processing.status == "superseded"
+        assert active_processing.supersedes_id == superseded_processing.id
         assert session.scalar(
             select(func.count(CodeSymbol.id)).where(
                 CodeSymbol.document_id == code_document.id

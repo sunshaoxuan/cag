@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import re
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree
+
+if TYPE_CHECKING:
+    from app.knowledge.ocr import TesseractOcrEngine
 
 
 TEXT_EXTENSIONS = {
@@ -71,6 +76,7 @@ def extract_text_with_metadata(
     *,
     max_spreadsheet_cells: int = 250_000,
     max_output_characters: int = 10_000_000,
+    ocr_engine: TesseractOcrEngine | None = None,
 ) -> ExtractedText:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
@@ -90,7 +96,17 @@ def extract_text_with_metadata(
             "office-xml",
         )
     if suffix == ".pdf":
-        return ExtractedText(_extract_pdf(path), "pdf-text", "pypdf")
+        text = _extract_pdf(path)
+        if text.strip() or ocr_engine is None:
+            return ExtractedText(text, "pdf-text", "pypdf")
+        result = ocr_engine.extract_pdf(path)
+        return ExtractedText(
+            result.text,
+            "pdf-ocr",
+            result.engine,
+            result.engine_version,
+            f"pdf_ocr_v1:{result.languages}:{result.pages}",
+        )
     raise ValueError(f"Unsupported knowledge file type: {suffix}")
 
 
@@ -275,9 +291,12 @@ def _extract_pdf(path: Path) -> str:
         ) from exc
     try:
         reader = PdfReader(str(path))
-        return "\n".join(
-            page.extract_text() or "" for page in reader.pages
-        )
+        parts = []
+        for index, page in enumerate(reader.pages, start=1):
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                parts.append(f"[page] index={index}\n{page_text}")
+        return "\n".join(parts)
     except PdfReadError as exc:
         raise ValueError(f"PDF cannot be read: {exc}") from exc
 

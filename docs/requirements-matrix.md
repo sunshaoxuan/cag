@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.23.0 | Evidence |
+| Requirement | Status for 0.24.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -47,7 +47,7 @@ Legend:
 | Authenticated operations administration | Implemented | constant-time administrator token validation, authenticated identity audit and session-scoped UI credentials |
 | Bounded operational AI timeline | Implemented | completed runtime evidence is durable; cumulative `*.delta` events are excluded; issue detail omits events and `/operations/issues/{id}/events` provides bounded sequence pagination |
 | Governed improvement branch | Implemented | approved internal issues create isolated `codex/improvement/<issue-code>` task branches |
-| Improvement re-evaluation and closure | Implemented | AI evaluation Worker, original issue evidence, pass closure and failed-cycle resubmission |
+| Improvement re-evaluation and closure | Implemented | AI evaluation Worker, original issue evidence, pass closure, failed-cycle resubmission and fresh Queue Item regression test |
 | Visual self-operations management | Implemented | `/operations` top decision panel, occurrence-independent authority, server-authoritative actions, stale-response protection, issue-scoped forms, inline mutation feedback and paginated evidence timeline |
 | Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
@@ -75,7 +75,7 @@ Legend:
 | 64-bit knowledge file sizes | Implemented | PostgreSQL `BIGINT` migration and sparse large-file ingestion test |
 | Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |
 | Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
-| Path-complete semantic indexing | Partial | Zero-byte file path knowledge is implemented; directory and every-file independent path vectors remain planned in ADR 0015 |
+| Path-complete semantic indexing | Implemented | Every physical file retains path evidence; canonical path and redacted content share one multilingual embedding representation; duplicate content does not remove paths |
 | Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and stable Product knowledge isolation | Implemented | Product-scoped retrieval follows the stable Product physical ID across ProductVersion changes |
@@ -85,9 +85,12 @@ Legend:
 | Structure-aware code indexing | Implemented | AST and Tree-sitter adapter, language fallback, symbol-boundary chunks and code intelligence tests |
 | Code symbol and relationship graph | Implemented | CodeSymbol, CodeRelation, CodeDocumentLink, migration and idempotency tests |
 | Code and documentation linkage | Implemented | Deterministic path and symbol evidence, detail API and retrieval graph expansion |
-| Japanese and code hybrid retrieval | Implemented | instructed embedding, Japanese n-grams, symbol channel, relationship expansion and optional local reranking |
+| Multilingual semantic and exact hybrid retrieval | Implemented | Qwen3 path and content embeddings, Japanese, Chinese and English query instruction, exact path and lexical channels, RRF and optional local reranking |
 | Bounded indexed knowledge retrieval | Implemented | pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
-| Customer ledger knowledge extraction | Implemented | asynchronous customer extraction API, structured CAG-owned schema, physical candidate IDs, generation citations and citation rejection tests |
+| Scoped customer ledger knowledge extraction | Implemented | schema v1, Catalog Scope resolution, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
+| Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |
+| Independent processing and business versions | Implemented | Active and Superseded Processing Versions, failed refresh protection, immutable Knowledge Blocks, Applicability Revisions and `analysis_context.as_of` selection |
+| Permanent learned knowledge history | Implemented | changed and absent source files retain historical Document Versions, Processing Versions, Blocks and archive Chunks |
 | Cancellation precedence and scheduled rescan control | Implemented | pending cancellation is committed before requeue; scheduled cancellation releases the source lease and advances its next due time; both paths have regression tests |
 | Standards control mapping | Implemented | `docs/standards-control-matrix.md`, `GET /api/v1/standards/controls` |
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
@@ -100,6 +103,8 @@ Legend:
 | Structured Agent artifacts | Implemented | `AgentArtifact` SHA 256 record and API tests |
 | Unified Harness SSE | Implemented | parent TaskEvent sequence and Harness event tests |
 | Idempotent vector indexing | Implemented | source fingerprint, path and ordinal uniqueness, vector reuse test |
+| Resumable vector generation | Implemented | redacted-input embedding checkpoints commit per batch, retries calculate only missing vectors and final knowledge replacement remains atomic |
+| End-to-end file provenance | Implemented | raw file SHA 256, resumable bounded-concurrency legacy backfill, cleaned document and chunk hashes, SourceEntry physical foreign key, chunk to file citation reverse lookup and closure audit |
 | Durable knowledge source registry and scheduled rescan | Implemented | persisted sync policy, database lease, retry state, restart recovery, run history and scheduler tests |
 | Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
@@ -110,7 +115,7 @@ Legend:
 | Complete required data model | Implemented | knowledge, Harness, learning, promotion, rollback and control entities |
 | Authentication and project authorization | Planned | Production blocker |
 | Rate and concurrency limits | Partial | Harness concurrency limit implemented, distributed rate limiting remains |
-| Secret scanning | Implemented | knowledge and capability proposal scanners |
+| Multilingual secret scanning | Implemented | English and Japanese credential labels, protected connection targets and credential-bearing URL redaction before search, embedding and model context |
 | OpenTelemetry tracing | Planned | Compatibility test required |
 
 ## First-round acceptance

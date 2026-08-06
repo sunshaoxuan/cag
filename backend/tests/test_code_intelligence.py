@@ -1,10 +1,12 @@
 from pathlib import Path
 
 from app.knowledge.code_intelligence import (
+    CodeSymbolFact,
     analyze_code,
     is_code_path,
     japanese_search_terms,
 )
+import app.knowledge.code_intelligence as code_intelligence
 from app.knowledge.extractors import (
     detect_text_encoding,
     extract_text_with_metadata,
@@ -75,3 +77,28 @@ export class 顧客Service {
     assert any(item.name == "searchCustomer" for item in analysis.symbols)
     terms = japanese_search_terms("顧客情報 searchCustomer")
     assert {"顧客", "情報", "searchcustomer"} <= terms
+
+
+def test_analysis_deduplicates_database_symbol_identity(monkeypatch) -> None:
+    duplicate = CodeSymbolFact(
+        kind="function",
+        name="connect",
+        qualified_name="connect",
+        signature="function connect() {}",
+        start_line=16,
+        end_line=16,
+        parser="tree-sitter",
+    )
+    monkeypatch.setattr(
+        code_intelligence,
+        "_analyze_tree_sitter",
+        lambda _language, _text: [duplicate, duplicate],
+    )
+
+    analysis = analyze_code("remote.js", "function connect() {}")
+
+    identities = [
+        (symbol.kind, symbol.qualified_name, symbol.start_line)
+        for symbol in analysis.symbols
+    ]
+    assert identities.count(("function", "remote.connect", 16)) == 1

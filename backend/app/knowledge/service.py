@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import math
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -21,6 +22,7 @@ from app.knowledge.connectors import (
     CollectionObservation,
     CollectionRejection,
     CollectionResult,
+    ReusableFile,
     SourceConfig,
     SourceConnectorManager,
     ValidationResult,
@@ -36,8 +38,13 @@ from app.knowledge.credentials import (
     KnowledgeCredentialStore,
     SourceCredential,
 )
+from app.knowledge.customer_ledger_contracts import value_matches_schema
 from app.knowledge.ollama import OllamaProvider
-from app.knowledge.processing_policy import processor_fingerprint
+from app.knowledge.ocr import TesseractOcrEngine
+from app.knowledge.processing_policy import (
+    PROCESSING_POLICY_VERSION,
+    processor_fingerprint,
+)
 from app.knowledge.resources import build_resource_uri
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
@@ -47,9 +54,12 @@ from app.models import (
     DataQualityMetric,
     KnowledgeChunk,
     KnowledgeDocument,
+    KnowledgeDocumentVersion,
+    KnowledgeEmbeddingCache,
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
     KnowledgeIngestionRejection,
+    KnowledgeProcessingVersion,
     KnowledgeSource,
     KnowledgeSourceEntry,
     KnowledgeStatus,
@@ -91,6 +101,7 @@ def summarize_knowledge_error(error: str) -> str:
 @dataclass(frozen=True)
 class SearchResult:
     id: str
+    source_entry_id: str
     path: str
     text: str
     score: float
@@ -143,17 +154,32 @@ class KnowledgeService:
         self._credential_store = credential_store or KnowledgeCredentialStore(
             settings.knowledge_keyring_service
         )
+        command_policy = CommandPolicyService()
+        self._ocr_engine = (
+            TesseractOcrEngine(
+                executable=settings.knowledge_ocr_executable,
+                languages=settings.knowledge_ocr_languages,
+                dpi=settings.knowledge_ocr_dpi,
+                page_timeout_seconds=(
+                    settings.knowledge_ocr_page_timeout_seconds
+                ),
+                command_policy=command_policy,
+            )
+            if settings.knowledge_ocr_enabled
+            else None
+        )
         self._connectors = SourceConnectorManager(
             cache_root=settings.knowledge_sources_dir,
             allowed_roots=self._allowed_roots,
             credential_store=self._credential_store,
-            command_policy=CommandPolicyService(),
+            command_policy=command_policy,
             git_executable=settings.git_executable,
             svn_executable=settings.svn_executable,
             max_file_bytes=settings.knowledge_max_file_bytes,
             max_spreadsheet_cells=(
                 settings.knowledge_max_spreadsheet_cells
             ),
+            ocr_engine=self._ocr_engine,
         )
         self._scheduler_running = False
 
@@ -194,7 +220,17 @@ class KnowledgeService:
                 "reason": str(exc),
                 **scheduler_status,
             }
-        return {"enabled": True, **provider_status, **scheduler_status}
+        ocr_status = (
+            self._ocr_engine.status()
+            if self._ocr_engine is not None
+            else {"available": False, "reason": "disabled"}
+        )
+        return {
+            "enabled": True,
+            **provider_status,
+            "ocr": ocr_status,
+            **scheduler_status,
+        }
 
     def set_scheduler_running(self, running: bool) -> None:
         self._scheduler_running = running
@@ -361,16 +397,37 @@ class KnowledgeService:
             )
             source_changed = next_source_key != source.source_key
             if source_changed:
-                session.execute(
-                    delete(KnowledgeDocument).where(
-                        KnowledgeDocument.source_id == source.id
+                existing_documents = list(
+                    session.scalars(
+                        select(KnowledgeDocument)
+                        .options(selectinload(KnowledgeDocument.chunks))
+                        .where(KnowledgeDocument.source_id == source.id)
                     )
                 )
-                session.execute(
-                    delete(KnowledgeSourceEntry).where(
-                        KnowledgeSourceEntry.source_id == source.id
+                for document in existing_documents:
+                    document.canonical_path = (
+                        f"{document.canonical_path}#history/config-{document.id}"
+                    )
+                    for chunk in document.chunks:
+                        chunk.scope = "archive"
+                    session.execute(
+                        update(CodeSymbol)
+                        .where(CodeSymbol.document_id == document.id)
+                        .values(scope="archive")
+                    )
+                existing_entries = list(
+                    session.scalars(
+                        select(KnowledgeSourceEntry).where(
+                            KnowledgeSourceEntry.source_id == source.id
+                        )
                     )
                 )
+                for entry in existing_entries:
+                    entry.relative_path = (
+                        f"{entry.relative_path}#history/config-{entry.id}"
+                    )
+                    entry.present = False
+                    entry.removed_at = utc_now()
                 source.status = KnowledgeStatus.DRAFT
                 source.index_fingerprint = None
                 source.source_commit = None
@@ -462,7 +519,13 @@ class KnowledgeService:
                 raise KeyError(source_id)
             credential_ref = source.credential_ref
             self._connectors.purge(source_id)
-            session.delete(source)
+            source.enabled = False
+            source.status = KnowledgeStatus.DISABLED
+            source.credential_ref = None
+            source.credential_username = None
+            source.next_sync_at = None
+            source.sync_lease_owner = None
+            source.sync_lease_expires_at = None
             session.commit()
         self._credential_store.delete(credential_ref)
 
@@ -482,8 +545,11 @@ class KnowledgeService:
         source_id: str,
         *,
         trigger: str = "manual",
+        analysis_scope_id: str | None = None,
+        scope_prefix: str | None = None,
+        retry_statuses: list[str] | None = None,
     ) -> tuple[KnowledgeIngestion, bool]:
-        if trigger not in {"manual", "scheduled"}:
+        if trigger not in {"manual", "scheduled", "scope_repair"}:
             raise ValueError("Unsupported knowledge ingestion trigger")
         with self._database.session_factory() as session:
             source = session.get(KnowledgeSource, source_id)
@@ -504,6 +570,9 @@ class KnowledgeService:
             ingestion = KnowledgeIngestion(
                 source_id=source_id,
                 trigger=trigger,
+                analysis_scope_id=analysis_scope_id,
+                scope_prefix=scope_prefix,
+                retry_statuses=retry_statuses or [],
             )
             has_active_generation = session.scalar(
                 select(KnowledgeDocument.id)
@@ -581,6 +650,8 @@ class KnowledgeService:
             session.commit()
             source_id = source.id
             source_config = self._source_config(source)
+            reusable_files = self._reusable_files(session, source)
+            scope_prefix = (ingestion.scope_prefix or "").replace("\\", "/").strip("/")
 
         try:
             self._record_ingestion_event(
@@ -620,7 +691,30 @@ class KnowledgeService:
                 report_collection_progress,
                 report_collection_rejection,
                 report_collection_observation,
+                reusable_files,
             )
+            if scope_prefix:
+                def in_scope(path: str) -> bool:
+                    normalized = path.replace("\\", "/").strip("/")
+                    return normalized == scope_prefix or normalized.startswith(
+                        f"{scope_prefix}/"
+                    )
+
+                scoped_documents = [
+                    item for item in collected.documents if in_scope(item.path)
+                ]
+                scoped_reused_paths = tuple(
+                    item for item in collected.reused_paths if in_scope(item)
+                )
+                collected = CollectionResult(
+                    revision=collected.revision,
+                    documents=scoped_documents,
+                    files_seen=len(scoped_documents) + len(scoped_reused_paths),
+                    rejected_files=collected.rejected_files,
+                    skipped_files=collected.skipped_files,
+                    duplicate_files=collected.duplicate_files,
+                    reused_paths=scoped_reused_paths,
+                )
             flush_observations()
             flush_rejections()
             self._finalize_source_observations(ingestion_id)
@@ -649,11 +743,49 @@ class KnowledgeService:
             )
             chunks: list[PreparedChunk] = []
             code_analysis_by_path: dict[str, CodeAnalysis] = {}
-            cleaned_hashes: set[str] = set()
             duplicate_files = collected.duplicate_files
             document_fingerprints: dict[str, str] = {}
             document_modes: dict[str, str] = {}
             document_extractors: dict[str, tuple[str, str | None]] = {}
+            document_hashes: dict[str, str] = {}
+            if collected.reused_paths:
+                with self._database.session_factory() as session:
+                    reused_documents: list[KnowledgeDocument] = []
+                    reused_entry_items: list[KnowledgeSourceEntry] = []
+                    for start in range(0, len(collected.reused_paths), 500):
+                        batch = collected.reused_paths[start : start + 500]
+                        reused_documents.extend(
+                            session.scalars(
+                                select(KnowledgeDocument).where(
+                                    KnowledgeDocument.source_id == source_id,
+                                    KnowledgeDocument.canonical_path.in_(batch),
+                                )
+                            )
+                        )
+                        reused_entry_items.extend(
+                            session.scalars(
+                                select(KnowledgeSourceEntry).where(
+                                    KnowledgeSourceEntry.source_id == source_id,
+                                    KnowledgeSourceEntry.relative_path.in_(batch),
+                                )
+                            )
+                        )
+                    reused_entries = {
+                        item.relative_path: item
+                        for item in reused_entry_items
+                    }
+                for document in reused_documents:
+                    path = document.canonical_path
+                    entry = reused_entries.get(path)
+                    if document.processor_fingerprint is None or entry is None:
+                        continue
+                    document_hashes[path] = document.content_hash
+                    document_fingerprints[path] = document.processor_fingerprint
+                    document_modes[path] = document.processing_mode
+                    document_extractors[path] = (
+                        entry.extractor or "reused",
+                        entry.extractor_version,
+                    )
             for document in collected.documents:
                 scan = scan_knowledge_text(document.text)
                 safe_text = scan.safe_text
@@ -662,10 +794,6 @@ class KnowledgeService:
                 safe_hash = hashlib.sha256(
                     safe_text.encode("utf-8")
                 ).hexdigest()
-                if safe_hash in cleaned_hashes:
-                    duplicate_files += 1
-                    continue
-                cleaned_hashes.add(safe_hash)
                 processing_mode = document.processing_mode
                 fingerprint = processor_fingerprint(
                     processing_mode,
@@ -678,6 +806,7 @@ class KnowledgeService:
                     processor_variant=document.processor_variant,
                 )
                 document_fingerprints[document.path] = fingerprint
+                document_hashes[document.path] = safe_hash
                 document_modes[document.path] = processing_mode
                 document_extractors[document.path] = (
                     document.extractor,
@@ -742,9 +871,6 @@ class KnowledgeService:
                     "duplicate_files": duplicate_files,
                 },
             )
-            document_hashes = {
-                item.path: item.document_hash for item in chunks
-            }
             fingerprint_input = "\n".join(
                 f"{path}:{content_hash}"
                 for path, content_hash in sorted(document_hashes.items())
@@ -782,7 +908,16 @@ class KnowledgeService:
                     )
                 }
                 changed_paths = set(document_hashes) - unchanged_paths
-                removed_paths = set(existing_by_path) - set(document_hashes)
+                target_existing_paths = (
+                    {
+                        path
+                        for path in existing_by_path
+                        if path == scope_prefix or path.startswith(f"{scope_prefix}/")
+                    }
+                    if scope_prefix
+                    else set(existing_by_path)
+                )
+                removed_paths = target_existing_paths - set(document_hashes)
                 vectors_reused = sum(
                     len(existing_by_path[path].chunks) for path in unchanged_paths
                 )
@@ -819,78 +954,249 @@ class KnowledgeService:
                     "removed_files": len(removed_paths),
                 },
             )
-            embeddings: list[list[float]] = []
-            for start in range(0, len(chunks), 8):
-                embeddings.extend(
-                    await self._provider.embed(
-                        [item.text for item in chunks[start : start + 8]]
-                    )
-                )
+            embedding_path_prefix = source_config.subpath or ""
+            await self._cache_ingestion_embeddings(
+                ingestion_id,
+                chunks,
+                path_prefix=embedding_path_prefix,
+            )
 
             with self._database.session_factory() as session:
                 ingestion = session.get(KnowledgeIngestion, ingestion_id)
                 source = session.get(KnowledgeSource, source_id)
                 if ingestion is None or source is None:
                     return
+                changed_entries = {
+                    item.relative_path: item
+                    for item in session.scalars(
+                        select(KnowledgeSourceEntry).where(
+                            KnowledgeSourceEntry.source_id == source.id,
+                            KnowledgeSourceEntry.relative_path.in_(
+                                changed_paths
+                            ),
+                        )
+                    )
+                }
+                missing_entry_paths = changed_paths - set(changed_entries)
+                if missing_entry_paths:
+                    raise KnowledgeUnavailableError(
+                        "Knowledge document source entry is missing"
+                    )
                 replaced_paths = changed_paths | removed_paths
                 if replaced_paths:
-                    session.execute(
-                        delete(KnowledgeDocument).where(
-                            KnowledgeDocument.source_id == source.id,
-                            KnowledgeDocument.canonical_path.in_(replaced_paths),
+                    replaced_documents = list(
+                        session.scalars(
+                            select(KnowledgeDocument)
+                            .options(selectinload(KnowledgeDocument.chunks))
+                            .where(
+                                KnowledgeDocument.source_id == source.id,
+                                KnowledgeDocument.canonical_path.in_(replaced_paths),
+                            )
                         )
                     )
-                document_by_path: dict[str, KnowledgeDocument] = {}
-                for chunk_data, embedding in zip(chunks, embeddings, strict=True):
-                    relative_path = chunk_data.path
-                    text = chunk_data.text
-                    document = document_by_path.get(relative_path)
-                    if document is None:
-                        document = KnowledgeDocument(
-                            source_id=source.id,
-                            canonical_path=relative_path,
-                            content_hash=chunk_data.document_hash,
-                            language=chunk_data.language,
-                            processing_mode=document_modes[relative_path],
-                            processor_fingerprint=(
-                                document_fingerprints[relative_path]
-                            ),
-                            generation_ingestion_id=ingestion.id,
+                    for existing in replaced_documents:
+                        entry = session.get(
+                            KnowledgeSourceEntry, existing.source_entry_id
                         )
-                        session.add(document)
-                        session.flush()
-                        document_by_path[relative_path] = document
-                    session.add(
-                        KnowledgeChunk(
-                            document_id=document.id,
-                            tenant_id=source.tenant_id,
-                            product_version_id=source.product_version_id,
-                            scope=source.scope,
-                            ordinal=chunk_data.ordinal,
-                            content_ciphertext=self._cipher.encrypt(text),
-                            search_text=self._search_projection(text),
-                            content_hash=hashlib.sha256(
-                                text.encode("utf-8")
-                            ).hexdigest(),
-                            token_count=max(1, len(text) // 4),
-                            embedding=embedding,
-                            embedding_model=self._settings.ollama_embedding_model,
-                            embedding_dimensions=(
-                                self._settings.ollama_embedding_dimensions
-                            ),
-                            metadata_json={
-                                "path": relative_path,
-                                "source_type": source.source_type,
-                                "source_revision": collected.revision,
-                                "prompt_injection_detected": (
-                                    chunk_data.prompt_injection_detected
+                        raw_hash = (
+                            entry.raw_content_hash
+                            if entry is not None
+                            else existing.content_hash
+                        ) or existing.content_hash
+                        document_version = session.scalar(
+                            select(KnowledgeDocumentVersion).where(
+                                KnowledgeDocumentVersion.document_id == existing.id,
+                                KnowledgeDocumentVersion.raw_content_hash == raw_hash,
+                            )
+                        )
+                        if document_version is None:
+                            document_version = KnowledgeDocumentVersion(
+                                document_id=existing.id,
+                                source_entry_id=existing.source_entry_id,
+                                source_generation_id=existing.generation_ingestion_id,
+                                canonical_path=existing.canonical_path,
+                                raw_content_hash=raw_hash,
+                                content_hash=existing.content_hash,
+                                source_modified_at=(
+                                    entry.modified_at if entry is not None else None
                                 ),
-                                "encoding": chunk_data.encoding,
-                                **chunk_data.metadata,
+                                status="historical",
+                            )
+                            session.add(document_version)
+                            session.flush()
+                        processing_version = session.scalar(
+                            select(KnowledgeProcessingVersion).where(
+                                KnowledgeProcessingVersion.document_version_id
+                                == document_version.id,
+                                KnowledgeProcessingVersion.status == "active",
+                            )
+                        )
+                        if processing_version is None:
+                            processor = (
+                                existing.processor_fingerprint or "legacy-processor"
+                            )
+                            processing_version = session.scalar(
+                                select(KnowledgeProcessingVersion).where(
+                                    KnowledgeProcessingVersion.document_version_id
+                                    == document_version.id,
+                                    KnowledgeProcessingVersion.processor_fingerprint
+                                    == processor,
+                                )
+                            )
+                        if processing_version is None:
+                            processing_version = KnowledgeProcessingVersion(
+                                document_version_id=document_version.id,
+                                processor_fingerprint=processor,
+                                extractor_version=(
+                                    entry.extractor_version
+                                    if entry is not None
+                                    else None
+                                ),
+                                status="superseded",
+                                quality_result={
+                                    "passed": True,
+                                    "source": "archived_active_index",
+                                },
+                                activated_at=existing.created_at,
+                            )
+                            session.add(processing_version)
+                        else:
+                            processing_version.status = "superseded"
+                        existing.canonical_path = (
+                            f"{existing.canonical_path}#history/{existing.id}"
+                        )
+                        for historical_chunk in existing.chunks:
+                            historical_chunk.scope = "archive"
+                        session.execute(
+                            update(CodeSymbol)
+                            .where(CodeSymbol.document_id == existing.id)
+                            .values(scope="archive")
+                        )
+                    session.flush()
+                document_by_path: dict[str, KnowledgeDocument] = {}
+                for start in range(0, len(chunks), 500):
+                    chunk_batch = chunks[start : start + 500]
+                    embedding_by_key = self._cached_embedding_batch(
+                        session,
+                        chunk_batch,
+                        path_prefix=embedding_path_prefix,
+                    )
+                    for chunk_data in chunk_batch:
+                        relative_path = chunk_data.path
+                        text = chunk_data.text
+                        document = document_by_path.get(relative_path)
+                        if document is None:
+                            document = KnowledgeDocument(
+                                source_id=source.id,
+                                source_entry_id=(
+                                    changed_entries[relative_path].id
+                                ),
+                                canonical_path=relative_path,
+                                content_hash=chunk_data.document_hash,
+                                language=chunk_data.language,
+                                processing_mode=document_modes[relative_path],
+                                processor_fingerprint=(
+                                    document_fingerprints[relative_path]
+                                ),
+                                generation_ingestion_id=ingestion.id,
+                            )
+                            session.add(document)
+                            session.flush()
+                            document_by_path[relative_path] = document
+                        embedding_key = self._embedding_cache_key(
+                            self._embedding_text(
+                                relative_path,
+                                text,
+                                embedding_path_prefix,
+                            )
+                        )
+                        session.add(
+                            KnowledgeChunk(
+                                document_id=document.id,
+                                tenant_id=source.tenant_id,
+                                product_version_id=(
+                                    source.product_version_id
+                                ),
+                                scope=source.scope,
+                                ordinal=chunk_data.ordinal,
+                                content_ciphertext=self._cipher.encrypt(text),
+                                search_text=self._search_projection(text),
+                                content_hash=hashlib.sha256(
+                                    text.encode("utf-8")
+                                ).hexdigest(),
+                                token_count=max(1, len(text) // 4),
+                                embedding=embedding_by_key[embedding_key],
+                                embedding_model=(
+                                    self._settings.ollama_embedding_model
+                                ),
+                                embedding_dimensions=(
+                                    self._settings.ollama_embedding_dimensions
+                                ),
+                                metadata_json={
+                                    "path": relative_path,
+                                    "semantic_path": self._semantic_path(
+                                        relative_path,
+                                        embedding_path_prefix,
+                                    ),
+                                    "source_type": source.source_type,
+                                    "source_revision": collected.revision,
+                                    "prompt_injection_detected": (
+                                        chunk_data.prompt_injection_detected
+                                    ),
+                                    "encoding": chunk_data.encoding,
+                                    **chunk_data.metadata,
+                                },
+                            )
+                        )
+                    session.flush()
+                for relative_path, document in document_by_path.items():
+                    entry = changed_entries[relative_path]
+                    raw_hash = (
+                        entry.raw_content_hash
+                        or entry.content_hash
+                        or document.content_hash
+                    )
+                    document_version = KnowledgeDocumentVersion(
+                        document_id=document.id,
+                        source_entry_id=entry.id,
+                        source_generation_id=ingestion.id,
+                        canonical_path=document.canonical_path,
+                        raw_content_hash=raw_hash,
+                        content_hash=document.content_hash,
+                        source_modified_at=entry.modified_at,
+                    )
+                    session.add(document_version)
+                    session.flush()
+                    previous_processing = session.scalar(
+                        select(KnowledgeProcessingVersion)
+                        .join(KnowledgeDocumentVersion)
+                        .where(
+                            KnowledgeDocumentVersion.source_entry_id == entry.id,
+                            KnowledgeProcessingVersion.status == "superseded",
+                        )
+                        .order_by(KnowledgeProcessingVersion.created_at.desc())
+                    )
+                    session.add(
+                        KnowledgeProcessingVersion(
+                            document_version_id=document_version.id,
+                            processor_fingerprint=(
+                                document.processor_fingerprint
+                                or "legacy-processor"
+                            ),
+                            extractor_version=entry.extractor_version,
+                            status="active",
+                            quality_result={
+                                "passed": True,
+                                "source": "ingestion_completion",
                             },
+                            supersedes_id=(
+                                previous_processing.id
+                                if previous_processing is not None
+                                else None
+                            ),
+                            activated_at=utc_now(),
                         )
                     )
-                session.flush()
                 unchanged_documents: list[KnowledgeDocument] = []
                 sorted_unchanged_paths = sorted(unchanged_paths)
                 for start in range(
@@ -931,7 +1237,10 @@ class KnowledgeService:
                     )
                 processed_at = utc_now()
                 for entry in processed_entries:
-                    entry.processing_status = "indexed"
+                    if entry.processing_mode != "metadata_only" and (
+                        entry.processing_status != "rejected"
+                    ):
+                        entry.processing_status = "indexed"
                     entry.content_hash = document_hashes[
                         entry.relative_path
                     ]
@@ -975,6 +1284,9 @@ class KnowledgeService:
                 graph_counts = self._rebuild_code_graph(session, source.id)
                 source.source_commit = collected.revision
                 source.index_fingerprint = index_fingerprint
+                source.processor_fingerprint = (
+                    self._source_processor_fingerprint()
+                )
                 source.last_collected_at = utc_now()
                 if changed_paths or removed_paths:
                     source.last_content_change_at = source.last_collected_at
@@ -1132,6 +1444,7 @@ class KnowledgeService:
                     record.processor_fingerprint = None
                     record.content_hash = None
                 record.reason_code = item.reason_code
+                record.raw_content_hash = item.raw_content_hash
                 record.present = True
                 record.last_seen_ingestion_id = ingestion_id
                 record.last_seen_at = observed_at
@@ -1567,24 +1880,17 @@ class KnowledgeService:
         started_at = utc_now()
         terms = japanese_search_terms(query)
         query_folded = query.strip().casefold()
-        search_terms = list(
-            dict.fromkeys(
-                value.casefold()
-                for value in (
-                    query.strip(),
-                    *sorted(terms, key=lambda value: (-len(value), value)),
-                )
-                if len(value.strip()) >= 2
-            )
-        )[:12]
+        search_terms = self._lexical_search_terms(query, terms)
         if event_callback is not None:
             await event_callback(
                 "knowledge.retrieval.stage",
                 {"stage": "query_embedding", "status": "started", "profile": profile},
             )
         instructed_query = (
-            "Instruct: Retrieve evidence from Japanese enterprise source code "
-            "and technical documentation. Preserve identifiers and exact paths.\n"
+            "Instruct: Retrieve semantically equivalent multilingual enterprise "
+            "evidence across Japanese, Chinese and English. Use canonical paths "
+            "as customer and operational context. Preserve identifiers, protocol "
+            "names and exact paths.\n"
             f"Query: {query}"
         )
         query_vector = None
@@ -1640,8 +1946,13 @@ class KnowledgeService:
                 chunk_query = chunk_query.where(
                     or_(
                         *(
-                            func.lower(KnowledgeDocument.canonical_path).startswith(
-                                prefix
+                            or_(
+                                func.lower(
+                                    KnowledgeDocument.canonical_path
+                                ).startswith(prefix),
+                                func.lower(KnowledgeSource.subpath).startswith(
+                                    prefix
+                                ),
                             )
                             for prefix in normalized_prefixes
                         )
@@ -1650,8 +1961,13 @@ class KnowledgeService:
             path_ranked = list(
                 session.scalars(
                     chunk_query.where(
-                        func.lower(KnowledgeDocument.canonical_path).contains(
-                            query_folded
+                        or_(
+                            func.lower(
+                                KnowledgeDocument.canonical_path
+                            ).contains(query_folded),
+                            func.lower(KnowledgeSource.subpath).contains(
+                                query_folded
+                            ),
                         )
                     )
                     .order_by(
@@ -1661,12 +1977,46 @@ class KnowledgeService:
                     .limit(self._settings.knowledge_candidate_limit)
                 )
             )
+            database_search_terms = search_terms
+            if self._database.backend_name == "postgresql":
+                exact_query_term = query.strip().casefold()
+                protocol_terms = {
+                    "citrix",
+                    "git",
+                    "github",
+                    "gitlab",
+                    "ldap",
+                    "rdp",
+                    "ssh",
+                    "svn",
+                    "teraterm",
+                    "tfs",
+                    "vpn",
+                    "winscp",
+                }
+                database_search_terms = [
+                    term
+                    for term in search_terms
+                    if term == exact_query_term
+                    or any(character.isdigit() for character in term)
+                    or term in protocol_terms
+                    or (
+                        len(term) >= 3
+                        and bool(
+                            re.search(
+                                r"[\u3040-\u30ff\u3400-\u9fff]",
+                                term,
+                            )
+                        )
+                    )
+                ][:4]
             text_filters = [
                 or_(
                     func.lower(KnowledgeChunk.search_text).contains(term),
                     func.lower(KnowledgeDocument.canonical_path).contains(term),
+                    func.lower(KnowledgeSource.subpath).contains(term),
                 )
-                for term in search_terms
+                for term in database_search_terms
             ]
             text_query = chunk_query
             if text_filters:
@@ -1966,7 +2316,11 @@ class KnowledgeService:
             result.append(
                 SearchResult(
                     id=chunk.id,
-                    path=document.canonical_path,
+                    source_entry_id=document.source_entry_id,
+                    path=self._semantic_path(
+                        document.canonical_path,
+                        source.subpath or "",
+                    ),
                     text=self._cipher.decrypt(chunk.content_ciphertext),
                     score=scores[chunk.id],
                     scope=chunk.scope,
@@ -2008,6 +2362,75 @@ class KnowledgeService:
                 },
             )
         return result
+
+    def customer_roots(
+        self,
+        *,
+        project: Project,
+        identities: list[str],
+    ) -> tuple[str, ...]:
+        normalized = tuple(
+            dict.fromkeys(
+                value.strip().casefold()
+                for value in identities
+                if value.strip()
+            )
+        )
+        if not normalized:
+            return ()
+        with self._database.session_factory() as session:
+            source_filter = self._knowledge_access_filter(
+                session,
+                project,
+                KnowledgeSource,
+            )
+            paths = list(
+                session.scalars(
+                    select(KnowledgeSourceEntry.relative_path)
+                    .join(KnowledgeSource)
+                    .where(
+                        KnowledgeSource.approved_for_codex.is_(True),
+                        KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                        source_filter,
+                        KnowledgeSourceEntry.present.is_(True),
+                        or_(
+                            *(
+                                func.lower(
+                                    KnowledgeSourceEntry.relative_path
+                                ).contains(value)
+                                for value in normalized
+                            )
+                        ),
+                    )
+                    .order_by(KnowledgeSourceEntry.relative_path)
+                    .limit(500)
+                )
+            )
+            subpaths = list(
+                session.scalars(
+                    select(KnowledgeSource.subpath).where(
+                        KnowledgeSource.approved_for_codex.is_(True),
+                        KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                        source_filter,
+                        KnowledgeSource.subpath.is_not(None),
+                        or_(
+                            *(
+                                func.lower(KnowledgeSource.subpath).contains(
+                                    value
+                                )
+                                for value in normalized
+                            )
+                        ),
+                    )
+                )
+            )
+        roots = []
+        for path in [*subpaths, *paths]:
+            root = path.replace("\\", "/").split("/", 1)[0]
+            folded_root = root.casefold()
+            if any(value in folded_root for value in normalized):
+                roots.append(root)
+        return tuple(dict.fromkeys(roots))
 
     @staticmethod
     def _symbol_match_score(
@@ -2323,37 +2746,32 @@ class KnowledgeService:
             session.commit()
         return "".join(parts), citations
 
-    async def extract_customer_candidates(
+    async def extract_customer_fields(
         self,
         *,
-        identity: dict[str, Any],
-        requested_sections: list[str],
+        requested_fields: list[dict[str, Any]],
         results: list[SearchResult],
+        schema_registry: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not results:
             return [], []
         allowed_ids = {item.id for item in results}
-        evidence = [
-            {
-                "chunk_id": item.id,
-                "path": item.path,
-                "text": item.text[:2_000],
-            }
-            for item in results
-        ]
+        result_by_id = {item.id: item for item in results}
+        field_by_code = {
+            str(item["code"]): item for item in requested_fields
+        }
+        allowed_codes = sorted(field_by_code)
         schema = {
             "type": "object",
             "properties": {
-                "candidates": {
+                "fields": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "candidate_type": {
-                                "type": "string",
-                                "enum": requested_sections,
-                            },
-                            "values": {"type": "object"},
+                            "field_code": {"type": "string", "enum": allowed_codes},
+                            "value": {},
+                            "option_id": {"type": ["string", "null"]},
                             "confidence": {
                                 "type": "number",
                                 "minimum": 0,
@@ -2365,61 +2783,192 @@ class KnowledgeService:
                                 "uniqueItems": True,
                                 "items": {"type": "string", "enum": sorted(allowed_ids)},
                             },
+                            "effective_from": {"type": ["string", "null"]},
+                            "effective_to": {"type": ["string", "null"]},
                         },
                         "required": [
-                            "candidate_type",
-                            "values",
+                            "field_code",
+                            "value",
+                            "option_id",
                             "confidence",
                             "evidence_chunk_ids",
+                            "effective_from",
+                            "effective_to",
                         ],
                     },
                 }
             },
-            "required": ["candidates"],
+            "required": ["fields"],
         }
+        evidence = [
+            {
+                "chunk_id": item.id,
+                "path": item.path,
+                "text": item.text[:4_000],
+            }
+            for item in results
+        ]
         output = await self._provider.structured_generate(
-            "Extract customer ledger candidates only from the supplied evidence. "
-            "Return no candidate when evidence is insufficient. Preserve exact "
-            "codes, names, addresses and network identifiers.\n"
-            f"Identity: {json.dumps(identity, ensure_ascii=False)}\n"
-            f"Requested sections: {json.dumps(requested_sections)}\n"
+            "Extract each requested business field only from this single file. "
+            "Return no field without direct evidence. Never return usernames, "
+            "passwords, tokens, private keys, hosts, IP addresses or credential "
+            "values. For enum and master_reference fields, option_id must be one "
+            "of the supplied option IDs. A document modification date is not a "
+            "business effective date.\n"
+            f"Requested fields: {json.dumps(requested_fields, ensure_ascii=False)}\n"
+            f"Registered object schemas: {json.dumps(schema_registry, ensure_ascii=False)}\n"
             f"Evidence: {json.dumps(evidence, ensure_ascii=False)}",
             schema,
         )
-        candidates: list[dict[str, Any]] = []
+        fields: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
-        for index, raw in enumerate(output.get("candidates", [])):
-            candidate_type = raw.get("candidate_type")
-            values = raw.get("values")
+        for index, raw in enumerate(output.get("fields", [])):
+            code = str(raw.get("field_code", ""))
+            contract = field_by_code.get(code)
             evidence_ids = raw.get("evidence_chunk_ids")
             confidence = raw.get("confidence")
-            reasons = []
-            if candidate_type not in requested_sections:
-                reasons.append("candidate_type_not_requested")
-            if not isinstance(values, dict) or not values:
-                reasons.append("values_empty")
+            option_id = raw.get("option_id")
+            reasons: list[str] = []
+            if contract is None:
+                reasons.append("field_not_requested")
             if (
                 not isinstance(evidence_ids, list)
                 or not evidence_ids
                 or any(value not in allowed_ids for value in evidence_ids)
             ):
-                reasons.append("citation_not_authoritative")
+                reasons.append("evidence_not_authoritative")
             if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
                 reasons.append("confidence_invalid")
+            if contract is not None and contract.get("type") in {
+                "enum",
+                "master_reference",
+            }:
+                allowed_options = {
+                    str(item["id"]) for item in contract.get("options", [])
+                }
+                if option_id not in allowed_options:
+                    reasons.append("option_not_allowed")
+            elif option_id is not None:
+                reasons.append("option_not_applicable")
+            if contract is not None and contract.get("type") == "object_list":
+                schema_ref = str(contract.get("schema_ref", ""))
+                object_schema = schema_registry.get(schema_ref)
+                if object_schema is None or not value_matches_schema(
+                    raw.get("value"), object_schema
+                ):
+                    reasons.append("object_schema_invalid")
+            if raw.get("value") is None or raw.get("value") == "":
+                reasons.append("value_empty")
+            cited_text = "\n".join(
+                (
+                    result_by_id[value].path
+                    + "\n"
+                    + result_by_id[value].text
+                )
+                for value in (evidence_ids or [])
+                if value in result_by_id
+            ).casefold()
+            field_value = raw.get("value")
+            if code == "remote_access" and isinstance(field_value, list):
+                connection_types = [
+                    str(item.get("connection_type", "")).strip().casefold()
+                    for item in field_value
+                    if isinstance(item, dict)
+                ]
+                if any(
+                    connection_type
+                    not in {
+                        "ssh",
+                        "ldap",
+                        "vpn",
+                        "rdp",
+                        "citrix",
+                        "teraterm",
+                        "winscp",
+                    }
+                    or connection_type not in cited_text
+                    for connection_type in connection_types
+                ):
+                    reasons.append("remote_protocol_not_cited")
+            if code == "repositories" and isinstance(field_value, list):
+                repository_types = [
+                    str(item.get("repository_type", "")).strip().casefold()
+                    for item in field_value
+                    if isinstance(item, dict)
+                ]
+                if any(
+                    repository_type
+                    not in {
+                        "svn",
+                        "subversion",
+                        "git",
+                        "gitlab",
+                        "github",
+                        "tfs",
+                    }
+                    or repository_type not in cited_text
+                    for repository_type in repository_types
+                ):
+                    reasons.append("repository_type_not_cited")
             if reasons:
-                errors.append({"candidate_index": index, "reasons": reasons})
+                errors.append({"field_index": index, "reasons": reasons})
                 continue
-            candidates.append(
+            fields.append(
                 {
-                    "candidate_id": str(uuid.uuid4()),
-                    "candidate_type": candidate_type,
-                    "values": values,
+                    "field_code": code,
+                    "value": raw.get("value"),
+                    "option_id": option_id,
                     "confidence": float(confidence),
                     "evidence_chunk_ids": list(dict.fromkeys(evidence_ids)),
-                    "validation_status": "valid",
+                    "effective_from": raw.get("effective_from"),
+                    "effective_to": raw.get("effective_to"),
                 }
             )
-        return candidates, errors
+        return fields, errors
+
+    def document_results(self, document_id: str) -> list[SearchResult]:
+        with self._database.session_factory() as session:
+            document = session.scalar(
+                select(KnowledgeDocument)
+                .options(
+                    selectinload(KnowledgeDocument.source),
+                    selectinload(KnowledgeDocument.chunks),
+                )
+                .where(KnowledgeDocument.id == document_id)
+            )
+            if document is None:
+                return []
+            source = document.source
+            return [
+                SearchResult(
+                    id=chunk.id,
+                    source_entry_id=document.source_entry_id,
+                    path=self._semantic_path(
+                        document.canonical_path,
+                        source.subpath or "",
+                    ),
+                    text=self._cipher.decrypt(chunk.content_ciphertext),
+                    score=1.0,
+                    scope=chunk.scope,
+                    source_id=source.id,
+                    source_name=source.name,
+                    source_type=source.source_type,
+                    source_commit=source.source_commit,
+                    resource_uri=build_resource_uri(
+                        source_type=source.source_type,
+                        location=source.root_path,
+                        reference=source.reference,
+                        subpath=source.subpath,
+                        source_commit=source.source_commit,
+                        document_path=document.canonical_path,
+                    ),
+                    generation_id=document.generation_ingestion_id,
+                    prompt_injection_detected=bool(
+                        chunk.metadata_json.get("prompt_injection_detected")
+                    ),
+                )
+                for chunk in sorted(document.chunks, key=lambda item: item.ordinal)
+            ]
 
     async def capture_memory(
         self,
@@ -2667,6 +3216,209 @@ class KnowledgeService:
     @staticmethod
     def _search_projection(text: str) -> str:
         return " ".join(text.split())[:4000]
+
+    @staticmethod
+    def _embedding_text(
+        path: str,
+        text: str,
+        path_prefix: str = "",
+    ) -> str:
+        semantic_path = KnowledgeService._semantic_path(path, path_prefix)
+        return (
+            "Represent this multilingual enterprise evidence for retrieval.\n"
+            f"Canonical path: {semantic_path}\n"
+            f"Content:\n{text}"
+        )
+
+    @staticmethod
+    def _semantic_path(path: str, path_prefix: str = "") -> str:
+        normalized_prefix = path_prefix.replace("\\", "/").strip("/")
+        normalized_path = path.replace("\\", "/").strip("/")
+        return (
+            f"{normalized_prefix}/{normalized_path}"
+            if normalized_prefix
+            else normalized_path
+        )
+
+    def _embedding_cache_key(self, embedding_text: str) -> str:
+        payload = (
+            f"{self._settings.ollama_embedding_model}\0"
+            f"{self._settings.ollama_embedding_dimensions}\0"
+            f"{embedding_text}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    async def _cache_ingestion_embeddings(
+        self,
+        ingestion_id: str,
+        chunks: list[PreparedChunk],
+        *,
+        path_prefix: str = "",
+    ) -> None:
+        completed = 0
+        for start in range(0, len(chunks), 8):
+            batch = chunks[start : start + 8]
+            texts = [
+                self._embedding_text(item.path, item.text, path_prefix)
+                for item in batch
+            ]
+            keys = [self._embedding_cache_key(item) for item in texts]
+            with self._database.session_factory() as session:
+                cached = {
+                    item.cache_key: item
+                    for item in session.scalars(
+                        select(KnowledgeEmbeddingCache).where(
+                            KnowledgeEmbeddingCache.cache_key.in_(keys)
+                        )
+                    )
+                }
+                now = utc_now()
+                for item in cached.values():
+                    item.last_used_at = now
+                missing = [
+                    (key, text)
+                    for key, text in zip(keys, texts, strict=True)
+                    if key not in cached
+                ]
+                if missing:
+                    generated = await self._provider.embed(
+                        [text for _, text in missing]
+                    )
+                    for (key, _), embedding in zip(
+                        missing,
+                        generated,
+                        strict=True,
+                    ):
+                        session.add(
+                            KnowledgeEmbeddingCache(
+                                cache_key=key,
+                                embedding_model=(
+                                    self._settings.ollama_embedding_model
+                                ),
+                                embedding_dimensions=(
+                                    self._settings.ollama_embedding_dimensions
+                                ),
+                                embedding=embedding,
+                                last_used_at=now,
+                            )
+                        )
+                session.commit()
+            completed += len(batch)
+            if completed == len(chunks) or completed % 200 < len(batch):
+                self._record_ingestion_event(
+                    ingestion_id,
+                    "knowledge.embedding.checkpointed",
+                    {
+                        "completed_chunks": completed,
+                        "total_chunks": len(chunks),
+                    },
+                )
+
+    def _cached_embedding_batch(
+        self,
+        session,
+        chunks: list[PreparedChunk],
+        *,
+        path_prefix: str = "",
+    ) -> dict[str, list[float]]:
+        keys = {
+            self._embedding_cache_key(
+                self._embedding_text(item.path, item.text, path_prefix)
+            )
+            for item in chunks
+        }
+        cached = {
+            item.cache_key: item.embedding
+            for item in session.scalars(
+                select(KnowledgeEmbeddingCache).where(
+                    KnowledgeEmbeddingCache.cache_key.in_(keys)
+                )
+            )
+        }
+        if keys - set(cached):
+            raise KnowledgeUnavailableError(
+                "Embedding checkpoint is incomplete"
+            )
+        return cached
+
+    @staticmethod
+    def _lexical_search_terms(query: str, terms: set[str]) -> list[str]:
+        priority_values = re.findall(
+            r"(?im)(?:organization\s*code|organization\s*name|code|正式名|略称)"
+            r"\s*[:：]\s*([^\r\n,{}\[\]\"]{2,128})",
+            query,
+        )
+        tokens = re.findall(
+            r"[A-Za-z][A-Za-z0-9_.:/-]{1,63}|\d{2,12}|"
+            r"[\u3040-\u30ff\u3400-\u9fff]{2,32}",
+            query,
+        )
+        candidates = [
+            *priority_values,
+            *( [query.strip()] if 2 <= len(query.strip()) <= 128 else [] ),
+            *tokens,
+            *sorted(terms, key=lambda value: (len(value), value)),
+        ]
+        return list(
+            dict.fromkeys(
+                value.strip().casefold()
+                for value in candidates
+                if len(value.strip()) >= 2
+            )
+        )[:12]
+
+    def _source_processor_fingerprint(self) -> str:
+        ocr_status = (
+            self._ocr_engine.status()
+            if self._ocr_engine is not None
+            else {"available": False, "reason": "disabled"}
+        )
+        payload = {
+            "policy": PROCESSING_POLICY_VERSION,
+            "embedding_model": self._settings.ollama_embedding_model,
+            "embedding_dimensions": self._settings.ollama_embedding_dimensions,
+            "ocr": ocr_status,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+    def _reusable_files(
+        self,
+        session,
+        source: KnowledgeSource,
+    ) -> dict[str, ReusableFile]:
+        if source.processor_fingerprint != self._source_processor_fingerprint():
+            return {}
+        rows = session.execute(
+            select(KnowledgeSourceEntry, KnowledgeDocument.id)
+            .join(
+                KnowledgeDocument,
+                (
+                    KnowledgeDocument.source_id == KnowledgeSourceEntry.source_id
+                )
+                & (
+                    KnowledgeDocument.canonical_path
+                    == KnowledgeSourceEntry.relative_path
+                ),
+                isouter=True,
+            )
+            .where(
+                KnowledgeSourceEntry.source_id == source.id,
+                KnowledgeSourceEntry.present.is_(True),
+            )
+        )
+        return {
+            entry.relative_path: ReusableFile(
+                file_size=entry.file_size,
+                modified_at=entry.modified_at,
+                processing_status=entry.processing_status,
+                reason_code=entry.reason_code,
+                raw_content_hash=entry.raw_content_hash,
+                has_document=document_id is not None,
+            )
+            for entry, document_id in rows
+        }
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:

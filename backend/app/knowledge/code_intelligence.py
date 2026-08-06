@@ -180,9 +180,17 @@ def analyze_code(
                 parser=parser_name,
             )
         )
+    unique_symbols: list[CodeSymbolFact] = []
+    seen_identities: set[tuple[str, str, int]] = set()
+    for symbol in normalized_symbols:
+        identity = (symbol.kind, symbol.qualified_name, symbol.start_line)
+        if identity in seen_identities:
+            continue
+        seen_identities.add(identity)
+        unique_symbols.append(symbol)
     chunks = _structure_chunks(
         text,
-        normalized_symbols[1:],
+        unique_symbols[1:],
         parser=parser_name,
         chunk_size=chunk_size,
         overlap=overlap,
@@ -190,7 +198,7 @@ def analyze_code(
     return CodeAnalysis(
         language=language,
         parser=parser_name,
-        symbols=tuple(normalized_symbols),
+        symbols=tuple(unique_symbols),
         chunks=tuple(chunks),
         diagnostics=tuple(diagnostics),
     )

@@ -16,6 +16,7 @@ from app.models import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeSource,
+    KnowledgeSourceEntry,
     Product,
     ProductVersion,
     Project,
@@ -141,6 +142,7 @@ def test_completed_sqlite_database_migrates_to_pgvector(
     project_id = "26758b72-105e-44ba-9d31-b8de19bf512e"
     source_id = "12b96a35-bafe-4e46-87e4-b148250a722d"
     document_id = "e0413334-f5c8-4ca1-8dd5-c5340cae93d3"
+    source_entry_id = "b180f06b-1c02-450d-ae49-c51b87edfd03"
     chunk_id = "b05ee96c-4a10-4561-8a54-b71fb68a0ad8"
     with Session(source_engine) as session:
         session.add(
@@ -188,9 +190,22 @@ def test_completed_sqlite_database_migrates_to_pgvector(
         )
         session.flush()
         session.add(
+            KnowledgeSourceEntry(
+                id=source_entry_id,
+                source_id=source_id,
+                relative_path="warning.txt",
+                entry_kind="file",
+                processing_mode="document",
+                processing_status="indexed",
+                raw_content_hash="c" * 64,
+            )
+        )
+        session.flush()
+        session.add(
             KnowledgeDocument(
                 id=document_id,
                 source_id=source_id,
+                source_entry_id=source_entry_id,
                 canonical_path="warning.txt",
                 content_hash="a" * 64,
                 language="text",

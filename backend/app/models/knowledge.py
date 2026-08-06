@@ -118,6 +118,9 @@ class KnowledgeSource(PhysicalIdMixin, Base):
     )
     source_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     index_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processor_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     approved_for_codex: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_validated_at: Mapped[datetime | None] = mapped_column(
@@ -166,6 +169,13 @@ class KnowledgeIngestion(PhysicalIdMixin, Base):
     source_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
     )
+    analysis_scope_id: Mapped[str | None] = mapped_column(
+        String(),
+        nullable=True,
+        index=True,
+    )
+    scope_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_statuses: Mapped[list[str]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     next_event_sequence: Mapped[int] = mapped_column(Integer, default=1)
     files_seen: Mapped[int] = mapped_column(Integer, default=0)
@@ -312,6 +322,9 @@ class KnowledgeSourceEntry(PhysicalIdMixin, Base):
     content_hash: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    raw_content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
@@ -326,6 +339,10 @@ class KnowledgeSourceEntry(PhysicalIdMixin, Base):
     )
     source = relationship("KnowledgeSource", back_populates="entries")
     last_seen_ingestion = relationship("KnowledgeIngestion")
+    documents = relationship(
+        "KnowledgeDocument",
+        back_populates="source_entry",
+    )
 
 
 class KnowledgeDocument(PhysicalIdMixin, Base):
@@ -340,6 +357,10 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
 
     source_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
+    )
+    source_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_source_entries.id", ondelete="CASCADE"),
+        index=True,
     )
     canonical_path: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
@@ -357,6 +378,9 @@ class KnowledgeDocument(PhysicalIdMixin, Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     source = relationship("KnowledgeSource", back_populates="documents")
+    source_entry = relationship(
+        "KnowledgeSourceEntry", back_populates="documents"
+    )
     chunks = relationship(
         "KnowledgeChunk", back_populates="document", cascade="all, delete-orphan"
     )
@@ -398,6 +422,23 @@ class KnowledgeChunk(PhysicalIdMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     document = relationship("KnowledgeDocument", back_populates="chunks")
+
+
+class KnowledgeEmbeddingCache(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_embedding_cache"
+
+    cache_key: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True
+    )
+    embedding_model: Mapped[str] = mapped_column(String(255), index=True)
+    embedding_dimensions: Mapped[int] = mapped_column(Integer)
+    embedding: Mapped[list[float]] = mapped_column(EmbeddingType())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class CodeSymbol(PhysicalIdMixin, Base):

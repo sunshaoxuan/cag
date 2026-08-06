@@ -24,6 +24,7 @@ from app.knowledge.extractors import (
     extract_text_with_metadata,
     normalize_text,
 )
+from app.knowledge.ocr import TesseractOcrEngine
 from app.knowledge.processing_policy import (
     classify_file,
     path_semantic_text,
@@ -77,6 +78,16 @@ class CollectedDocument:
 
 
 @dataclass(frozen=True)
+class ReusableFile:
+    file_size: int | None
+    modified_at: datetime | None
+    processing_status: str
+    reason_code: str | None
+    raw_content_hash: str | None
+    has_document: bool
+
+
+@dataclass(frozen=True)
 class CollectionResult:
     revision: str | None
     documents: list[CollectedDocument]
@@ -84,6 +95,7 @@ class CollectionResult:
     rejected_files: int
     skipped_files: int
     duplicate_files: int
+    reused_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,6 +122,7 @@ class CollectionObservation:
     processing_mode: str
     processing_status: str
     reason_code: str | None
+    raw_content_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +149,7 @@ class SourceConnectorManager:
         svn_executable: str,
         max_file_bytes: int,
         max_spreadsheet_cells: int = 250_000,
+        ocr_engine: TesseractOcrEngine | None = None,
     ) -> None:
         self._cache_root = cache_root.resolve()
         self._allowed_roots = allowed_roots
@@ -145,6 +159,7 @@ class SourceConnectorManager:
         self._svn = svn_executable
         self._max_file_bytes = max_file_bytes
         self._max_spreadsheet_cells = max_spreadsheet_cells
+        self._ocr_engine = ocr_engine
 
     @staticmethod
     def normalized_source_key(
@@ -234,6 +249,7 @@ class SourceConnectorManager:
         progress: CollectionProgress | None = None,
         rejection: CollectionRejectionSink | None = None,
         observation: CollectionObservationSink | None = None,
+        reusable_files: dict[str, ReusableFile] | None = None,
     ) -> CollectionResult:
         credential = self._credentials.get(source.credential_ref)
         if source.source_type == "local_directory":
@@ -247,6 +263,7 @@ class SourceConnectorManager:
                 progress,
                 rejection,
                 observation,
+                reusable_files,
             )
         if source.source_type == "network_share":
             with self._network_connection(source.location, credential):
@@ -257,6 +274,7 @@ class SourceConnectorManager:
                     progress,
                     rejection,
                     observation,
+                    reusable_files,
                 )
         if source.source_type in {"git", "gitlab"}:
             root, revision = self._materialize_git(source, credential)
@@ -268,6 +286,7 @@ class SourceConnectorManager:
             progress,
             rejection,
             observation,
+            reusable_files,
         )
 
     def purge(self, source_id: str) -> None:
@@ -297,6 +316,7 @@ class SourceConnectorManager:
         progress: CollectionProgress | None = None,
         rejection: CollectionRejectionSink | None = None,
         observation: CollectionObservationSink | None = None,
+        reusable_files: dict[str, ReusableFile] | None = None,
     ) -> CollectionResult:
         if not root.is_dir():
             raise ValueError("Selected source subpath does not exist")
@@ -307,8 +327,29 @@ class SourceConnectorManager:
         files_discovered = 0
         files_processed = 0
         directories_scanned = 0
-        seen_hashes: set[str] = set()
         pending_directories = deque([root])
+        reusable_files = reusable_files or {}
+        reused_paths: list[str] = []
+
+        def append_path_document(path: Path, reason_code: str) -> None:
+            relative_path = path.relative_to(root).as_posix()
+            path_text = path_semantic_text(
+                relative_path,
+                reason_code=reason_code,
+            )
+            documents.append(
+                CollectedDocument(
+                    path=relative_path,
+                    text=path_text,
+                    content_hash=hashlib.sha256(
+                        path_text.encode("utf-8")
+                    ).hexdigest(),
+                    language="path",
+                    encoding="path-metadata",
+                    processing_mode="path_only",
+                    extractor="path-semantic",
+                )
+            )
 
         def report(
             phase: str,
@@ -397,6 +438,17 @@ class SourceConnectorManager:
                     )
                 except OSError as exc:
                     rejected += 1
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        file_size=None,
+                        modified_at=None,
+                        processing_mode="metadata_only",
+                        processing_status="rejected",
+                        reason_code="file_stat_error",
+                    )
                     self._report_rejection(
                         rejection,
                         root=root,
@@ -415,6 +467,88 @@ class SourceConnectorManager:
                     file_size=file_size,
                     max_file_bytes=self._max_file_bytes,
                 )
+                reusable = reusable_files.get(relative_path)
+                reusable_metadata_matches = (
+                    reusable is not None
+                    and reusable.file_size == file_size
+                    and reusable.modified_at == modified_at
+                    and reusable.raw_content_hash is not None
+                )
+                if reusable_metadata_matches and (
+                    reusable.has_document
+                    or reusable.processing_status == "rejected"
+                ):
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        file_size=file_size,
+                        modified_at=modified_at,
+                        processing_mode=decision.mode,
+                        processing_status=reusable.processing_status,
+                        reason_code=reusable.reason_code,
+                        raw_content_hash=reusable.raw_content_hash,
+                    )
+                    reused_paths.append(relative_path)
+                    files_processed += 1
+                    if reusable.processing_status in {
+                        "metadata_only",
+                        "rejected",
+                    }:
+                        disposition = (
+                            "rejected"
+                            if reusable.processing_status == "rejected"
+                            else "skipped"
+                        )
+                        if disposition == "rejected":
+                            rejected += 1
+                        else:
+                            skipped += 1
+                        self._report_rejection(
+                            rejection,
+                            root=root,
+                            path=path,
+                            entry_kind="file",
+                            disposition=disposition,
+                            file_size=file_size,
+                            reason_code=(
+                                reusable.reason_code or "reused_path_evidence"
+                            ),
+                        )
+                    continue
+                try:
+                    raw_content_hash = (
+                        reusable.raw_content_hash
+                        if reusable_metadata_matches
+                        else self._sha256_file(path)
+                    )
+                except OSError as exc:
+                    rejected += 1
+                    files_processed += 1
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        file_size=file_size,
+                        modified_at=modified_at,
+                        processing_mode=decision.mode,
+                        processing_status="rejected",
+                        reason_code="raw_hash_read_error",
+                    )
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="rejected",
+                        file_size=file_size,
+                        reason_code="raw_hash_read_error",
+                        error=exc,
+                    )
+                    append_path_document(path, "raw_hash_read_error")
+                    continue
                 self._report_observation(
                     observation,
                     root=root,
@@ -429,6 +563,7 @@ class SourceConnectorManager:
                         else "observed"
                     ),
                     reason_code=decision.reason_code,
+                    raw_content_hash=raw_content_hash,
                 )
                 if decision.mode == "metadata_only":
                     skipped += 1
@@ -444,6 +579,10 @@ class SourceConnectorManager:
                             decision.reason_code
                             or "metadata_only_policy"
                         ),
+                    )
+                    append_path_document(
+                        path,
+                        decision.reason_code or "metadata_only_policy",
                     )
                     continue
                 if decision.mode == "path_only":
@@ -481,6 +620,7 @@ class SourceConnectorManager:
                             self._max_spreadsheet_cells
                         ),
                         max_output_characters=self._max_file_bytes,
+                        ocr_engine=self._ocr_engine,
                     )
                     text = normalize_text(extracted.text)
                 except (
@@ -501,6 +641,10 @@ class SourceConnectorManager:
                         reason_code=self._rejection_reason(path, exc),
                         error=exc,
                     )
+                    append_path_document(
+                        path,
+                        self._rejection_reason(path, exc),
+                    )
                     files_processed += 1
                     continue
                 files_processed += 1
@@ -515,14 +659,11 @@ class SourceConnectorManager:
                         file_size=file_size,
                         reason_code="empty_text",
                     )
+                    append_path_document(path, "empty_text")
                     continue
                 content_hash = hashlib.sha256(
                     text.encode("utf-8")
                 ).hexdigest()
-                if content_hash in seen_hashes:
-                    duplicates += 1
-                    continue
-                seen_hashes.add(content_hash)
                 documents.append(
                     CollectedDocument(
                         path=path.relative_to(root).as_posix(),
@@ -550,7 +691,16 @@ class SourceConnectorManager:
             rejected_files=rejected,
             skipped_files=skipped,
             duplicate_files=duplicates,
+            reused_paths=tuple(reused_paths),
         )
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            while block := stream.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
 
     @staticmethod
     def _rejection_reason(path: Path, error: Exception) -> str:
@@ -657,6 +807,7 @@ class SourceConnectorManager:
         processing_mode: str,
         processing_status: str,
         reason_code: str | None,
+        raw_content_hash: str | None = None,
     ) -> None:
         if sink is None:
             return
@@ -675,6 +826,7 @@ class SourceConnectorManager:
                 processing_mode=processing_mode,
                 processing_status=processing_status,
                 reason_code=reason_code,
+                raw_content_hash=raw_content_hash,
             )
         )
 

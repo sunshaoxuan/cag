@@ -213,7 +213,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector and pg_trgm in every managed runtime.
-Alembic owns schema versioning through revision `20260806_0021`. SQLite is
+Alembic owns schema versioning through revision `20260806_0024`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension
@@ -374,6 +374,35 @@ and source references preserving the grounding chain.
 
 Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect to Ollama or Codex app-server directly.
 
+### Scoped customer ledger analysis
+
+Customer ledger extraction is a dedicated knowledge queue job. The request
+contains Source and organization physical identities plus Code and names used
+only for Catalog resolution. CAG resolves one `KnowledgeAnalysisScope`, records
+its canonical prefix and creates one `KnowledgeExtractionTaskDocument` for
+every Catalog entry below that prefix. Ready documents reuse their active
+versions. Missing, metadata-only, changed or failed documents remain explicit
+Manifest outcomes and can be prepared by a separate Scope Ingestion.
+
+Extraction runs one file at a time. Every accepted field has a physical
+candidate ID, a Knowledge Block Version ID and evidence linked to Chunk,
+Document and Document Version physical IDs. Aggregation applies Template source
+priority, confidence, conflict and evidence policies. The response reports
+coverage, exclusions, unresolved fields and document failures without updating
+the calling system's ledger.
+
+Technical processing and business time are independent axes. A successful new
+processor creates an Active `KnowledgeProcessingVersion` and marks the prior
+version Superseded. Quality failure leaves the prior Active version unchanged.
+Immutable `KnowledgeBlockVersion` rows hold facts and evidence.
+`KnowledgeBlockApplicability` revisions hold effective intervals and management
+state. `analysis_context.as_of` selects applicable Blocks and records every
+excluded Block and reason on the Extraction Task.
+
+Changed and absent files retain Document Versions, Processing Versions, Blocks
+and archive Chunks. Source disable and removal operations clear credentials and
+stop future processing while keeping this audit history.
+
 The durable source scheduler polls persisted `next_sync_at` values. It claims
 one due source with `FOR UPDATE SKIP LOCKED` and an expiring database lease,
 creates a normal ingestion record with trigger `scheduled`, and runs the same
@@ -398,6 +427,11 @@ Every business record has an independent UUID physical ID.
 * Conversation TaskEvents also store `conversation_id` and a Conversation-local sequence.
 * `KnowledgeSource.id` owns sync policy, lease, source health and all ingestion history.
 * `KnowledgeIngestion.id` records one manual or scheduled source snapshot comparison.
+* `KnowledgeAnalysisScope.id` identifies one resolved Catalog customer scope.
+* `KnowledgeDocumentVersion.id` identifies one immutable source content version.
+* `KnowledgeProcessingVersion.id` identifies one technical processing result.
+* `KnowledgeBlockVersion.id` identifies one immutable business fact and evidence set.
+* `KnowledgeBlockApplicability.id` identifies one business effective period revision.
 
 The request field `project_id` accepts a project UUID or project Code for compatibility with the source specification. Storage always uses the physical UUID. Responses expose `project_id` and `project_code`.
 

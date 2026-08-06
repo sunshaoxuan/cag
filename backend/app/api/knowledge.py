@@ -346,9 +346,20 @@ def source_retrieval_health(
         latest_ingestion is not None
         and latest_ingestion.status in {"queued", "running"}
     )
+    stale_refresh = (
+        source.consecutive_failures > 0
+        or (
+            source.last_sync_attempt_at is not None
+            and (
+                source.last_collected_at is None
+                or source.last_sync_attempt_at > source.last_collected_at
+            )
+            and not refreshing
+        )
+    )
     if not source.enabled:
         health_status = "disabled"
-    elif accessible_chunks > 0 and source.error:
+    elif accessible_chunks > 0 and (source.error or stale_refresh):
         health_status = "degraded"
     elif accessible_chunks > 0 and refreshing:
         health_status = "refreshing"
@@ -372,10 +383,22 @@ def source_retrieval_health(
         health_status = "empty"
     return {
         "status": health_status,
+        "freshness_status": (
+            "refreshing"
+            if refreshing
+            else "stale"
+            if stale_refresh
+            else "current"
+            if source.last_collected_at is not None
+            else "never_collected"
+        ),
         "total_chunks": total_chunks,
         "accessible_chunks": accessible_chunks,
         "legacy_documents": legacy_documents,
         "active_generation_id": active_generation_id,
+        "last_collected_at": source.last_collected_at,
+        "last_sync_attempt_at": source.last_sync_attempt_at,
+        "consecutive_failures": source.consecutive_failures,
     }
 
 
@@ -556,6 +579,7 @@ def source_entry_response(item: KnowledgeSourceEntry) -> dict[str, Any]:
         "last_seen_ingestion_id": item.last_seen_ingestion_id,
         "processor_fingerprint": item.processor_fingerprint,
         "content_hash": item.content_hash,
+        "raw_content_hash": item.raw_content_hash,
         "first_seen_at": item.first_seen_at,
         "last_seen_at": item.last_seen_at,
         "processed_at": item.processed_at,
@@ -971,6 +995,7 @@ async def search_knowledge(
         "results": [
             {
                 "chunk_id": item.id,
+                "source_entry_id": item.source_entry_id,
                 "source_id": item.source_id,
                 "source_name": item.source_name,
                 "source_type": item.source_type,

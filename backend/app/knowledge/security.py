@@ -16,6 +16,19 @@ SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:password|passwd|secret|api[_-]?key)\s*[:=]\s*[\"']?[^\s\"']{8,}"
     ),
+    re.compile(
+        r"(?im)^[^\r\n]*(?:パスワード|暗証番号|秘密鍵|認証キー)"
+        r"[^\r\n]*$"
+    ),
+    re.compile(
+        r"(?im)^\s*(?:ユーザー(?:名)?|ユーザ(?:名)?|アカウント(?:名)?|"
+        r"ログイン(?:名)?|接続先|ホスト(?:名)?|IP(?:アドレス)?|"
+        r"endpoint|host(?:name)?|user(?:name)?)\s*[:：=\t]"
+        r"[^\r\n]*$"
+    ),
+    re.compile(
+        r"(?i)\b(?:https?|ssh|svn)://[^\s/:]+:[^\s/@]+@[^\s]+"
+    ),
 )
 PROMPT_INJECTION_PATTERNS = (
     re.compile(r"(?i)ignore (?:all |the )?(?:previous|prior) instructions"),

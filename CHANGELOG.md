@@ -2,6 +2,74 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.24.0
+
+* Add scoped customer ledger extraction schema v1 with Catalog scope
+  resolution, exhaustive file manifests, file level extraction checkpoints,
+  coverage, conflicts, unresolved fields and stable error codes.
+* Persist independent Source, Document, Processing, Knowledge Block and
+  Applicability physical versions. Changed or absent source files retain their
+  historical documents, chunks, evidence and audit relationships.
+* Select business facts at `analysis_context.as_of` while Processor activation
+  remains an independent version axis. A failed processing refresh preserves
+  the previous Active version.
+* Add idempotent scope repair ingestion and separate scope repair from
+  extraction reanalysis.
+* Give exhaustive customer extraction its own 900 second deadline so file level
+  model work is independent from the 30 second deep-search contract.
+* Bound each customer document model call to 15 seconds and report timeout as a
+  document failure so the exhaustive Manifest reaches a terminal aggregate.
+* Register complete v1 object schemas for contracts, services, VPNs,
+  environments, remote access and repositories.
+* Deduplicate extracted code symbols by their persisted document identity so
+  repeated parser facts cannot roll back a long knowledge refresh.
+* Persist redacted-input embedding checkpoints per batch so interrupted large
+  source refreshes resume without repeating completed GPU work or retaining all
+  vectors in process memory.
+* Bound PostgreSQL lexical retrieval to indexable identifiers and terms so CJK
+  bigrams cannot force a full knowledge scan past the statement timeout.
+* Include a governed Source subpath in semantic path embeddings while keeping
+  canonical document paths and resource URIs stable.
+* Keep natural-language English terms in semantic retrieval and reserve the
+  bounded lexical channel for the full query, codes, protocol identifiers and
+  sufficiently specific CJK terms.
+* Close file provenance with raw byte SHA 256 values, required physical
+  SourceEntry foreign keys on documents and Citation source entry IDs.
+* Add a resumable, bounded-concurrency provenance backfill command so legacy
+  sources can receive original-byte hashes without repeating OCR, cleaning or
+  embedding work. Files whose size or modification time changed are left for
+  normal ingestion instead of being linked to stale knowledge.
+* Freeze the original knowledge document schema in Alembic revision 0005 so a
+  clean PostgreSQL installation can replay through revision 0024.
+* Create a fresh operational triage queue item after an explicit reopen or a
+  failed evaluation so a finishing leased item cannot consume the new cycle.
+
+发布日期：2026-08-06
+
+### Added
+
+* 扫描 PDF 在文本层为空时使用 Tesseract 日英 OCR，并保存页码、语言及提取器版本。
+* 客户台账 Extraction v1 新增远程访问和代码仓库字段，协议与仓库类型必须出现在权威 Citation 中。
+* 知识源保存全局处理器指纹，未变化文件在正文提取、OCR 和 embedding 之前直接复用物理文档与向量。
+* Knowledge Retrieval Health 新增 freshness、最后成功时间、最后尝试时间和连续失败数。
+
+### Changed
+
+* Qwen3 Embedding 输入同时包含规范路径和脱敏正文，查询指令覆盖日文、中文及英文语义等价表达。
+* 客户 Scope 直接从受治理 Catalog 定位，身份解析使用 Code、正式名、略称和别名，强引用使用 Scope 物理 ID。
+* Scope 下所有 Catalog 文件进入 Manifest，抽取按文件顺序执行，并记录每个文件的处理状态和失败原因。
+* 内容相同的不同物理路径分别保留；不支持、空文本及提取失败文件生成受限的路径存在证据。
+
+### Security
+
+* 日文密码、用户、账号、连接目标、主机及 IP 字段在搜索投影、向量和模型上下文之前脱敏。
+* 路径证据只证明资产存在，不能作为正文事实 Citation。
+
+### Validation
+
+* 滋贺大学五页扫描维护合同通过真实日英 OCR 生成 5544 个字符，并识别客户、契约及维护语义。
+* 远程连接 Fixture 只生成具备 SSH Citation 的候选；缺少 SVN Citation 时返回 repository learning gap。
+
 ## 0.23.0
 
 发布日期：2026-08-06

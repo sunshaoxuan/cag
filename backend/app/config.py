@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.23.0"
+APP_VERSION = "0.24.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     knowledge_fast_timeout_seconds: int = Field(default=3, ge=1, le=30)
     knowledge_balanced_timeout_seconds: int = Field(default=15, ge=2, le=120)
     knowledge_deep_timeout_seconds: int = Field(default=30, ge=5, le=300)
+    knowledge_customer_extraction_timeout_seconds: int = Field(
+        default=900, ge=30, le=7_200
+    )
+    knowledge_customer_document_timeout_seconds: int = Field(
+        default=15, ge=5, le=300
+    )
     knowledge_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
     knowledge_sources_dir: Path = (
         DEFAULT_REPOSITORY_ROOT / ".gateway" / "knowledge-sources"
@@ -96,6 +102,11 @@ class Settings(BaseSettings):
     knowledge_max_spreadsheet_cells: int = Field(
         default=250_000, ge=1_000, le=2_000_000
     )
+    knowledge_ocr_enabled: bool = True
+    knowledge_ocr_executable: str = "tesseract"
+    knowledge_ocr_languages: str = "jpn+eng"
+    knowledge_ocr_dpi: int = Field(default=300, ge=150, le=600)
+    knowledge_ocr_page_timeout_seconds: int = Field(default=60, ge=5, le=600)
     knowledge_scheduler_enabled: bool = True
     knowledge_scheduler_poll_seconds: int = Field(
         default=10, ge=1, le=3_600

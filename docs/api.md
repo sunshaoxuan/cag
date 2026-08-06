@@ -2,7 +2,14 @@
 
 Base path: `/api/v1`
 
-Current version: `0.23.0`
+Current version: `0.24.0`
+
+Customer ledger extraction schema version 1 accepts a Source physical ID, an
+organization subject physical ID, Catalog scope policy, analysis time,
+ingestion policy and typed `requested_fields`. CAG resolves one governed Scope,
+places every Catalog file in the Task manifest and extracts each eligible file.
+Remote access and repository values require their declared protocol or
+repository type in authoritative cited evidence.
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.23.0"
+    "version": "0.24.0"
 }
 ```
 
@@ -104,16 +111,30 @@ overall profile deadline bound each request.
 * `POST /api/v1/knowledge/extractions/customer-ledger`
 * `GET /api/v1/knowledge/extractions/customer-ledger/{task_id}`
 * `POST /api/v1/knowledge/extractions/customer-ledger/{task_id}/cancel`
+* `POST /api/v1/knowledge/scopes/{scope_id}/ingestions`
 * `GET /api/v1/tasks/{task_id}/events`
 
-The create endpoint accepts customer Code, official name, aliases and requested
-sections. It returns HTTP 202 and a physical Task ID. CAG validates every
-candidate against the requested section, non-empty structured values,
-confidence range and authoritative returned Chunk IDs. Each result includes a
-physical candidate ID and Chunk, Source and active Generation citations.
-The extraction resolves an authoritative customer root from an exact Code,
-official-name or alias path match. Section searches remain inside that root;
-when no such root exists, the result reports a learning gap.
+The create endpoint returns HTTP 202 and a physical Extraction Task ID. Required
+headers are `X-CAG-Source`, `X-CAG-Client-ID`, `X-Request-ID` and
+`Idempotency-Key`. Replaying the same key and body returns the same Task. A
+different body returns `409 IDEMPOTENCY_CONFLICT`. Request and registered object
+schema failures return `422 REQUEST_SCHEMA_INVALID`.
+
+Scope resolution uses exact boundary matching for organization Code and name
+attributes. Zero matches return `SCOPE_NOT_FOUND`; multiple matches return
+`SCOPE_AMBIGUOUS`. The result contains Scope, exhaustive coverage, field
+candidates, evidence, conflicts, unresolved fields, applicability exclusions,
+document failures and Source, Template, Extractor and Model versions. Evidence
+contains Chunk ID, Document ID, Document Version ID, Resource URI, canonical
+path, Sheet, Cell, Page or Section location and a redacted excerpt.
+
+`analysis_context.as_of` selects only business Knowledge Blocks within their
+effective interval. Each selected or excluded candidate carries its Knowledge
+Block physical ID and effective interval. Processing Version activation is
+independent from business applicability. Scope ingestion requires
+`X-CAG-Client-Role: system-admin` and its own idempotency key. It creates a
+repair Ingestion only for the resolved Scope. Reanalysis uses a new Extraction
+Task and reuses ready versions.
 
 ## Durable queue
 

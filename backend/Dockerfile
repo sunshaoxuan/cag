@@ -7,6 +7,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git subversion ca-certificates \
+       tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml backend/alembic.ini ./

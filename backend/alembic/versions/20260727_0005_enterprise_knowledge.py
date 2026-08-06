@@ -37,6 +37,53 @@ TABLES = [
 ]
 
 
+def _create_original_knowledge_documents() -> None:
+    """Create the document schema owned by revision 0005.
+
+    This revision predates source entries and processing fingerprints.  Using
+    the live ORM table here would make a clean upgrade depend on tables that
+    are introduced by later revisions.
+    """
+    if sa.inspect(op.get_bind()).has_table("knowledge_documents"):
+        return
+    op.create_table(
+        "knowledge_documents",
+        sa.Column("source_id", sa.String(), nullable=False),
+        sa.Column("canonical_path", sa.Text(), nullable=False),
+        sa.Column("content_hash", sa.String(length=64), nullable=False),
+        sa.Column("language", sa.String(length=32), nullable=False),
+        sa.Column("generation_ingestion_id", sa.String(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.String(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["generation_ingestion_id"],
+            ["knowledge_ingestions.id"],
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["source_id"],
+            ["knowledge_sources.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "source_id",
+            "canonical_path",
+            name="uq_knowledge_documents_source_path",
+        ),
+    )
+    for column in (
+        "content_hash",
+        "generation_ingestion_id",
+        "source_id",
+    ):
+        op.create_index(
+            f"ix_knowledge_documents_{column}",
+            "knowledge_documents",
+            [column],
+        )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
@@ -75,7 +122,10 @@ def upgrade() -> None:
         )
         batch_op.add_column(sa.Column("knowledge_usage", sa.JSON(), nullable=True))
     for name in TABLES[3:]:
-        Base.metadata.tables[name].create(bind=bind, checkfirst=True)
+        if name == "knowledge_documents":
+            _create_original_knowledge_documents()
+        else:
+            Base.metadata.tables[name].create(bind=bind, checkfirst=True)
     if bind.dialect.name == "postgresql":
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_embedding_hnsw "

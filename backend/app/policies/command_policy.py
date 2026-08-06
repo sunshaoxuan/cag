@@ -22,6 +22,7 @@ class CommandPolicyService:
         re.compile(r"^\s*svn\s+(info|export)\b", re.IGNORECASE),
         re.compile(r"^\s*(npm|pnpm)\s+(test|run\s+(test|build|lint))\b", re.IGNORECASE),
         re.compile(r"^\s*(get-childitem|get-content|select-string)\b", re.IGNORECASE),
+        re.compile(r"^\s*tesseract\s+ocr\b", re.IGNORECASE),
     )
 
     def evaluate(self, subject: str, request_type: str) -> PolicyDecision:

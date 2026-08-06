@@ -10,10 +10,10 @@ from app.knowledge.code_intelligence import CODE_LANGUAGE_BY_SUFFIX
 from app.knowledge.extractors import SUPPORTED_EXTENSIONS
 
 
-PROCESSING_POLICY_VERSION = "knowledge-routing-v2"
-CODE_PROCESSOR_VERSION = "structural-code-v2"
-DOCUMENT_PROCESSOR_VERSION = "document-text-v2"
-PATH_PROCESSOR_VERSION = "path-semantic-v1"
+PROCESSING_POLICY_VERSION = "knowledge-routing-v5"
+CODE_PROCESSOR_VERSION = "structural-code-v4-subpath-embedding"
+DOCUMENT_PROCESSOR_VERSION = "document-text-v5-structured-location"
+PATH_PROCESSOR_VERSION = "path-semantic-v3-subpath-embedding"
 
 METADATA_ONLY_EXTENSIONS = {
     ".7z",

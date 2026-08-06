@@ -49,8 +49,10 @@ XLSX files use openpyxl in read-only mode with external workbook links
 disabled. The semantic representation preserves workbook sheet order, sheet
 name and visibility, populated cell coordinates, normalized values, formulas
 and cached formula values when present. Dates use ISO text and embedded line
-breaks are escaped. Images, charts, macros and style-only information remain
-outside the knowledge text. Hidden sheets remain eligible for indexing.
+breaks are escaped. Charts, macros and style-only information remain outside
+the spreadsheet knowledge text. Hidden sheets remain eligible for indexing.
+PDF pages whose text layer is empty use Tesseract OCR with Japanese and English
+language data. OCR output preserves page markers and extractor version evidence.
 
 One workbook is limited to 250000 populated cells by default. Extracted text
 also remains inside the configured file-size character budget. A limit breach
@@ -89,7 +91,10 @@ refresh preserves the previous searchable generation and records a degraded
 health state.
 
 The managed knowledge store is PostgreSQL 16 with pgvector and pg_trgm.
-Embeddings use the native `vector(1024)` type and an HNSW cosine index. Lowered
+Embeddings use the native `vector(1024)` type and an HNSW cosine index. Each
+embedding input contains the canonical path and redacted chunk text so customer
+and operational meaning carried by directories remains available to semantic
+retrieval. Lowered
 Chunk text, document paths and symbol names use GIN trigram indexes. Every
 channel has a fixed candidate limit. The `fast` profile performs no model call,
 while `balanced` and `deep` add bounded vector and reranking stages. SQLite is
@@ -99,9 +104,9 @@ The API and durable queue worker run in separate operating-system processes.
 Knowledge saturation therefore does not occupy the API event loop. Retrieval
 events expose stage, profile, elapsed time, candidate counts, Source IDs and
 active Generation IDs. Customer ledger extraction uses a dedicated knowledge
-job, resolves the exact customer root directory, restricts section retrieval to
-that root and validates structured candidates against authoritative Chunk
-citations.
+job, resolves one Catalog Scope from the Source and organization attributes,
+builds an exhaustive file manifest and validates typed candidates against
+authoritative Chunk and Document Version citations.
 
 The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE
@@ -157,9 +162,10 @@ duplicate work when more than one Gateway Worker polls the same database.
 Every scheduled run scans the current source snapshot. The idempotent comparison
 then separates unchanged, changed, added and removed paths. Only changed and
 added files, plus files with changed processor fingerprints, require new
-embeddings. Unchanged chunks retain their physical IDs and vectors. Removed
-paths delete their documents and dependent chunks while their source inventory
-entry remains marked absent. Each
+embeddings. Unchanged chunks retain their physical IDs and vectors. Changed and
+absent paths move their previous documents and chunks into immutable history
+while the source inventory records current presence. Archive chunks stay
+outside normal retrieval and remain available for version and audit queries. Each
 run remains available as ingestion history with its trigger, status, counts,
 timestamps, error and rejection archive receipt. The management page exposes
 the file-level audit, CSV export and compressed archive from this history.
@@ -174,12 +180,25 @@ records, after which their sources can retry safely.
 
 ## Idempotent vector index
 
-Every cleaned file is identified by source physical ID, canonical relative path and SHA 256 content hash. A source fingerprint is derived from the sorted path and hash set. Repeating ingestion with the same fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files replace only their own chunks. Removed files delete their indexed documents. Database uniqueness on source plus path and document plus ordinal prevents duplicate results.
+Every physical file has a streamed raw byte SHA 256 on its SourceEntry. Cleaned documents and knowledge chunks have separate content hashes because each proves a different transformation boundary. KnowledgeDocument stores a required physical foreign key to SourceEntry, and KnowledgeChunk stores a required foreign key to KnowledgeDocument. A source fingerprint is derived from the sorted path and cleaned hash set. Repeating ingestion with unchanged size, modification time, raw hash and processor fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files create a new Document and Document Version, activate a new Processing Version after quality completion, mark the prior Processing Version superseded and archive prior chunks. Removed files follow the same historical retention rule. Knowledge Block Versions keep immutable values and evidence. Applicability Revisions keep business effective periods independently from Processing Versions. Embeddings of redacted path and content input are checkpointed by model, dimensions and input hash after every successful batch. A failed refresh resumes from these checkpoints and retains the previous Active Processing Version until the replacement transaction completes.
+
+Legacy sources backfill original-byte provenance with:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.knowledge.provenance_backfill <source-id>
+```
+
+The command selects only present file entries whose raw hash is missing, reads
+files with bounded concurrency, and commits each batch. The stored raw hash is
+the restart checkpoint. A file whose size or modification time differs from
+the inventory remains unhashed so normal ingestion can atomically refresh its
+cleaned document and chunks. This command never runs OCR, embeddings or a
+generative model.
 
 The registry also computes a normalized source key from source type, location,
 reference, subpath and scope. One Project cannot register the same logical
 source twice. During a collection run, files with identical cleaned content
-share a content hash and only the first canonical path is indexed. The
+share a content hash and every canonical path is indexed. The
 ingestion receipt reports unchanged files, reused vectors and duplicate files
 separately.
 

@@ -2,6 +2,10 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router
@@ -221,6 +225,26 @@ def create_app(
     application.state.queue_coordinator = queue_coordinator
     application.state.extraction_service = extraction_service
     application.state.operational_issue_service = operational_issue_service
+
+    @application.exception_handler(RequestValidationError)
+    async def stable_customer_extraction_validation_error(
+        request: Request,
+        error: RequestValidationError,
+    ):
+        if request.url.path.startswith(
+            "/api/v1/knowledge/extractions/customer-ledger"
+        ) or request.url.path.startswith("/api/v1/knowledge/scopes/"):
+            return JSONResponse(
+                status_code=422,
+                content=jsonable_encoder({
+                    "detail": {
+                        "code": "REQUEST_SCHEMA_INVALID",
+                        "message": "Request schema validation failed.",
+                        "details": {"errors": error.errors()},
+                    }
+                }),
+            )
+        return await request_validation_exception_handler(request, error)
 
     @application.middleware("http")
     async def capture_unhandled_api_failure(request: Request, call_next):
