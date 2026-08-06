@@ -147,7 +147,54 @@ try {
             Pop-Location
         }
     }
-    & $pythonExecutable -m uvicorn app.main:app --host 0.0.0.0 --port $Port
+    $runtimeLogDirectory = Join-Path $repositoryRoot "workspaces\.gateway\logs"
+    New-Item -ItemType Directory -Path $runtimeLogDirectory -Force | Out-Null
+    $workerOutput = Join-Path $runtimeLogDirectory "gateway-worker.out.log"
+    $workerError = Join-Path $runtimeLogDirectory "gateway-worker.err.log"
+    $apiOutput = Join-Path $runtimeLogDirectory "gateway-api.out.log"
+    $apiError = Join-Path $runtimeLogDirectory "gateway-api.err.log"
+
+    $env:AGENT_GATEWAY_PROCESS_ROLE = "worker"
+    $workerProcess = Start-Process `
+        -FilePath $pythonExecutable `
+        -ArgumentList @("-m", "app.worker") `
+        -WorkingDirectory $backendRoot `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $workerOutput `
+        -RedirectStandardError $workerError `
+        -PassThru
+    $env:AGENT_GATEWAY_PROCESS_ROLE = "api"
+    $apiProcess = Start-Process `
+        -FilePath $pythonExecutable `
+        -ArgumentList @(
+            "-m", "uvicorn", "app.main:app",
+            "--host", "0.0.0.0", "--port", $Port
+        ) `
+        -WorkingDirectory $backendRoot `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $apiOutput `
+        -RedirectStandardError $apiError `
+        -PassThru
+    try {
+        while (-not $workerProcess.HasExited -and -not $apiProcess.HasExited) {
+            Start-Sleep -Seconds 1
+        }
+        if ($workerProcess.HasExited) {
+            throw "Knowledge worker exited with code $($workerProcess.ExitCode)."
+        }
+        throw "Gateway API exited with code $($apiProcess.ExitCode)."
+    }
+    finally {
+        foreach ($process in @($workerProcess, $apiProcess)) {
+            if ($null -ne $process -and -not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+            }
+            if ($null -ne $process) {
+                $process.Dispose()
+            }
+        }
+    }
 }
 finally {
     Pop-Location

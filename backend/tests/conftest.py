@@ -100,6 +100,7 @@ def projects_dir(tmp_path: Path, project_repository: Path) -> Path:
 def settings(tmp_path: Path, projects_dir: Path) -> Settings:
     return Settings(
         environment="test",
+        process_role="combined",
         database_url=sqlite_url(tmp_path / "gateway.sqlite"),
         allow_sqlite_for_tests=True,
         fake_runtime_delay_ms=0,

@@ -44,6 +44,7 @@ def test_pgvector_storage_and_native_search(
 ) -> None:
     settings = Settings(
         environment="test",
+        process_role="combined",
         database_url=POSTGRES_URL,
         auto_create_schema=False,
         projects_dir=projects_dir,

@@ -18,6 +18,7 @@ from app.knowledge.ollama import OllamaClient
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.security import load_knowledge_cipher
 from app.knowledge.service import KnowledgeService
+from app.knowledge.extraction import CustomerKnowledgeExtractionService
 from app.approvals.service import ApprovalService
 from app.harness.service import AgentHarness
 from app.policies.command_policy import CommandPolicyService
@@ -142,11 +143,18 @@ def create_app(
         channel_prefix=active_settings.queue_redis_channel_prefix,
         enabled=active_settings.queue_redis_enabled,
     )
+    extraction_service = CustomerKnowledgeExtractionService(
+        database=database,
+        settings=active_settings,
+        knowledge_service=knowledge_service,
+        task_service=task_service,
+    )
     queue_coordinator = QueueCoordinator(
         service=queue_service,
         notifier=queue_notifier,
         task_executor=task_executor,
         knowledge_service=knowledge_service,
+        extraction_service=extraction_service,
         interactive_workers=active_settings.queue_interactive_workers,
         knowledge_workers=active_settings.queue_knowledge_workers,
         operations_workers=active_settings.queue_operations_workers,
@@ -169,9 +177,15 @@ def create_app(
         with database.session_factory() as recovery_session:
             task_service.ensure_audit_cursor(recovery_session)
         capability_service.seed_defaults()
+        worker_role = active_settings.process_role in {"worker", "combined"}
         if active_settings.queue_enabled:
-            await queue_coordinator.start()
+            if worker_role:
+                await queue_coordinator.start()
+            else:
+                await queue_notifier.start()
         if (
+            worker_role
+            and
             active_settings.knowledge_scheduler_enabled
             and knowledge_service.configured
         ):
@@ -205,6 +219,7 @@ def create_app(
     application.state.queue_service = queue_service
     application.state.queue_notifier = queue_notifier
     application.state.queue_coordinator = queue_coordinator
+    application.state.extraction_service = extraction_service
     application.state.operational_issue_service = operational_issue_service
 
     @application.middleware("http")

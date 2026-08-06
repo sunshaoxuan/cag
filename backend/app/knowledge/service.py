@@ -8,9 +8,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sqlalchemy import Float, delete, false, or_, select, update
+from sqlalchemy import Float, case, delete, false, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -67,6 +68,10 @@ class KnowledgeUnavailableError(RuntimeError):
     pass
 
 
+class KnowledgeSearchTimeoutError(KnowledgeUnavailableError):
+    pass
+
+
 def summarize_knowledge_error(error: str) -> str:
     if "NumericValueOutOfRange" in error or "integer out of range" in error:
         return (
@@ -95,6 +100,7 @@ class SearchResult:
     source_type: str
     source_commit: str | None
     resource_uri: str
+    generation_id: str | None
     prompt_injection_detected: bool
     match_reasons: tuple[str, ...] = ()
     symbol_ids: tuple[str, ...] = ()
@@ -1553,16 +1559,58 @@ class KnowledgeService:
         query: str,
         limit: int | None = None,
         profile: str = "balanced",
+        path_prefixes: tuple[str, ...] = (),
+        event_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> list[SearchResult]:
         if not self.configured:
             raise KnowledgeUnavailableError("Knowledge service is not ready")
+        started_at = utc_now()
+        terms = japanese_search_terms(query)
+        query_folded = query.strip().casefold()
+        search_terms = list(
+            dict.fromkeys(
+                value.casefold()
+                for value in (
+                    query.strip(),
+                    *sorted(terms, key=lambda value: (-len(value), value)),
+                )
+                if len(value.strip()) >= 2
+            )
+        )[:12]
+        if event_callback is not None:
+            await event_callback(
+                "knowledge.retrieval.stage",
+                {"stage": "query_embedding", "status": "started", "profile": profile},
+            )
         instructed_query = (
             "Instruct: Retrieve evidence from Japanese enterprise source code "
             "and technical documentation. Preserve identifiers and exact paths.\n"
             f"Query: {query}"
         )
-        query_vector = (await self._provider.embed([instructed_query]))[0]
+        query_vector = None
+        if profile != "fast":
+            query_vector = (await self._provider.embed([instructed_query]))[0]
+        if event_callback is not None:
+            await event_callback(
+                "knowledge.retrieval.stage",
+                {
+                    "stage": "query_embedding",
+                    "status": "completed" if query_vector is not None else "skipped",
+                    "profile": profile,
+                },
+            )
+            await event_callback(
+                "knowledge.retrieval.stage",
+                {"stage": "database_candidates", "status": "started"},
+            )
         with self._database.session_factory() as session:
+            if self._database.backend_name == "postgresql":
+                session.execute(
+                    text(
+                        "SET LOCAL statement_timeout = "
+                        f"{self._settings.knowledge_statement_timeout_ms}"
+                    )
+                )
             access_filter = self._knowledge_access_filter(
                 session,
                 project,
@@ -1583,10 +1631,71 @@ class KnowledgeService:
                     access_filter,
                 )
             )
-            chunks = list(
-                session.scalars(chunk_query)
+            normalized_prefixes = tuple(
+                value.replace("\\", "/").strip("/").casefold()
+                for value in path_prefixes
+                if value.strip("/\\")
             )
-            if self._database.native_vector_search:
+            if normalized_prefixes:
+                chunk_query = chunk_query.where(
+                    or_(
+                        *(
+                            func.lower(KnowledgeDocument.canonical_path).startswith(
+                                prefix
+                            )
+                            for prefix in normalized_prefixes
+                        )
+                    )
+                )
+            path_ranked = list(
+                session.scalars(
+                    chunk_query.where(
+                        func.lower(KnowledgeDocument.canonical_path).contains(
+                            query_folded
+                        )
+                    )
+                    .order_by(
+                        KnowledgeDocument.canonical_path,
+                        KnowledgeChunk.ordinal,
+                    )
+                    .limit(self._settings.knowledge_candidate_limit)
+                )
+            )
+            text_filters = [
+                or_(
+                    func.lower(KnowledgeChunk.search_text).contains(term),
+                    func.lower(KnowledgeDocument.canonical_path).contains(term),
+                )
+                for term in search_terms
+            ]
+            text_query = chunk_query
+            if text_filters:
+                text_query = text_query.where(or_(*text_filters))
+            else:
+                text_query = text_query.where(false())
+            text_ranked = (
+                []
+                if profile == "fast" and path_ranked
+                else list(
+                    session.scalars(
+                        text_query.order_by(
+                            case(
+                                (
+                                    func.lower(KnowledgeChunk.search_text).contains(
+                                        query_folded
+                                    ),
+                                    0,
+                                ),
+                                else_=1,
+                            ),
+                            KnowledgeChunk.id,
+                        ).limit(self._settings.knowledge_candidate_limit)
+                    )
+                )
+            )
+            chunks = [*path_ranked, *text_ranked]
+            vector_ranked: list[KnowledgeChunk] = []
+            if self._database.native_vector_search and query_vector is not None:
                 vector_distance = KnowledgeChunk.embedding.op(
                     "<=>",
                     return_type=Float,
@@ -1596,7 +1705,7 @@ class KnowledgeService:
                         chunk_query.order_by(vector_distance).limit(20)
                     )
                 )
-            else:
+            elif query_vector is not None:
                 vector_ranked = sorted(
                     chunks,
                     key=lambda item: self._cosine(
@@ -1605,30 +1714,60 @@ class KnowledgeService:
                     ),
                     reverse=True,
                 )[:20]
-            symbols = list(
-                session.scalars(
-                    select(CodeSymbol)
-                    .join(KnowledgeDocument)
-                    .join(KnowledgeSource)
-                    .options(selectinload(CodeSymbol.document))
-                    .where(
-                        KnowledgeSource.approved_for_codex.is_(True),
-                        KnowledgeSource.status == KnowledgeStatus.APPROVED,
-                        self._knowledge_access_filter(
-                            session,
-                            project,
-                            CodeSymbol,
-                        ),
+            symbol_filters = []
+            for term in search_terms:
+                symbol_filters.extend(
+                    (
+                        func.lower(CodeSymbol.name).contains(term),
+                        func.lower(CodeSymbol.qualified_name).contains(term),
+                    )
+                )
+            symbols = (
+                []
+                if profile == "fast" and path_ranked
+                else list(
+                    session.scalars(
+                        select(CodeSymbol)
+                        .join(KnowledgeDocument)
+                        .join(KnowledgeSource)
+                        .options(selectinload(CodeSymbol.document))
+                        .where(
+                            KnowledgeSource.approved_for_codex.is_(True),
+                            KnowledgeSource.status == KnowledgeStatus.APPROVED,
+                            self._knowledge_access_filter(
+                                session,
+                                project,
+                                CodeSymbol,
+                            ),
+                            or_(*symbol_filters) if symbol_filters else false(),
+                        )
+                        .order_by(CodeSymbol.name, CodeSymbol.id)
+                        .limit(self._settings.knowledge_candidate_limit)
                     )
                 )
             )
+            candidate_chunks = {item.id: item for item in chunks}
+            candidate_chunks.update({item.id: item for item in vector_ranked})
+            symbol_document_ids = list({item.document_id for item in symbols})
+            if symbol_document_ids:
+                symbol_chunks = list(
+                    session.scalars(
+                        chunk_query.where(
+                            KnowledgeChunk.document_id.in_(symbol_document_ids)
+                        )
+                        .order_by(KnowledgeChunk.document_id, KnowledgeChunk.ordinal)
+                        .limit(self._settings.knowledge_candidate_limit)
+                    )
+                )
+                candidate_chunks.update({item.id: item for item in symbol_chunks})
+            chunks = list(candidate_chunks.values())
             symbol_ids = [item.id for item in symbols]
             relations = (
                 list(
                     session.scalars(
                         select(CodeRelation).where(
                             CodeRelation.source_symbol_id.in_(symbol_ids)
-                        )
+                        ).limit(self._settings.knowledge_candidate_limit * 2)
                     )
                 )
                 if symbol_ids
@@ -1639,13 +1778,24 @@ class KnowledgeService:
                     session.scalars(
                         select(CodeDocumentLink).where(
                             CodeDocumentLink.symbol_id.in_(symbol_ids)
-                        )
+                        ).limit(self._settings.knowledge_candidate_limit * 2)
                     )
                 )
                 if symbol_ids
                 else []
             )
-        terms = japanese_search_terms(query)
+        if event_callback is not None:
+            await event_callback(
+                "knowledge.retrieval.stage",
+                {
+                    "stage": "database_candidates",
+                    "status": "completed",
+                    "text_candidates": len(chunks),
+                    "vector_candidates": len(vector_ranked),
+                    "symbol_candidates": len(symbols),
+                    "path_prefix_count": len(normalized_prefixes),
+                },
+            )
         keyword_ranked = sorted(
             chunks,
             key=lambda item: sum(
@@ -1656,18 +1806,23 @@ class KnowledgeService:
         scores: dict[str, float] = {}
         reasons: dict[str, set[str]] = {}
         symbol_hits_by_chunk: dict[str, set[str]] = {}
+        for rank, chunk in enumerate(path_ranked, start=1):
+            scores[chunk.id] = scores.get(chunk.id, 0.0) + 2.0 + 1.0 / rank
+            reasons.setdefault(chunk.id, set()).add("exact_path")
         for rank, chunk in enumerate(vector_ranked, start=1):
             scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (60 + rank)
             reasons.setdefault(chunk.id, set()).add("vector")
         for rank, chunk in enumerate(keyword_ranked, start=1):
             scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (60 + rank)
             reasons.setdefault(chunk.id, set()).add("japanese_keyword")
+            if query.casefold() in chunk.search_text.casefold():
+                scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0
+                reasons.setdefault(chunk.id, set()).add("exact_text")
         by_id = {chunk.id: chunk for chunk in chunks}
         chunks_by_document: dict[str, list[KnowledgeChunk]] = {}
         for chunk in chunks:
             chunks_by_document.setdefault(chunk.document_id, []).append(chunk)
 
-        query_folded = query.casefold()
         symbol_ranked = sorted(
             (
                 (
@@ -1793,8 +1948,16 @@ class KnowledgeService:
                             "local_reranker"
                         )
                     ranked_ids = sorted(scores, key=scores.get, reverse=True)
-            except Exception:
-                pass
+            except Exception as error:
+                if event_callback is not None:
+                    await event_callback(
+                        "knowledge.retrieval.stage",
+                        {
+                            "stage": "rerank",
+                            "status": "fallback",
+                            "error_type": type(error).__name__,
+                        },
+                    )
         result: list[SearchResult] = []
         for chunk_id in ranked_ids[: limit or self._settings.knowledge_max_chunks]:
             chunk = by_id[chunk_id]
@@ -1819,6 +1982,7 @@ class KnowledgeService:
                         source_commit=source.source_commit,
                         document_path=document.canonical_path,
                     ),
+                    generation_id=document.generation_ingestion_id,
                     prompt_injection_detected=bool(
                         chunk.metadata_json.get("prompt_injection_detected")
                     ),
@@ -1827,6 +1991,21 @@ class KnowledgeService:
                         sorted(symbol_hits_by_chunk.get(chunk.id, set()))
                     ),
                 )
+            )
+        if event_callback is not None:
+            elapsed_ms = int((utc_now() - started_at).total_seconds() * 1000)
+            await event_callback(
+                "knowledge.retrieval.stage",
+                {
+                    "stage": "result_build",
+                    "status": "completed",
+                    "elapsed_ms": elapsed_ms,
+                    "candidate_count": len(result),
+                    "source_ids": sorted({item.source_id for item in result}),
+                    "generation_ids": sorted(
+                        {item.generation_id for item in result if item.generation_id}
+                    ),
+                },
             )
         return result
 
@@ -2071,8 +2250,13 @@ class KnowledgeService:
         task_id: str,
         project: Project,
         query: str,
+        event_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[dict[str, Any]]]:
-        results = await self.search(project=project, query=query)
+        results = await self.search(
+            project=project,
+            query=query,
+            event_callback=event_callback,
+        )
         if not results:
             return None, []
         parts = [
@@ -2113,6 +2297,7 @@ class KnowledgeService:
                     "source_type": result.source_type,
                     "path": result.path,
                     "resource_uri": result.resource_uri,
+                    "generation_id": result.generation_id,
                     "scope": result.scope,
                     "commit": result.source_commit,
                     "score": result.score,
@@ -2137,6 +2322,104 @@ class KnowledgeService:
                 }
             session.commit()
         return "".join(parts), citations
+
+    async def extract_customer_candidates(
+        self,
+        *,
+        identity: dict[str, Any],
+        requested_sections: list[str],
+        results: list[SearchResult],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if not results:
+            return [], []
+        allowed_ids = {item.id for item in results}
+        evidence = [
+            {
+                "chunk_id": item.id,
+                "path": item.path,
+                "text": item.text[:2_000],
+            }
+            for item in results
+        ]
+        schema = {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "candidate_type": {
+                                "type": "string",
+                                "enum": requested_sections,
+                            },
+                            "values": {"type": "object"},
+                            "confidence": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                            },
+                            "evidence_chunk_ids": {
+                                "type": "array",
+                                "minItems": 1,
+                                "uniqueItems": True,
+                                "items": {"type": "string", "enum": sorted(allowed_ids)},
+                            },
+                        },
+                        "required": [
+                            "candidate_type",
+                            "values",
+                            "confidence",
+                            "evidence_chunk_ids",
+                        ],
+                    },
+                }
+            },
+            "required": ["candidates"],
+        }
+        output = await self._provider.structured_generate(
+            "Extract customer ledger candidates only from the supplied evidence. "
+            "Return no candidate when evidence is insufficient. Preserve exact "
+            "codes, names, addresses and network identifiers.\n"
+            f"Identity: {json.dumps(identity, ensure_ascii=False)}\n"
+            f"Requested sections: {json.dumps(requested_sections)}\n"
+            f"Evidence: {json.dumps(evidence, ensure_ascii=False)}",
+            schema,
+        )
+        candidates: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        for index, raw in enumerate(output.get("candidates", [])):
+            candidate_type = raw.get("candidate_type")
+            values = raw.get("values")
+            evidence_ids = raw.get("evidence_chunk_ids")
+            confidence = raw.get("confidence")
+            reasons = []
+            if candidate_type not in requested_sections:
+                reasons.append("candidate_type_not_requested")
+            if not isinstance(values, dict) or not values:
+                reasons.append("values_empty")
+            if (
+                not isinstance(evidence_ids, list)
+                or not evidence_ids
+                or any(value not in allowed_ids for value in evidence_ids)
+            ):
+                reasons.append("citation_not_authoritative")
+            if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+                reasons.append("confidence_invalid")
+            if reasons:
+                errors.append({"candidate_index": index, "reasons": reasons})
+                continue
+            candidates.append(
+                {
+                    "candidate_id": str(uuid.uuid4()),
+                    "candidate_type": candidate_type,
+                    "values": values,
+                    "confidence": float(confidence),
+                    "evidence_chunk_ids": list(dict.fromkeys(evidence_ids)),
+                    "validation_status": "valid",
+                }
+            )
+        return candidates, errors
 
     async def capture_memory(
         self,

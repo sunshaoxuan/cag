@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -151,6 +151,37 @@ def test_expired_lease_is_requeued_with_task_state(
     assert recovered["status"] == "queued"
 
 
+def test_api_process_role_starts_notifier_without_queue_consumers(
+    app_factory,
+    settings,
+) -> None:
+    settings.process_role = "api"
+    app = app_factory()
+    notifier = app.state.queue_coordinator._notifier
+    notifier_started = False
+    notifier_stopped = False
+
+    async def start_notifier() -> None:
+        nonlocal notifier_started
+        notifier_started = True
+
+    async def stop_notifier() -> None:
+        nonlocal notifier_stopped
+        notifier_stopped = True
+
+    notifier.start = start_notifier
+    notifier.stop = stop_notifier
+    with TestClient(app) as client:
+        status = client.get("/api/v1/queue/status").json()
+        health = client.get("/health/ready").json()
+
+    assert status["running"] is False
+    assert health["process_role"] == "api"
+    assert health["queue_running"] is False
+    assert notifier_started is True
+    assert notifier_stopped is True
+
+
 def test_queued_item_can_be_cancelled(app_factory, settings) -> None:
     settings.queue_enabled = False
     app = app_factory()
@@ -169,6 +200,100 @@ def test_queued_item_can_be_cancelled(app_factory, settings) -> None:
     assert response.status_code == 202
     assert response.json()["status"] == "cancelled"
     assert cancelled["status"] == "cancelled"
+
+
+def test_expired_lease_preserves_pending_cancellation(app_factory, settings) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        task = submit_task(client, request_id="cancelled-expired-lease")
+        claimed = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="cancelled-worker",
+        )
+        assert claimed is not None
+        assert app.state.queue_service.request_cancel(claimed.id) == "leased"
+        with app.state.database.session_factory() as session:
+            item = session.get(QueueItem, claimed.id)
+            item.lease_expires_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+
+        result = app.state.queue_service.bootstrap()
+        recovered = client.get(f"/api/v1/tasks/{task['id']}").json()
+        item = next(
+            value
+            for value in client.get("/api/v1/queue/items").json()
+            if value["id"] == claimed.id
+        )
+
+    assert result["expired_requeued"] == 1
+    assert recovered["status"] == "cancelled"
+    assert item["status"] == "cancelled"
+    assert item["cancel_requested_at"] is not None
+
+
+def test_finish_resolves_cancel_completion_race_by_timestamp(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        cancel_first = submit_task(client, request_id="cancel-first")
+        cancel_first_item = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="race-worker-1",
+        )
+        assert cancel_first_item is not None
+        assert (
+            app.state.queue_service.request_cancel(cancel_first_item.id)
+            == "leased"
+        )
+        with app.state.database.session_factory() as session:
+            task = session.get(Task, cancel_first["id"])
+            task.status = "completed"
+            task.final_report = {"must_not_be_delivered": True}
+            task.knowledge_usage = {"status": "used"}
+            task.completed_at = utc_now()
+            session.commit()
+        assert app.state.queue_service.finish(
+            item_id=cancel_first_item.id,
+            worker_key="race-worker-1",
+        ) == "cancelled"
+
+        completed_first = submit_task(client, request_id="completed-first")
+        completed_first_item = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="race-worker-2",
+        )
+        assert completed_first_item is not None
+        with app.state.database.session_factory() as session:
+            task = session.get(Task, completed_first["id"])
+            task.status = "completed"
+            task.final_report = {"delivered": True}
+            task.completed_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        assert (
+            app.state.queue_service.request_cancel(completed_first_item.id)
+            == "leased"
+        )
+        assert app.state.queue_service.finish(
+            item_id=completed_first_item.id,
+            worker_key="race-worker-2",
+        ) == "completed"
+
+        cancelled_task = client.get(
+            f"/api/v1/tasks/{cancel_first['id']}"
+        ).json()
+        completed_task = client.get(
+            f"/api/v1/tasks/{completed_first['id']}"
+        ).json()
+
+    assert cancelled_task["status"] == "cancelled"
+    assert cancelled_task["final_report"] is None
+    assert cancelled_task["knowledge_usage"] is None
+    assert completed_task["status"] == "completed"
+    assert completed_task["final_report"] == {"delivered": True}
 
 
 def test_missing_queue_item_cancel_returns_404(app_factory) -> None:
@@ -352,6 +477,81 @@ def test_knowledge_queue_bootstrap_cancel_recover_and_fail(
     assert filtered[0]["ingestion_id"] == ingestion_id
     assert "knowledge.ingestion.requeued" in event_types
     assert "knowledge.ingestion.failed" in event_types
+
+
+def test_cancelled_scheduled_ingestion_advances_source_schedule(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app):
+        with app.state.database.session_factory() as session:
+            project = app.state.task_service.resolve_project(
+                session,
+                "test-project",
+            )
+            source = KnowledgeSource(
+                project_id=project.id,
+                name="Scheduled source",
+                source_key="scheduled-source",
+                root_path="D:/scheduled-source",
+                sync_mode="scheduled",
+                sync_interval_minutes=90,
+                next_sync_at=utc_now() - timedelta(minutes=1),
+                sync_lease_owner="scheduler-worker",
+                sync_lease_expires_at=utc_now() + timedelta(minutes=5),
+            )
+            session.add(source)
+            session.flush()
+            ingestion = KnowledgeIngestion(
+                source_id=source.id,
+                status="queued",
+                trigger="scheduled",
+            )
+            session.add(ingestion)
+            session.flush()
+            item = app.state.queue_service.add_ingestion_item(
+                session,
+                ingestion,
+                source,
+            )
+            session.commit()
+            item_id = item.id
+            source_id = source.id
+            ingestion_id = ingestion.id
+
+        before_cancel = utc_now()
+        assert app.state.queue_service.request_cancel(item_id) == "cancelled"
+
+        with app.state.database.session_factory() as session:
+            stored_source = session.get(KnowledgeSource, source_id)
+            stored_ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            event = session.scalar(
+                session.query(KnowledgeIngestionEvent)
+                .filter_by(
+                    ingestion_id=ingestion_id,
+                    type="knowledge.ingestion.cancelled",
+                )
+                .statement
+            )
+
+        assert stored_ingestion.status == "cancelled"
+        assert (
+            stored_source.last_sync_attempt_at.replace(tzinfo=UTC).timestamp()
+            >= before_cancel.timestamp()
+        )
+        assert (
+            stored_source.next_sync_at.replace(tzinfo=UTC).timestamp()
+            >= (before_cancel + timedelta(minutes=90)).timestamp()
+        )
+        assert stored_source.sync_lease_owner is None
+        assert stored_source.sync_lease_expires_at is None
+        assert event.data["next_sync_at"] is not None
+        assert app.state.knowledge_service.claim_due_source(
+            worker_id="second-scheduler",
+            lease_seconds=30,
+        ) is None
 
 
 @pytest.mark.anyio

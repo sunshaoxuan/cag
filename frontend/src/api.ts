@@ -80,6 +80,7 @@ export type KnowledgeStatus = {
 
 export type QueueStatus = {
   running: boolean;
+  local_consumers_running: boolean;
   configured_workers: Record<string, number>;
   redis: {
     enabled: boolean;
@@ -96,6 +97,8 @@ export type QueueStatus = {
     id: string;
     worker_key: string;
     queue_name: string;
+    hostname: string;
+    process_id: number;
     status: string;
     current_item_id: string | null;
     heartbeat_at: string;

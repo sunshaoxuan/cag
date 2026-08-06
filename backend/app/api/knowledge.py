@@ -20,11 +20,13 @@ from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
+    get_app_settings,
     get_knowledge_service,
     get_queue_coordinator,
     get_session,
     get_task_service,
 )
+from app.config import Settings
 from app.knowledge.service import (
     KnowledgeService,
     KnowledgeUnavailableError,
@@ -926,20 +928,44 @@ async def search_knowledge(
     session: Session = Depends(get_session),
     task_service: TaskService = Depends(get_task_service),
     service: KnowledgeService = Depends(get_knowledge_service),
+    settings: Settings = Depends(get_app_settings),
 ) -> dict[str, Any]:
     try:
         project = task_service.resolve_project(session, request.project_id)
         session.commit()
-        results = await service.search(
-            project=project,
-            query=request.query.strip(),
-            limit=request.limit,
-            profile=request.profile,
+        timeout_seconds = {
+            "fast": settings.knowledge_fast_timeout_seconds,
+            "balanced": settings.knowledge_balanced_timeout_seconds,
+            "deep": settings.knowledge_deep_timeout_seconds,
+        }[request.profile]
+        def execute_isolated_search():
+            return asyncio.run(
+                service.search(
+                    project=project,
+                    query=request.query.strip(),
+                    limit=request.limit,
+                    profile=request.profile,
+                )
+            )
+
+        results = await asyncio.wait_for(
+            asyncio.to_thread(execute_isolated_search),
+            timeout=timeout_seconds,
         )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Knowledge search exceeded {timeout_seconds} seconds",
+        ) from exc
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
     except KnowledgeUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Knowledge search failed in a bounded retrieval stage",
+        ) from exc
     return {
         "query": request.query,
         "results": [
@@ -950,6 +976,7 @@ async def search_knowledge(
                 "source_type": item.source_type,
                 "path": item.path,
                 "resource_uri": item.resource_uri,
+                "generation_id": item.generation_id,
                 "text": item.text,
                 "score": item.score,
                 "scope": item.scope,

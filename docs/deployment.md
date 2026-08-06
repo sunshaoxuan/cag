@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.22.8 development deployment
+## 0.23.0 development deployment
 
 Harness concurrency defaults to three child Codex app-server processes. `AGENT_GATEWAY_HARNESS_MAX_PARALLEL_AGENTS` can lower the host limit. `AGENT_GATEWAY_APPROVAL_TIMEOUT_SECONDS` controls the persistent approval window. Each investigator receives a task-scoped Git clone under the configured workspace root.
 
@@ -23,6 +23,7 @@ docker compose up --build
 The Compose deployment contains:
 
 * `gateway`: FastAPI application.
+* `worker`: durable interactive, knowledge and operations queue consumers.
 * `frontend`: React production build served by Nginx.
 * `postgres`: PostgreSQL 16 with pgvector and a named volume.
 * `redis`: Redis 7 with append-only persistence.
@@ -129,7 +130,7 @@ The Codex process runs on the trusted host. Start the host Gateway with:
 .\scripts\run-local-codex-gateway.ps1
 ```
 
-The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT or API Key login status, PostgreSQL connectivity and the pgvector extension, then starts the Gateway with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
+The script prefers the Codex plugin app-server executable installed under the current user profile, checks ChatGPT or API Key login status, PostgreSQL connectivity and the pgvector extension, then starts an API process and an independent durable queue worker process with `AGENT_GATEWAY_RUNTIME_PROVIDER=codex-app-server`. The Gateway binds to `0.0.0.0:8000` by default. Local callers use `http://127.0.0.1:8000`; network callers use `http://<CAG-host-IP>:8000`. The launcher terminates the peer process when either child exits so the supervisor can recover the complete pair. The script handles native login-status output consistently in Windows PowerShell 5 and PowerShell 7.
 
 For a continuously supervised host deployment, register and start the Windows
 background task:
@@ -142,8 +143,8 @@ Use the same script with `status`, `stop` or `uninstall` to inspect, stop or
 remove the background task. The task starts at Windows startup and at sign-in
 under the current interactive user identity so the local Codex
 authentication remains available. Task Scheduler retries the supervisor up to
-999 times at one-minute intervals. The supervisor checks `/health/ready` every
-15 seconds, restarts a recognized Gateway after four consecutive failures, and
+999 times at one-minute intervals. The supervisor checks `/health/live` every
+15 seconds, restarts a recognized Gateway after four consecutive liveness failures, and
 starts it again when the listener exits. It never terminates an unexpected
 port owner.
 
@@ -175,16 +176,23 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | Setting | Purpose |
 |---|---|
 | `AGENT_GATEWAY_DATABASE_URL` | PostgreSQL pgvector connection URL |
+| `AGENT_GATEWAY_PROCESS_ROLE` | `api`, `worker` or isolated-test `combined` role |
 | `AGENT_GATEWAY_RUNTIME_PROVIDER` | `fake` or `codex-app-server` |
 | `AGENT_GATEWAY_CODEX_EXECUTABLE` | Callable local Codex executable |
 | `AGENT_GATEWAY_CODEX_STARTUP_TIMEOUT_SECONDS` | Protocol initialization timeout |
 | `AGENT_GATEWAY_CODEX_TURN_TIMEOUT_SECONDS` | Turn completion timeout |
 | `AGENT_GATEWAY_CODEX_REQUIRE_CHATGPT_AUTH` | `true` enforces ChatGPT only; `false` allows ChatGPT or API Key local Codex sessions |
 | `AGENT_GATEWAY_SELF_IMPROVEMENT_ROOT` | Parent directory for task-scoped self-improvement candidates |
+| `AGENT_GATEWAY_QUEUE_HEARTBEAT_SECONDS` | Active job lease renewal and cancellation check interval, default 1 second |
 | `AGENT_GATEWAY_QUEUE_OPERATIONS_WORKERS` | Independent self-operations issue Worker count |
 | `AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR` | Managed Git and SVN source snapshot directory |
 | `AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` | Maximum accepted source file size |
 | `AGENT_GATEWAY_KNOWLEDGE_MAX_SPREADSHEET_CELLS` | Maximum populated cells extracted from one XLSX workbook, default 250000 |
+| `AGENT_GATEWAY_KNOWLEDGE_CANDIDATE_LIMIT` | Maximum bounded candidates retained per retrieval channel |
+| `AGENT_GATEWAY_KNOWLEDGE_FAST_TIMEOUT_SECONDS` | Overall indexed fast-search deadline |
+| `AGENT_GATEWAY_KNOWLEDGE_BALANCED_TIMEOUT_SECONDS` | Overall balanced-search deadline |
+| `AGENT_GATEWAY_KNOWLEDGE_DEEP_TIMEOUT_SECONDS` | Overall deep-search and extraction deadline |
+| `AGENT_GATEWAY_KNOWLEDGE_STATEMENT_TIMEOUT_MS` | PostgreSQL timeout for each retrieval transaction |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_LEASE_SECONDS` | Database lease duration for one claimed source |
@@ -217,7 +225,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260731_0018` and then
+The normal Windows launcher applies Alembic revision `20260806_0021` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

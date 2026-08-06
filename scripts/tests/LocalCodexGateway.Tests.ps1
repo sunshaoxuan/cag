@@ -31,6 +31,9 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'Redis\.from_url'
         $content | Should Match 'compose build frontend'
         $content | Should Match 'compose up -d --no-deps frontend'
+        $content | Should Match 'AGENT_GATEWAY_PROCESS_ROLE = "worker"'
+        $content | Should Match 'AGENT_GATEWAY_PROCESS_ROLE = "api"'
+        $content | Should Match 'app\.worker'
         $content | Should Not Match 'sqlite\+pysqlite'
         $content | Should Not Match 'agent_gateway\.db'
     }
@@ -53,8 +56,8 @@ Describe "Local Codex Gateway PowerShell scripts" {
 
     It "binds the Gateway to every IPv4 interface" {
         $content = Get-Content -Raw -LiteralPath $runScript
-        $content | Should Match '--host 0\.0\.0\.0'
-        $content | Should Not Match '--host 127\.0\.0\.1'
+        $content | Should Match '"--host",\s*"0\.0\.0\.0"'
+        $content | Should Not Match '"--host",\s*"127\.0\.0\.1"'
     }
 
     It "detects the listener by port and requires an all-interface address" {
@@ -76,7 +79,7 @@ Describe "Local Codex Gateway PowerShell scripts" {
 
     It "supervises health and rotates persistent logs" {
         $content = Get-Content -Raw -LiteralPath $supervisorScript
-        $content | Should Match '/health/ready'
+        $content | Should Match '/health/live'
         $content | Should Match 'UnhealthyThreshold'
         $content | Should Match 'gateway\.restarting'
         $content | Should Match 'gateway-supervisor\.log'

@@ -30,6 +30,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       AGENT_GATEWAY_ENVIRONMENT: container
+      AGENT_GATEWAY_PROCESS_ROLE: api
       AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_gateway}:${POSTGRES_PASSWORD:-agent_gateway}@postgres:5432/${POSTGRES_DB:-agent_gateway}
       AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
       AGENT_GATEWAY_RUNTIME_PROVIDER: fake
@@ -56,6 +57,35 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    volumes:
+      - agent_gateway_workspaces:/workspaces
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - python
+      - -m
+      - app.worker
+    environment:
+      AGENT_GATEWAY_ENVIRONMENT: container
+      AGENT_GATEWAY_PROCESS_ROLE: worker
+      AGENT_GATEWAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_gateway}:${POSTGRES_PASSWORD:-agent_gateway}@postgres:5432/${POSTGRES_DB:-agent_gateway}
+      AGENT_GATEWAY_REDIS_URL: redis://redis:6379/0
+      AGENT_GATEWAY_RUNTIME_PROVIDER: fake
+      AGENT_GATEWAY_KNOWLEDGE_ENABLED: "false"
+      AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR: /workspaces/.knowledge-sources
+      AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
+      AGENT_GATEWAY_PROJECTS_DIR: /projects
+      AGENT_GATEWAY_WORKSPACE_ROOT: /workspaces
+      AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS: ${AGENT_GATEWAY_FAKE_RUNTIME_DELAY_MS:-25}
+      AGENT_GATEWAY_LOG_LEVEL: ${AGENT_GATEWAY_LOG_LEVEL:-INFO}
+    depends_on:
+      gateway:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - agent_gateway_workspaces:/workspaces
 

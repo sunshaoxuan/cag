@@ -26,7 +26,7 @@ from sqlalchemy.engine import Connection, Engine, make_url
 from app.models import Base
 
 
-TARGET_ALEMBIC_REVISION = "20260731_0018"
+TARGET_ALEMBIC_REVISION = "20260806_0021"
 ACTIVE_INGESTION_STATUSES = ("queued", "running")
 ACTIVE_TASK_STATUSES = (
     "queued",

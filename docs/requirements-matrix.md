@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.22.8 | Evidence |
+| Requirement | Status for 0.23.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -35,7 +35,8 @@ Legend:
 | External task API trace contract | Implemented | Trace ID, client request ID, request hash, source and idempotency tests |
 | Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
 | PostgreSQL plus Redis durable gateway queue | Implemented | QueueItem, QueueWorker, `FOR UPDATE SKIP LOCKED`, Redis wake, lease recovery and queue API tests |
-| Separate interactive and knowledge worker pools | Implemented | QueueCoordinator worker pools, queue status API, recovery tests and interactive completion during delayed knowledge ingestion |
+| API and queue worker process isolation | Implemented | `app.worker`, host dual-process launcher, API-only Redis notifier lifecycle test and ADR 0025 |
+| Separate interactive and knowledge worker pools | Implemented | Worker-process QueueCoordinator pools, queue status API, recovery tests and interactive completion during delayed knowledge ingestion |
 | Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, sequence-addressed fresh workspaces, versioned artifacts and tests |
@@ -85,6 +86,9 @@ Legend:
 | Code symbol and relationship graph | Implemented | CodeSymbol, CodeRelation, CodeDocumentLink, migration and idempotency tests |
 | Code and documentation linkage | Implemented | Deterministic path and symbol evidence, detail API and retrieval graph expansion |
 | Japanese and code hybrid retrieval | Implemented | instructed embedding, Japanese n-grams, symbol channel, relationship expansion and optional local reranking |
+| Bounded indexed knowledge retrieval | Implemented | pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
+| Customer ledger knowledge extraction | Implemented | asynchronous customer extraction API, structured CAG-owned schema, physical candidate IDs, generation citations and citation rejection tests |
+| Cancellation precedence and scheduled rescan control | Implemented | pending cancellation is committed before requeue; scheduled cancellation releases the source lease and advances its next due time; both paths have regression tests |
 | Standards control mapping | Implemented | `docs/standards-control-matrix.md`, `GET /api/v1/standards/controls` |
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
 | Skill discovery | Implemented | Gateway capability registry and seeded Skill catalog |

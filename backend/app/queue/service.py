@@ -370,18 +370,24 @@ class QueueService:
             item = session.get(QueueItem, item_id)
             if item is None:
                 return QueueItemStatus.FAILED
-            resource_status = self._resource_status(session, item)
-            if resource_status in {"completed"}:
-                item.status = QueueItemStatus.COMPLETED
-            elif resource_status in {"cancelled"}:
-                item.status = QueueItemStatus.CANCELLED
+            if (
+                item.cancel_requested_at is not None
+                and self._cancellation_precedes_completion(session, item)
+            ):
+                self._cancel_locked(session, item, reason="cancel_requested")
             else:
-                item.status = QueueItemStatus.FAILED
-                item.error = self._resource_error(session, item)
-            item.completed_at = now
-            item.lease_owner = None
-            item.lease_expires_at = None
-            item.heartbeat_at = now
+                resource_status = self._resource_status(session, item)
+                if resource_status in {"completed"}:
+                    item.status = QueueItemStatus.COMPLETED
+                elif resource_status in {"cancelled"}:
+                    item.status = QueueItemStatus.CANCELLED
+                else:
+                    item.status = QueueItemStatus.FAILED
+                    item.error = self._resource_error(session, item)
+                item.completed_at = now
+                item.lease_owner = None
+                item.lease_expires_at = None
+                item.heartbeat_at = now
             self.touch_worker(
                 worker_key=worker_key,
                 queue_name=item.queue_name,
@@ -501,6 +507,8 @@ class QueueService:
                         "id": worker.id,
                         "worker_key": worker.worker_key,
                         "queue_name": worker.queue_name,
+                        "hostname": worker.hostname,
+                        "process_id": worker.process_id,
                         "status": worker.status,
                         "current_item_id": worker.current_item_id,
                         "heartbeat_at": worker.heartbeat_at.isoformat(),
@@ -617,6 +625,9 @@ class QueueService:
                 session.close()
 
     def _requeue_locked(self, session, item: QueueItem, *, reason: str) -> None:
+        if item.cancel_requested_at is not None:
+            self._cancel_locked(session, item, reason="cancel_requested")
+            return
         now = utc_now()
         item.status = QueueItemStatus.QUEUED
         item.available_at = now + timedelta(
@@ -625,7 +636,6 @@ class QueueService:
         item.lease_owner = None
         item.lease_expires_at = None
         item.heartbeat_at = None
-        item.cancel_requested_at = None
         item.error = reason
         if item.task_id is not None:
             task = session.get(Task, item.task_id)
@@ -692,9 +702,20 @@ class QueueService:
         item.error = reason
         if item.task_id is not None:
             task = session.get(Task, item.task_id)
-            if task is not None and task.status not in TaskStatus.TERMINAL:
+            if task is not None and (
+                task.status not in TaskStatus.TERMINAL
+                or (
+                    item.cancel_requested_at is not None
+                    and task.completed_at is not None
+                    and self._aware_datetime(item.cancel_requested_at)
+                    <= self._aware_datetime(task.completed_at)
+                )
+            ):
                 task.status = TaskStatus.CANCELLED
                 task.completed_at = now
+                task.final_report = None
+                task.knowledge_usage = None
+                task.error = None
                 self._task_service.append_event(
                     session,
                     task=task,
@@ -703,18 +724,40 @@ class QueueService:
                 )
         if item.ingestion_id is not None:
             ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
-            if ingestion is not None and ingestion.status not in {
-                "completed",
-                "failed",
-                "cancelled",
-            }:
+            if ingestion is not None and (
+                ingestion.status not in {"completed", "failed", "cancelled"}
+                or (
+                    item.cancel_requested_at is not None
+                    and ingestion.completed_at is not None
+                    and self._aware_datetime(item.cancel_requested_at)
+                    <= self._aware_datetime(ingestion.completed_at)
+                )
+            ):
                 ingestion.status = "cancelled"
                 ingestion.completed_at = now
+                event_data: dict[str, Any] = {"reason": reason}
+                if ingestion.trigger == "scheduled":
+                    source = session.get(KnowledgeSource, ingestion.source_id)
+                    if source is not None:
+                        source.last_sync_attempt_at = now
+                        source.sync_lease_owner = None
+                        source.sync_lease_expires_at = None
+                        if source.enabled and source.sync_mode == "scheduled":
+                            source.next_sync_at = now + timedelta(
+                                minutes=source.sync_interval_minutes
+                            )
+                        else:
+                            source.next_sync_at = None
+                        event_data["next_sync_at"] = (
+                            source.next_sync_at.isoformat()
+                            if source.next_sync_at is not None
+                            else None
+                        )
                 self._append_ingestion_event(
                     session,
                     ingestion,
                     "knowledge.ingestion.cancelled",
-                    {"reason": reason},
+                    event_data,
                 )
         if item.issue_id is not None:
             issue = session.get(OperationalIssue, item.issue_id)
@@ -794,6 +837,22 @@ class QueueService:
         if issue.status == OperationalIssueStatus.TRIAGE_FAILED:
             return "failed"
         return "completed"
+
+    def _cancellation_precedes_completion(self, session, item: QueueItem) -> bool:
+        if item.cancel_requested_at is None:
+            return False
+        completed_at = None
+        if item.task_id is not None:
+            task = session.get(Task, item.task_id)
+            completed_at = task.completed_at if task is not None else None
+        elif item.ingestion_id is not None:
+            ingestion = session.get(KnowledgeIngestion, item.ingestion_id)
+            completed_at = ingestion.completed_at if ingestion is not None else None
+        if completed_at is None:
+            return True
+        return self._aware_datetime(
+            item.cancel_requested_at
+        ) <= self._aware_datetime(completed_at)
 
     @staticmethod
     def _resource_error(session, item: QueueItem) -> str | None:

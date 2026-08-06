@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for version 0.17.1.
+Accepted for version 0.17.1 and amended by ADR 0025 for version 0.23.0.
 
 ## Context
 
@@ -20,10 +20,11 @@ Task Scheduler starts a PowerShell supervisor at system startup and at current
 user sign-in. The task has no execution time limit and retries a failed
 supervisor every minute up to 999 times.
 
-The supervisor checks port 8000 and `/health/ready` every 15 seconds. A missing
-listener starts the normal managed launcher. Four consecutive failed readiness
+The supervisor checks port 8000 and `/health/live` every 15 seconds. A missing
+listener starts the normal managed launcher. Four consecutive failed liveness
 checks restart only a process whose command line matches the expected Uvicorn
-Gateway and port. An unexpected listener is logged and left untouched.
+Gateway and port. Readiness remains observable without triggering a process
+restart. An unexpected listener is logged and left untouched.
 
 The supervisor writes a 10 MiB rotating log and retains five historical files
 under the ignored persistent Gateway workspace.

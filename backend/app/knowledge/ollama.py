@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Any, Protocol
 
@@ -36,7 +35,6 @@ class OllamaClient:
         self._memory_model = memory_model
         self._dimensions = dimensions
         self._timeout = timeout_seconds
-        self._lock = asyncio.Lock()
 
     async def status(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -62,18 +60,17 @@ class OllamaClient:
         }
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        async with self._lock:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{self._base_url}/api/embed",
-                    json={
-                        "model": self._embedding_model,
-                        "input": texts,
-                        "dimensions": self._dimensions,
-                        "truncate": True,
-                        "keep_alive": "5m",
-                    },
-                )
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/api/embed",
+                json={
+                    "model": self._embedding_model,
+                    "input": texts,
+                    "dimensions": self._dimensions,
+                    "truncate": True,
+                    "keep_alive": "5m",
+                },
+            )
         if not response.is_success:
             raise OllamaError(f"Ollama embedding failed: HTTP {response.status_code}")
         embeddings = response.json().get("embeddings")
@@ -88,20 +85,19 @@ class OllamaClient:
         prompt: str,
         schema: dict[str, Any],
     ) -> dict[str, Any]:
-        async with self._lock:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{self._base_url}/api/generate",
-                    json={
-                        "model": self._memory_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": schema,
-                        "options": {"temperature": 0},
-                        "keep_alive": "5m",
-                    },
-                )
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/api/generate",
+                json={
+                    "model": self._memory_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "format": schema,
+                    "options": {"temperature": 0},
+                    "keep_alive": "5m",
+                },
+            )
         if not response.is_success:
             raise OllamaError(f"Ollama generation failed: HTTP {response.status_code}")
         raw = response.json().get("response")

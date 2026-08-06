@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.22.8`
+Current version: `0.23.0`
 
 The visual online reference is available at `/api-docs`. FastAPI interactive
 OpenAPI remains available at `/docs`, and the machine-readable contract is
@@ -29,7 +29,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.22.8"
+    "version": "0.23.0"
 }
 ```
 
@@ -93,6 +93,27 @@ knowledge plaintext.
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}`
+
+Search profiles have distinct execution contracts. `fast` uses indexed exact
+and text candidates without Ollama. `balanced` adds bounded pgvector candidates.
+`deep` adds schema-checked local reranking. PostgreSQL statement timeout and an
+overall profile deadline bound each request.
+
+### Customer ledger extraction
+
+* `POST /api/v1/knowledge/extractions/customer-ledger`
+* `GET /api/v1/knowledge/extractions/customer-ledger/{task_id}`
+* `POST /api/v1/knowledge/extractions/customer-ledger/{task_id}/cancel`
+* `GET /api/v1/tasks/{task_id}/events`
+
+The create endpoint accepts customer Code, official name, aliases and requested
+sections. It returns HTTP 202 and a physical Task ID. CAG validates every
+candidate against the requested section, non-empty structured values,
+confidence range and authoritative returned Chunk IDs. Each result includes a
+physical candidate ID and Chunk, Source and active Generation citations.
+The extraction resolves an authoritative customer root from an exact Code,
+official-name or alias path match. Section searches remain inside that root;
+when no such root exists, the result reports a learning gap.
 
 ## Durable queue
 

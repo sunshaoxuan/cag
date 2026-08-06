@@ -123,6 +123,9 @@ class TaskService:
         knowledge_mode: str = "assist",
         harness_profile: str = "single",
         learning_mode: str = "capture",
+        queue_name: str = "interactive",
+        job_type: str = "agent_task",
+        priority: int = 100,
     ) -> Task:
         project = self.resolve_project(session, project_reference)
         project_config = self.project_registry.resolve(project_reference)
@@ -172,13 +175,13 @@ class TaskService:
         )
         session.add(
             QueueItem(
-                queue_name="interactive",
-                job_type="agent_task",
+                queue_name=queue_name,
+                job_type=job_type,
                 task_id=task.id,
                 project_id=task.project_id,
                 conversation_id=task.conversation_id,
                 client_id=task.client_id,
-                priority=100,
+                priority=priority,
             )
         )
         session.commit()

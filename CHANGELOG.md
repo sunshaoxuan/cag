@@ -2,6 +2,36 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.23.0
+
+发布日期：2026-08-06
+
+### Added
+
+* 新增客户台账异步 Knowledge Extraction API，以 CAG 所有的结构化 Schema 返回契约、Service、VPN 和 Environment 候选。
+* 候选使用独立物理 ID，并保存 Chunk、Source、Generation、Resource URI 和内容 Hash Citation。
+* Migration 0021 新增 PostgreSQL pg_trgm 以及 Knowledge Text、Document Path、Code Symbol 的 GIN Index。
+* Retrieval Stage Event 记录 Profile、候选件数、经过时间、Source、Generation、失败 Stage 和 Rerank Fallback。
+
+### Changed
+
+* API 与 durable queue worker 改为独立操作系统 Process，由宿主 Launcher 共同监督。
+* API 与 worker Process 都连接 Redis wake-up channel；API 只发布唤醒消息，不运行队列消费者。
+* Supervisor 使用 `/health/live` 决定 Process 重启，并保留 `/health/ready` 作为依赖状态证据。
+* Knowledge Search 使用固定上限的 PostgreSQL 候选、pgvector Top K、pg_trgm Index 和 Statement Timeout。
+* `fast` Profile 跳过 Ollama Embedding，优先检索 Code、正式名、略称和 Path。
+* 客户台账抽取先确定包含 Code 或正式名的权威客户目录，再按 Section 在该目录内检索，目录身份缺失时返回 Learning Gap。
+
+### Fixed
+
+* 删除每次检索对全部 Chunk、Symbol、Relation 和 Document Link 的应用内读取和排序。
+* Authority Citation 中不存在的 Chunk、空 Values、不正 Confidence 和未要求 Section 不再进入有效候选。
+* Lease 恢复先处理 Cancel Request，取消完成的 Task 不再重新进入 Queue。
+* Queue finish 按时间顺序处理 Cancel 与 Completion 竞态，Cancel 先发生时清除未交付结果并进入 cancelled；活动任务默认每秒检查取消请求。
+* 取消 scheduled ingestion 时推进 Source 的下一次同步时间并释放调度租约，避免调度器立即创建同一 Source 的重复任务。
+* SQLite cutover 的目标 Schema Gate 更新为本版本 Alembic Head `20260806_0021`，避免全新环境在迁移后被陈旧 Revision 拒绝。
+* Knowledge Retrieval 饱和时，API Health、Task、Queue 和 Cancel 接口继续由独立 API Process 响应。
+
 ## 0.22.8
 
 发布日期：2026-08-05

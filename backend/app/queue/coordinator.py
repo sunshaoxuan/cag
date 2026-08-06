@@ -6,6 +6,7 @@ import uuid
 from contextlib import suppress
 
 from app.knowledge.service import KnowledgeService
+from app.knowledge.extraction import CustomerKnowledgeExtractionService
 from app.models import QueueItem
 from app.queue.notifier import QueueNotifier
 from app.queue.service import QueueService
@@ -24,6 +25,7 @@ class QueueCoordinator:
         notifier: QueueNotifier,
         task_executor: TaskExecutor,
         knowledge_service: KnowledgeService,
+        extraction_service: CustomerKnowledgeExtractionService,
         interactive_workers: int,
         knowledge_workers: int,
         operations_workers: int,
@@ -36,6 +38,7 @@ class QueueCoordinator:
         self._notifier = notifier
         self._task_executor = task_executor
         self._knowledge_service = knowledge_service
+        self._extraction_service = extraction_service
         self._operational_issue_service = operational_issue_service
         self._worker_counts = {
             "interactive": interactive_workers,
@@ -106,11 +109,13 @@ class QueueCoordinator:
         await self._notifier.publish(queue_name)
 
     def status(self) -> dict[str, object]:
+        snapshot = self._service.status_snapshot()
         return {
-            "running": self.running,
+            "running": self.running or bool(snapshot["workers"]),
+            "local_consumers_running": self.running,
             "configured_workers": dict(self._worker_counts),
             "redis": self._notifier.status(),
-            **self._service.status_snapshot(),
+            **snapshot,
         }
 
     async def _worker_loop(
@@ -233,6 +238,9 @@ class QueueCoordinator:
             and item.ingestion_id is not None
         ):
             await self._knowledge_service.ingest(item.ingestion_id)
+            return
+        if item.job_type == "customer_knowledge_extraction" and item.task_id is not None:
+            await self._extraction_service.execute(item.task_id)
             return
         if item.issue_id is not None and item.job_type.startswith("operational_"):
             await self._operational_issue_service.process(

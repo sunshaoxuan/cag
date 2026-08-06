@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for version 0.17.0.
+Accepted for version 0.17.0 and amended by ADR 0025 for version 0.23.0.
 
 ## Context
 
@@ -15,7 +15,7 @@ concurrency, while each Conversation must preserve task order.
 
 PostgreSQL stores every queue item, lease, attempt, cancellation request and
 worker heartbeat. Interactive Agent tasks and knowledge ingestions have
-separate worker pools. Workers claim eligible rows with row locks and
+separate worker pools in a process isolated from the API. Workers claim eligible rows with row locks and
 `SKIP LOCKED`.
 
 Redis Pub/Sub sends wake notifications. It contains no authoritative payload.

@@ -212,8 +212,8 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 
 ### Persistence
 
-SQLAlchemy 2 models use PostgreSQL 16 with pgvector in every managed runtime.
-Alembic owns schema versioning through revision `20260731_0018`. SQLite is
+SQLAlchemy 2 models use PostgreSQL 16 with pgvector and pg_trgm in every managed runtime.
+Alembic owns schema versioning through revision `20260806_0021`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension
@@ -229,7 +229,8 @@ tasks and knowledge ingestions. Workers claim rows with row locking and
 `SKIP LOCKED`, renew bounded leases with heartbeats and requeue expired leases
 at startup. `QueueWorker` records expose active capacity and current ownership.
 
-Interactive and knowledge jobs use separate worker pools. A correlated
+The API and all queue consumers run in independent operating-system processes.
+Interactive and knowledge jobs use separate pools inside the worker process. A correlated
 Conversation ordering guard prevents a later task from being claimed while an
 earlier task in the same Conversation remains queued or leased. Independent
 Conversations can run in parallel.
@@ -240,8 +241,8 @@ the durable job record.
 
 The Windows host uses a long-running Task Scheduler supervisor under the
 interactive user who owns the local Codex ChatGPT or API Key session. It starts at system startup and
-sign-in, checks the all-interface listener and `/health/ready`, starts a missing
-Gateway, and restarts a recognized unhealthy Gateway after a bounded failure
+sign-in, checks the all-interface listener and `/health/live`, starts a missing
+Gateway, and restarts a recognized non-live Gateway after a bounded failure
 threshold. Unexpected port owners are logged and left untouched.
 
 ### Project registry

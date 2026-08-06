@@ -146,12 +146,12 @@ function Test-GatewayProcess {
     )
 }
 
-function Test-GatewayReady {
+function Test-GatewayLive {
     try {
         $health = Invoke-RestMethod `
-            -Uri "http://127.0.0.1:$Port/health/ready" `
+            -Uri "http://127.0.0.1:$Port/health/live" `
             -TimeoutSec 5
-        $health.status -eq "ready"
+        $health.status -eq "ok"
     }
     catch {
         $false
@@ -251,7 +251,7 @@ while ($true) {
         continue
     }
 
-    if (Test-GatewayReady) {
+    if (Test-GatewayLive) {
         $consecutiveUnhealthyChecks = 0
         if ($lastReportedState -ne "ready") {
             Write-SupervisorLog (
@@ -282,7 +282,7 @@ while ($true) {
             -Title "Gateway health threshold exceeded" `
             -ErrorType "GatewayHealthFailure" `
             -ErrorMessage (
-                "Gateway readiness failed $consecutiveUnhealthyChecks " +
+                "Gateway liveness failed $consecutiveUnhealthyChecks " +
                 "consecutive checks and requires restart"
             ) `
             -Evidence @{

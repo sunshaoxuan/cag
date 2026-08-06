@@ -143,6 +143,7 @@ class TaskExecutor:
                         task_id=task_id,
                         project=knowledge_project,
                         query=knowledge_prompt,
+                        event_callback=emit,
                     )
                 )
                 knowledge_citations = citations

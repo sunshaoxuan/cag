@@ -19,11 +19,11 @@ code symbols, relationships and documentation evidence
   |
 Ollama embedding
   |
-pgvector and keyword projection
+pgvector, pg_trgm and keyword projection
   |
 tenant and product authorization filter
   |
-vector, Japanese keyword, symbol and graph recall
+bounded exact text, vector Top K, symbol and graph recall
   |
 reciprocal rank fusion
   |
@@ -88,10 +88,20 @@ previous committed representation until that transaction succeeds. A failed
 refresh preserves the previous searchable generation and records a degraded
 health state.
 
-The managed knowledge store is PostgreSQL 16 with pgvector. Embeddings use the
-native `vector(1024)` type and an HNSW cosine index. The vector channel executes
-distance ordering inside PostgreSQL. SQLite is accepted only by isolated tests
-and the one-time migration reader.
+The managed knowledge store is PostgreSQL 16 with pgvector and pg_trgm.
+Embeddings use the native `vector(1024)` type and an HNSW cosine index. Lowered
+Chunk text, document paths and symbol names use GIN trigram indexes. Every
+channel has a fixed candidate limit. The `fast` profile performs no model call,
+while `balanced` and `deep` add bounded vector and reranking stages. SQLite is
+accepted only by isolated tests and the one-time migration reader.
+
+The API and durable queue worker run in separate operating-system processes.
+Knowledge saturation therefore does not occupy the API event loop. Retrieval
+events expose stage, profile, elapsed time, candidate counts, Source IDs and
+active Generation IDs. Customer ledger extraction uses a dedicated knowledge
+job, resolves the exact customer root directory, restricts section retrieval to
+that root and validates structured candidates against authoritative Chunk
+citations.
 
 The ingestion stream reports collection, cleaning, indexing and Source Memory
 persistence as separate durable stages. The Knowledge page follows this SSE

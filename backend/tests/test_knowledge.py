@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 import gzip
 import json
@@ -6,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 from threading import Event
 import zipfile
 
@@ -115,6 +117,33 @@ class FailingEmbeddingOllama(FakeOllamaClient):
         raise OllamaError("forced embedding failure")
 
 
+class CustomerExtractionFakeOllama(FakeOllamaClient):
+    def __init__(self, *, authoritative_citation: bool = True) -> None:
+        super().__init__()
+        self.authoritative_citation = authoritative_citation
+
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "candidates" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        self.generated.append(prompt)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        chunk_id = (
+            evidence[0]["chunk_id"]
+            if self.authoritative_citation
+            else "00000000-0000-0000-0000-000000000000"
+        )
+        return {
+            "candidates": [
+                {
+                    "candidate_type": "contracts",
+                    "values": {"contract_code": "C-9330"},
+                    "confidence": 0.98,
+                    "evidence_chunk_ids": [chunk_id],
+                }
+            ]
+        }
+
+
 class CapturingKnowledgeRuntime:
     def __init__(self) -> None:
         self.developer_instructions: str | None = None
@@ -167,6 +196,7 @@ def install_fake_knowledge(
     )
     app.state.knowledge_service = service
     app.state.queue_coordinator._knowledge_service = service
+    app.state.extraction_service._knowledge_service = service
     executor: TaskExecutor = app.state.task_executor
     executor._knowledge_service = service
     return service
@@ -457,6 +487,144 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
         sources = client.get("/api/v1/knowledge/sources").json()
         assert sources[0]["status"] == "approved"
         assert service.list_sources()[0].id == source["id"]
+
+
+def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    (project_repository / "README.md").write_text(
+        "# 岡山市立総合医療センター\n\n顧客 Code 9330 の契約は C-9330 です。\n",
+        encoding="utf-8",
+    )
+    customer_directory = project_repository / "お_9330_岡山市立総合医療センター"
+    customer_directory.mkdir()
+    (customer_directory / "contract.md").write_text(
+        "契約 C-9330",
+        encoding="utf-8",
+    )
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    provider = CustomerExtractionFakeOllama()
+    service._provider = provider
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Customer ledger source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+
+        provider.embedded_texts.clear()
+        fast = client.post(
+            "/api/v1/knowledge/search",
+            json={
+                "project_id": "test-project",
+                "query": "9330",
+                "profile": "fast",
+                "limit": 10,
+            },
+        )
+        assert fast.status_code == 200
+        assert fast.json()["results"][0]["path"] == (
+            "お_9330_岡山市立総合医療センター/contract.md"
+        )
+        assert "exact_path" in fast.json()["results"][0]["match_reasons"]
+        assert provider.embedded_texts == []
+
+        official_name = client.post(
+            "/api/v1/knowledge/search",
+            json={
+                "project_id": "test-project",
+                "query": "岡山市立総合医療センター",
+                "profile": "fast",
+                "limit": 10,
+            },
+        )
+        assert official_name.status_code == 200
+        assert official_name.json()["results"][0]["path"] == (
+            "お_9330_岡山市立総合医療センター/contract.md"
+        )
+        assert "exact_path" in official_name.json()["results"][0][
+            "match_reasons"
+        ]
+
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            json={
+                "project_id": "test-project",
+                "organization_code": "9330",
+                "official_name": "岡山市立総合医療センター",
+                "requested_sections": ["contracts"],
+            },
+        )
+        assert created.status_code == 202
+        completed = wait_for_task(
+            client,
+            created.json()["id"],
+            timeout_seconds=10,
+        )
+        assert completed["status"] == "completed"
+        report = completed["final_report"]
+        assert report["schema_version"] == 1
+        assert report["learning_gap"] is False
+        assert report["candidates"][0]["candidate_id"]
+        assert report["candidates"][0]["validation_status"] == "valid"
+        assert report["candidates"][0]["evidence_chunk_ids"] == [
+            report["citations"][0]["chunk_id"]
+        ]
+        assert report["citations"][0]["generation_id"] == ingestion["id"]
+
+        provider.authoritative_citation = False
+        rejected = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            json={
+                "project_id": "test-project",
+                "organization_code": "9330",
+                "requested_sections": ["contracts"],
+            },
+        )
+        rejected_report = wait_for_task(
+            client,
+            rejected.json()["id"],
+            timeout_seconds=10,
+        )["final_report"]
+        assert rejected_report["candidates"] == []
+        assert rejected_report["learning_gap"] is True
+        assert rejected_report["validation_errors"][0]["reasons"] == [
+            "citation_not_authoritative"
+        ]
+
+        async def blocking_search(**_: object) -> list:
+            time.sleep(1)
+            return []
+
+        service.search = blocking_search  # type: ignore[method-assign]
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                client.post,
+                "/api/v1/knowledge/search",
+                json={
+                    "project_id": "test-project",
+                    "query": "9330",
+                    "profile": "fast",
+                },
+            )
+            time.sleep(0.1)
+            started = time.monotonic()
+            assert client.get("/health/live").status_code == 200
+            assert time.monotonic() - started < 0.5
+            assert pending.result().status_code == 200
 
 
 def test_code_knowledge_graph_is_idempotent_and_searchable(
