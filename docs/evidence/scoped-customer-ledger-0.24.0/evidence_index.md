@@ -13,3 +13,4 @@
 | C8 | Browser 与 Console | OneOps 四份业务截图，应用 Console Warning 和 Error 为 0 | 合格 |
 | C9 | Candidate Apply | `f6e0805d...`，Applied Record `ORGANIZATION:2`，成功审计 `b7531332...` | 合格 |
 | C10 | 问题中心重处理竞态 | Fresh Queue Item 回归测试与 151 项全量 pytest | 合格 |
+| C11 | 发布 | Release Commit `69343e2` 已 Push 到 `origin/master` | 合格 |
