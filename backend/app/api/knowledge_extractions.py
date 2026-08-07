@@ -52,7 +52,7 @@ class StrictModel(BaseModel):
 
 class AnalysisTemplateRequest(StrictModel):
     code: Literal["ORGANIZATION_PROFILE_ENRICHMENT"]
-    version: Literal[1]
+    version: Literal[2]
 
 
 class SubjectRequest(StrictModel):
@@ -217,7 +217,7 @@ def _template(
                 {"pattern": "導入システム一覧", "priority": 30},
                 {"pattern": "*", "priority": 100},
             ],
-            extractor_version="customer-ledger-v1",
+            extractor_version=f"customer-ledger-v{request.version}",
         )
         session.add(template)
         session.flush()

@@ -74,6 +74,7 @@ Legend:
 | Processor policy reprocessing | Implemented | Processor fingerprints, legacy code backfill and unchanged document vector reuse tests |
 | 64-bit knowledge file sizes | Implemented | PostgreSQL `BIGINT` migration and sparse large-file ingestion test |
 | Resumable knowledge ingestion queue | Implemented | Knowledge ingestion jobs use PostgreSQL leases, Redis wake, cancellation and restart recovery |
+| Post-start lease expiry recovery | Implemented | each queue claim transaction requeues expired leases for its queue and resumes durable checkpoints |
 | Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
 | Path-complete semantic indexing | Implemented | Every physical file retains path evidence; canonical path and redacted content share one multilingual embedding representation; duplicate content does not remove paths |
 | Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
@@ -87,7 +88,8 @@ Legend:
 | Code and documentation linkage | Implemented | Deterministic path and symbol evidence, detail API and retrieval graph expansion |
 | Multilingual semantic and exact hybrid retrieval | Implemented | Qwen3 path and content embeddings, Japanese, Chinese and English query instruction, exact path and lexical channels, RRF and optional local reranking |
 | Bounded indexed knowledge retrieval | Implemented | pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
-| Scoped customer ledger knowledge extraction | Implemented | schema v1, Catalog Scope resolution, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
+| Scoped customer ledger knowledge extraction | Implemented | request schema v1 with analysis Template v2, Catalog Scope resolution, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
+| Customer customization and remote ledger classification | Implemented | customization schema, field-specific model output schema, shared ingestion and manifest support policy, SQL and XLSM processing, VPN and Environment field contracts, physical-record apply tests |
 | Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |
 | Independent processing and business versions | Implemented | Active and Superseded Processing Versions, failed refresh protection, immutable Knowledge Blocks, Applicability Revisions and `analysis_context.as_of` selection |
 | Permanent learned knowledge history | Implemented | changed and absent source files retain historical Document Versions, Processing Versions, Blocks and archive Chunks |
@@ -103,7 +105,7 @@ Legend:
 | Structured Agent artifacts | Implemented | `AgentArtifact` SHA 256 record and API tests |
 | Unified Harness SSE | Implemented | parent TaskEvent sequence and Harness event tests |
 | Idempotent vector indexing | Implemented | source fingerprint, path and ordinal uniqueness, vector reuse test |
-| Resumable vector generation | Implemented | redacted-input embedding checkpoints commit per batch, retries calculate only missing vectors and final knowledge replacement remains atomic |
+| Resumable vector generation | Implemented | redacted-input embeddings use proven 8 Chunk batches, duplicate cache keys are inserted once, checkpoints commit per batch, retries calculate only missing vectors and final knowledge replacement remains atomic |
 | End-to-end file provenance | Implemented | raw file SHA 256, resumable bounded-concurrency legacy backfill, cleaned document and chunk hashes, SourceEntry physical foreign key, chunk to file citation reverse lookup and closure audit |
 | Durable knowledge source registry and scheduled rescan | Implemented | persisted sync policy, database lease, retry state, restart recovery, run history and scheduler tests |
 | Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |

@@ -2,6 +2,35 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.25.0
+
+发布日期：2026-08-07
+
+### Added
+
+* 顧客台帳 Schema に `CUSTOMER_CUSTOMIZATION_V1` を追加し、名称、区分、概要、業務目的、対象コンポーネント、状態及び備考を根拠付き候補として抽出する。
+* Macro 付き Excel `.xlsm` を既存の構造化 Spreadsheet 抽出経路へ追加する。
+
+### Changed
+
+* Scoped Extraction の Manifest 判定を Knowledge Ingestion と同じ対応拡張子定義へ統一し、SQL 等の取込済みコード資料を再度除外しない。
+* `６．リモート接続情報` は独立した Remote Access 候補を生成せず、VPN と Environment の台帳候補へ分類する。
+* 項目抽出を通用 Directory Taxonomy で絞り込み、`２．カスタマイズ情報` は Customize、`６．リモート接続情報` は VPN と Environment だけをモデルへ要求する。他 Directory ではこの三項目を要求しない。
+* `object_list` の異なる値を独立した台帳候補として集約し、Scalar 項目用の同一優先度値競合を Customize、VPN 及び Environment の別記録へ適用しない。
+* 顧客台帳分析 Template Version 2 を新しい Customize、VPN 及び Environment 契約に使用し、Version 1 の物理履歴を保持する。
+* 顧客台帳抽出 API は現行 Template Version 2 だけを受理し、モデルの構造化出力 Schema を項目ごとの Scalar 又は登録 Object Schema へ拘束する。
+* 実行中 Worker は Claim Transaction ごとに同 Queue の期限切れ Lease を回収し、再起動後に到期した長時間 Ingestion も Checkpoint から再開する。
+* Scope Repair Ingestion は同じ Source の無範囲 Ingestion を再利用せず、Scope 物理 ID と Prefix が一致する Task だけを単一化する。
+* Scope Repair の Prefix を Connector の開始 Directory へ下推し、範囲外ファイルを走査せず、範囲外 Source Entry を Removed に変更しない。
+* Scope Repair の Canonical Path に Scope Prefix を一度だけ含め、Embedding Cache Key と Semantic Path の Prefix 重複を防止する。
+* `metadata_only` と判定した大型 Archive、Database 及び実行ファイルは正文と原始 Byte Hash を読み込まず、Path、Size、更新日時及び理由だけを記録する。
+* Embedding の既存 8 Chunk Batch と永続 Checkpoint を維持し、同一 Batch 内の Cache Key を重複排除して一意制約違反を防止する。
+
+### Security
+
+* 実行ファイル、Database、Archive 及び資格情報は Customize の内容根拠に使用しない。Path Evidence は資産の存在だけを示す。
+* Spreadsheet 等で Label と分離された `account/strong-password` 形式を資格情報として脱敏し、既存 Chunk を再利用する再分析でもモデル Prompt と Citation Excerpt を再度脱敏する。
+
 ## 0.24.0
 
 * Add scoped customer ledger extraction schema v1 with Catalog scope

@@ -100,17 +100,27 @@ CUSTOMER_LEDGER_SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
-    "CUSTOMER_REMOTE_ACCESS_V1": {
+    "CUSTOMER_CUSTOMIZATION_V1": {
         "type": "array",
         "minItems": 1,
         "items": {
             "type": "object",
             "properties": {
-                "connection_type": {"type": "string"},
-                "purpose": {"type": ["string", "null"]},
+                "name": {"type": "string"},
+                "category": {"type": ["string", "null"]},
+                "summary": {"type": "string"},
+                "business_purpose": {"type": ["string", "null"]},
+                "affected_components": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["PLANNED", "ACTIVE", "RETIRED", "UNKNOWN"],
+                },
                 "notes": {"type": ["string", "null"]},
             },
-            "required": ["connection_type"],
+            "required": ["name", "summary", "affected_components", "status"],
             "additionalProperties": False,
         },
     },

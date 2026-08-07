@@ -63,6 +63,7 @@ def classify_file(
         ".docx",
         ".pptx",
         ".xlsx",
+        ".xlsm",
     }:
         return FileProcessingDecision(
             "metadata_only",

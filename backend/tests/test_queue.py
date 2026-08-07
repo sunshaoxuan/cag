@@ -151,6 +151,47 @@ def test_expired_lease_is_requeued_with_task_state(
     assert recovered["status"] == "queued"
 
 
+def test_claim_recovers_lease_that_expires_after_worker_start(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        task = submit_task(client, request_id="post-start-expiry")
+        first = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="stopped-worker",
+        )
+        assert first is not None
+        with app.state.database.session_factory() as session:
+            item = session.get(QueueItem, first.id)
+            item.lease_expires_at = utc_now() - timedelta(seconds=1)
+            stored_task = session.get(Task, str(task["id"]))
+            stored_task.status = "running"
+            session.commit()
+
+        pending_retry = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="replacement-worker",
+        )
+        assert pending_retry is None
+        with app.state.database.session_factory() as session:
+            item = session.get(QueueItem, first.id)
+            assert item.status == "queued"
+            item.available_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        recovered = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="replacement-worker",
+        )
+
+    assert recovered is not None
+    assert recovered.id == first.id
+    assert recovered.attempt_count == 2
+    assert recovered.lease_owner == "replacement-worker"
+
+
 def test_api_process_role_starts_notifier_without_queue_consumers(
     app_factory,
     settings,

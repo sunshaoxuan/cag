@@ -48,7 +48,7 @@ TEXT_EXTENSIONS = {
     ".yaml",
     ".yml",
 }
-OFFICE_EXTENSIONS = {".docx", ".pptx", ".xlsx", ".odt"}
+OFFICE_EXTENSIONS = {".docx", ".pptx", ".xlsx", ".xlsm", ".odt"}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | {".pdf"}
 
 
@@ -83,7 +83,7 @@ def extract_text_with_metadata(
         raw = path.read_bytes()
         encoding = detect_text_encoding(raw)
         return ExtractedText(raw.decode(encoding), encoding, "text")
-    if suffix == ".xlsx":
+    if suffix in {".xlsx", ".xlsm"}:
         return _extract_xlsx(
             path,
             max_cells=max_spreadsheet_cells,

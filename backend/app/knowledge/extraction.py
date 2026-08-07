@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from app.config import Settings
 from app.database import Database
 from app.knowledge.security import scan_knowledge_text
+from app.knowledge.extractors import SUPPORTED_EXTENSIONS
 from app.knowledge.service import KnowledgeService, SearchResult
 from app.models import (
     KnowledgeAnalysisScope,
@@ -40,20 +41,25 @@ from app.services.task_service import TaskService
 
 
 TERMINAL_EXTRACTION_STATUSES = {"review_required", "completed", "failed"}
-SUPPORTED_EXTENSIONS = {
-    ".csv",
-    ".docx",
-    ".json",
-    ".md",
-    ".pdf",
-    ".pptx",
-    ".txt",
-    ".xls",
-    ".xlsx",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
+CUSTOMIZATION_DIRECTORY = "２．カスタマイズ情報"
+REMOTE_INFORMATION_DIRECTORY = "６．リモート接続情報"
+SPECIAL_LEDGER_FIELDS = {"customizations", "vpns", "environments"}
+
+
+def requested_fields_for_document(
+    canonical_path: str,
+    requested_fields: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    segments = set(canonical_path.replace("\\", "/").split("/"))
+    if CUSTOMIZATION_DIRECTORY in segments:
+        allowed = {"customizations"}
+    elif REMOTE_INFORMATION_DIRECTORY in segments:
+        allowed = {"vpns", "environments"}
+    else:
+        allowed = {str(item["code"]) for item in requested_fields} - (
+            SPECIAL_LEDGER_FIELDS
+        )
+    return [item for item in requested_fields if str(item["code"]) in allowed]
 
 
 class ScopedExtractionError(RuntimeError):
@@ -563,17 +569,24 @@ class CustomerKnowledgeExtractionService:
                     row.failure_code = "EMPTY_TEXT"
                     session.commit()
             return
+        document_requested_fields = requested_fields_for_document(
+            task_document.canonical_path,
+            requested_fields,
+        )
         try:
-            async with asyncio.timeout(
-                self._settings.knowledge_customer_document_timeout_seconds
-            ):
-                fields, validation_errors = (
-                    await self._knowledge_service.extract_customer_fields(
-                        requested_fields=requested_fields,
-                        results=results,
-                        schema_registry=schema_registry,
+            if document_requested_fields:
+                async with asyncio.timeout(
+                    self._settings.knowledge_customer_document_timeout_seconds
+                ):
+                    fields, validation_errors = (
+                        await self._knowledge_service.extract_customer_fields(
+                            requested_fields=document_requested_fields,
+                            results=results,
+                            schema_registry=schema_registry,
+                        )
                     )
-                )
+            else:
+                fields, validation_errors = [], []
         except Exception as error:
             failure_code = (
                 "MODEL_TIMEOUT"
@@ -811,6 +824,11 @@ class CustomerKnowledgeExtractionService:
             requested_codes = {
                 item["code"] for item in task.request_json["requested_fields"]
             }
+            object_list_codes = {
+                item["code"]
+                for item in task.request_json["requested_fields"]
+                if item.get("type") == "object_list"
+            }
             resolved_codes: set[str] = set()
             minimum_confidence = float(
                 task.request_json["result_policy"]["minimum_confidence"]
@@ -833,7 +851,10 @@ class CustomerKnowledgeExtractionService:
                     ranked.append((priority, value_key, value_items))
                 best_priority = min(item[0] for item in ranked)
                 best = [item for item in ranked if item[0] == best_priority]
-                if len(best) > 1:
+                conflicting_values = (
+                    len(best) > 1 and field_code not in object_list_codes
+                )
+                if conflicting_values:
                     ids = [candidate.id for _, _, values in best for candidate in values]
                     conflict = KnowledgeFieldConflict(
                         extraction_task_id=task.id,
@@ -856,7 +877,7 @@ class CustomerKnowledgeExtractionService:
                     if winner.confidence < minimum_confidence:
                         continue
                     winner.aggregation_status = (
-                        "conflict" if len(best) > 1 else "selected"
+                        "conflict" if conflicting_values else "selected"
                     )
                     resolved_codes.add(field_code)
                     unique_evidence: dict[tuple[str, str], KnowledgeCandidateEvidence] = {}

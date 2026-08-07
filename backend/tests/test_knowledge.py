@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import time
 from threading import Event
+from types import SimpleNamespace
 import uuid
 import zipfile
 
@@ -35,14 +36,18 @@ from app.knowledge.customer_ledger_contracts import (
     customer_ledger_schema_registry,
     value_matches_schema,
 )
-from app.knowledge.extraction import _parse_datetime
+from app.knowledge.extraction import (
+    CustomerKnowledgeExtractionService,
+    _parse_datetime,
+    requested_fields_for_document,
+)
 from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
     KnowledgeCipher,
     load_knowledge_cipher,
     scan_knowledge_text,
 )
-from app.knowledge.service import KnowledgeService
+from app.knowledge.service import KnowledgeService, customer_field_output_schema
 from app.main import create_app
 from app.models import (
     CodeDocumentLink,
@@ -176,21 +181,23 @@ class CustomerExtractionFakeOllama(FakeOllamaClient):
         }
 
 
-class RemoteAccessExtractionFakeOllama(FakeOllamaClient):
+class RemoteInformationExtractionFakeOllama(FakeOllamaClient):
     async def structured_generate(self, prompt: str, schema: dict) -> dict:
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
-        remote = next(item for item in evidence if "SSH" in item["text"])
+        remote = next(item for item in evidence if "SSL VPN" in item["text"])
         return {
             "fields": [
                 {
-                    "field_code": "remote_access",
+                    "field_code": "vpns",
                     "value": [
                         {
-                            "connection_type": "SSH",
-                            "purpose": "support remote access",
+                            "name": "Support VPN",
+                            "vpn_type": "SSL",
+                            "provider_name": None,
+                            "status": "ACTIVE",
                             "notes": None,
                         }
                     ],
@@ -201,20 +208,45 @@ class RemoteAccessExtractionFakeOllama(FakeOllamaClient):
                     "effective_to": None,
                 },
                 {
-                    "field_code": "repositories",
+                    "field_code": "environments",
                     "value": [
                         {
-                            "repository_type": "SVN",
-                            "name": None,
-                            "purpose": None,
+                            "name": "本番環境",
+                            "environment_type": "PRODUCTION",
+                            "status": "ACTIVE",
+                            "product_code": None,
+                            "product_version": None,
+                            "notes": None,
                         }
                     ],
                     "option_id": None,
-                    "confidence": 0.5,
+                    "confidence": 0.95,
                     "evidence_chunk_ids": [remote["chunk_id"]],
                     "effective_from": None,
                     "effective_to": None,
                 },
+            ]
+        }
+
+
+class MultipleVpnExtractionFakeOllama(FakeOllamaClient):
+    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate(prompt, schema)
+        evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+        item = evidence[0]
+        name = "First VPN" if "first" in item["path"] else "Second VPN"
+        return {
+            "fields": [
+                {
+                    "field_code": "vpns",
+                    "value": [{"name": name, "vpn_type": "SSL"}],
+                    "option_id": None,
+                    "confidence": 0.9,
+                    "evidence_chunk_ids": [item["chunk_id"]],
+                    "effective_from": None,
+                    "effective_to": None,
+                }
             ]
         }
 
@@ -309,7 +341,7 @@ def scoped_extraction_request(
         "knowledge_source_id": source["id"],
         "analysis_template": {
             "code": "ORGANIZATION_PROFILE_ENRICHMENT",
-            "version": 1,
+            "version": 2,
         },
         "subject": {
             "type": "organization",
@@ -372,6 +404,133 @@ def test_customer_ledger_schema_registry_validates_nested_values() -> None:
     assert value_matches_schema(False, {"type": "boolean"})
     assert not value_matches_schema("false", {"type": "boolean"})
     assert not value_matches_schema("UNKNOWN", {"type": "string", "enum": ["ACTIVE"]})
+    customization = registry["CUSTOMER_CUSTOMIZATION_V1"]
+    assert value_matches_schema(
+        [{
+            "name": "帳票カスタマイズ",
+            "category": "REPORT",
+            "summary": "大学向け帳票",
+            "business_purpose": None,
+            "affected_components": ["report-server"],
+            "status": "ACTIVE",
+            "notes": None,
+        }],
+        customization,
+    )
+    assert "CUSTOMER_REMOTE_ACCESS_V1" not in registry
+
+
+def test_customer_field_output_schema_constrains_object_values() -> None:
+    registry = customer_ledger_schema_registry()
+    schema = customer_field_output_schema(
+        [
+            {
+                "code": "customizations",
+                "type": "object_list",
+                "required": False,
+                "schema_ref": "CUSTOMER_CUSTOMIZATION_V1",
+            },
+            {
+                "code": "vpns",
+                "type": "object_list",
+                "required": False,
+                "schema_ref": "CUSTOMER_VPN_V1",
+            },
+        ],
+        registry,
+        {"chunk-b", "chunk-a"},
+    )
+
+    variants = schema["properties"]["fields"]["items"]["oneOf"]
+    by_code = {
+        variant["properties"]["field_code"]["const"]: variant
+        for variant in variants
+    }
+    assert by_code["customizations"]["properties"]["value"] == (
+        registry["CUSTOMER_CUSTOMIZATION_V1"]
+    )
+    assert by_code["vpns"]["properties"]["value"] == registry["CUSTOMER_VPN_V1"]
+    assert by_code["vpns"]["properties"]["option_id"] == {"type": "null"}
+    assert by_code["vpns"]["properties"]["evidence_chunk_ids"]["items"] == {
+        "type": "string",
+        "enum": ["chunk-a", "chunk-b"],
+    }
+
+
+def test_customer_ledger_special_fields_follow_business_directory_taxonomy() -> None:
+    fields = [
+        {"code": "organization_name"},
+        {"code": "customizations"},
+        {"code": "vpns"},
+        {"code": "environments"},
+    ]
+
+    assert [
+        item["code"]
+        for item in requested_fields_for_document(
+            "任意顧客/２．カスタマイズ情報/設計書.xlsx",
+            fields,
+        )
+    ] == ["customizations"]
+    assert [
+        item["code"]
+        for item in requested_fields_for_document(
+            "別組織/６．リモート接続情報/VPN手順.pdf",
+            fields,
+        )
+    ] == ["vpns", "environments"]
+    assert [
+        item["code"]
+        for item in requested_fields_for_document(
+            "第三組織/１．導入システム一覧/一覧.xlsx",
+            fields,
+        )
+    ] == ["organization_name"]
+
+
+def test_scoped_manifest_uses_ingestion_support_for_sql() -> None:
+    entry = SimpleNamespace(
+        extension=".sql",
+        present=True,
+        processing_status="completed",
+        processing_mode="code",
+        content_hash="same",
+        processor_fingerprint="processor-v1",
+    )
+    document = SimpleNamespace(
+        content_hash="same",
+        processor_fingerprint="processor-v1",
+    )
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, document, "custom.sql"
+    ) == ("ready", None)
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, document, "~$temporary.sql"
+    ) == ("excluded", "temporary_office_file")
+    entry.extension = ".exe"
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, None, "binary.exe"
+    ) == ("unsupported_extension", "unsupported_extension")
+    entry.extension = ".sql"
+    entry.present = False
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, None, "removed.sql"
+    ) == ("source_absent", "source_absent")
+    entry.present = True
+    entry.processing_status = "failed"
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, None, "failed.sql"
+    ) == ("extraction_failed", None)
+    entry.processing_status = "metadata_only"
+    entry.processing_mode = "metadata_only"
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, None, "metadata.sql"
+    ) == ("metadata_only", None)
+    entry.processing_status = "completed"
+    entry.processing_mode = "code"
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, None, "observed.sql"
+    ) == ("observed_only", None)
 
 
 def test_customer_extraction_datetime_parser_normalizes_utc() -> None:
@@ -500,6 +659,19 @@ def test_multilingual_connection_credentials_are_redacted() -> None:
     assert "internal.example.invalid" not in scan.safe_text
     assert "SSH" in scan.safe_text
     assert "LDAP" in scan.safe_text
+
+
+def test_slash_separated_account_and_strong_password_are_redacted() -> None:
+    scan = scan_knowledge_text(
+        "接続設定 support-user/Str0ng!CredentialValue 次の項目"
+    )
+
+    assert scan.secret_detected is True
+    assert "support-user" not in scan.safe_text
+    assert "CredentialValue" not in scan.safe_text
+    assert "folder/report.xlsx" in scan_knowledge_text(
+        "folder/report.xlsx"
+    ).safe_text
 
 
 def test_long_customer_prompt_prioritizes_physical_identity_terms() -> None:
@@ -1122,15 +1294,15 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
         assert pending.result().status_code == 200
 
 
-def test_customer_remote_access_is_semantic_cited_and_does_not_guess_svn(
+def test_customer_remote_information_becomes_vpn_and_environment_candidates(
     settings: Settings,
     project_repository: Path,
 ) -> None:
     customer = project_repository / "し_0276_滋賀大学" / "６．リモート接続情報"
     customer.mkdir(parents=True)
     (customer / "リモート接続方法.txt").write_text(
-        "サポート用SSH接続\n"
-        "LDAPデータ参照\n"
+            "サポート用SSL VPN接続\n"
+            "本番環境への保守接続\n"
         "ユーザ名：operator-name\n"
         "パスワード：secret-value\n",
         encoding="utf-8",
@@ -1138,7 +1310,7 @@ def test_customer_remote_access_is_semantic_cited_and_does_not_guess_svn(
     active_settings = knowledge_settings(settings, project_repository.parent)
     app = create_app(settings=active_settings)
     service = install_fake_knowledge(app, active_settings)
-    provider = RemoteAccessExtractionFakeOllama()
+    provider = RemoteInformationExtractionFakeOllama()
     service._provider = provider
 
     with TestClient(app) as client:
@@ -1167,16 +1339,16 @@ def test_customer_remote_access_is_semantic_cited_and_does_not_guess_svn(
                 name="滋賀大学",
                 fields=[
                     {
-                        "code": "remote_access",
+                        "code": "vpns",
                         "type": "object_list",
                         "required": False,
-                        "schema_ref": "CUSTOMER_REMOTE_ACCESS_V1",
+                        "schema_ref": "CUSTOMER_VPN_V1",
                     },
                     {
-                        "code": "repositories",
+                        "code": "environments",
                         "type": "object_list",
                         "required": False,
-                        "schema_ref": "CUSTOMER_REPOSITORY_V1",
+                        "schema_ref": "CUSTOMER_ENVIRONMENT_V1",
                     },
                 ],
             ),
@@ -1184,18 +1356,74 @@ def test_customer_remote_access_is_semantic_cited_and_does_not_guess_svn(
         report = wait_for_extraction(client, created.json()["id"])
 
     assert report["status"] != "failed", report.get("error")
-    assert [item["field_code"] for item in report["field_candidates"]] == [
-        "remote_access"
-    ]
-    assert report["field_candidates"][0]["evidence"][0]["canonical_path"].startswith(
+    assert {item["field_code"] for item in report["field_candidates"]} == {
+        "environments",
+        "vpns",
+    }, report
+    by_field = {item["field_code"]: item for item in report["field_candidates"]}
+    assert by_field["vpns"]["evidence"][0]["canonical_path"].startswith(
         "し_0276_滋賀大学/"
     )
-    assert report["field_candidates"][0]["value"][0]["connection_type"] == "SSH"
-    assert report["unresolved_fields"] == [
-        {"field_code": "repositories", "reason_code": "EVIDENCE_NOT_FOUND"}
-    ]
+    assert by_field["environments"]["value"][0]["name"] == "本番環境"
+    assert by_field["vpns"]["value"][0]["vpn_type"] == "SSL"
+    assert report["unresolved_fields"] == []
     assert "secret-value" not in provider.generated[-1]
     assert "operator-name" not in provider.generated[-1]
+
+
+def test_object_list_values_are_independent_candidates_not_scalar_conflicts(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    remote = project_repository / "別_1000_任意組織" / "６．リモート接続情報"
+    remote.mkdir(parents=True)
+    (remote / "first.txt").write_text("First SSL VPN", encoding="utf-8")
+    (remote / "second.txt").write_text("Second SSL VPN", encoding="utf-8")
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    service._provider = MultipleVpnExtractionFakeOllama()
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Generic remote source",
+                "root_path": str(project_repository),
+                "subpath": "別_1000_任意組織",
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("generic-object-list"),
+            json=scoped_extraction_request(
+                source,
+                code="1000",
+                name="任意組織",
+                fields=[
+                    {
+                        "code": "vpns",
+                        "type": "object_list",
+                        "required": False,
+                        "schema_ref": "CUSTOMER_VPN_V1",
+                    }
+                ],
+            ),
+        )
+        report = wait_for_extraction(client, created.json()["id"])
+
+    assert report["conflicts"] == []
+    assert {item["value"][0]["name"] for item in report["field_candidates"]} == {
+        "First VPN",
+        "Second VPN",
+    }
 
 
 def test_scoped_extraction_idempotency_and_scope_errors_are_stable(
@@ -1715,7 +1943,10 @@ def test_failed_embedding_refresh_resumes_from_durable_checkpoints(
     source_dir = project_repository / "checkpoint-source"
     source_dir.mkdir()
     (source_dir / "large-guide.txt").write_text(
-        "multilingual remote access knowledge\n" * 2_000,
+        "\n".join(
+            f"{index} multilingual remote access knowledge"
+            for index in range(20_000)
+        ),
         encoding="utf-8",
     )
     active_settings = knowledge_settings(
@@ -1738,18 +1969,30 @@ def test_failed_embedding_refresh_resumes_from_durable_checkpoints(
                 "approved_for_codex": True,
             },
         ).json()
-        first = client.post(
-            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        first, first_created = service.create_ingestion(source["id"])
+        assert first_created is True
+        asyncio.run(service.ingest(first.id))
+        first_result = client.get(
+            f"/api/v1/knowledge/ingestions/{first.id}"
         ).json()
-        assert wait_for_ingestion(client, first["id"])["status"] == "failed"
+        assert first_result["status"] == "failed", first_result.get("error")
+        assert first_result["error"] == "forced transient embedding failure"
         assert len(provider.embedded_texts) == 8
 
-        second = client.post(
-            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        second, second_created = service.create_ingestion(source["id"])
+        assert second_created is True
+        assert second.id != first.id
+        asyncio.run(service.ingest(second.id))
+        completed = client.get(
+            f"/api/v1/knowledge/ingestions/{second.id}"
         ).json()
-        completed = wait_for_ingestion(client, second["id"])
 
-    assert completed["status"] == "completed"
+    assert completed["status"] == "completed", (
+        completed.get("error"),
+        completed.get("error_summary"),
+        provider.calls,
+        provider.failed,
+    )
     assert completed["chunks_written"] > 8
     assert len(provider.embedded_texts) == completed["chunks_written"]
     with app.state.database.session_factory() as session:
@@ -2261,6 +2504,20 @@ def test_xlsx_semantic_extraction_preserves_structure_and_formula_cache(
     assert "B1\tvalue=TRUE" in extracted.text
 
 
+def test_xlsm_uses_bounded_spreadsheet_extraction(tmp_path: Path) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "顧客カスタマイズ.xlsm"
+    workbook = Workbook()
+    workbook.active["A1"] = "筑波大学カスタマイズ"
+    workbook.save(workbook_path)
+    workbook.close()
+
+    extracted = extract_text_with_metadata(workbook_path)
+    assert "筑波大学カスタマイズ" in extracted.text
+    assert extracted.processor_variant == "xlsx_semantic_v1"
+
+
 def test_xlsx_semantic_extraction_enforces_cell_and_text_limits(
     tmp_path: Path,
 ) -> None:
@@ -2361,6 +2618,47 @@ def test_temporary_office_file_is_skipped_before_extraction(
     assert result.rejected_files == 0
     assert rejections[0].reason_code == "temporary_office_file"
     assert rejections[0].extractor == "filesystem"
+
+
+def test_metadata_only_large_file_is_not_read_for_raw_hash(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "large-file-source"
+    root.mkdir()
+    large_archive = root / "customer-installer.zip"
+    large_archive.write_bytes(b"x" * 11)
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10,
+    )
+
+    def fail_if_hashed(path: Path) -> str:
+        raise AssertionError(f"metadata-only file was read: {path}")
+
+    monkeypatch.setattr(manager, "_sha256_file", fail_if_hashed)
+    observations: list[CollectionObservation] = []
+    result = manager.collect(
+        SourceConfig(
+            id="large-file-source",
+            source_type="local_directory",
+            location=str(root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        observation=observations.append,
+    )
+
+    assert result.files_seen == 1
+    assert result.skipped_files == 1
+    assert observations[0].processing_status == "metadata_only"
+    assert observations[0].raw_content_hash is None
 
 
 def test_rejection_persistence_is_idempotent_across_flushes(
@@ -2823,8 +3121,14 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         assert entries["guide.md"]["extractor"] == "text"
         assert entries["warning.txt"]["processing_mode"] == "path_only"
         assert all(
+            item["raw_content_hash"] is None
+            for item in entries.values()
+            if item["processing_mode"] == "metadata_only"
+        )
+        assert all(
             item["raw_content_hash"] == "a" * 64
             for item in entries.values()
+            if item["processing_mode"] != "metadata_only"
         )
         filtered_inventory = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/entries",
@@ -2976,6 +3280,7 @@ def test_active_ingestion_is_reused_without_duplicate_execution(
     settings: Settings,
     project_repository: Path,
 ) -> None:
+    settings.queue_enabled = False
     active_settings = knowledge_settings(settings, project_repository.parent)
     app = create_app(settings=active_settings)
     service = install_fake_knowledge(app, active_settings)
@@ -2993,6 +3298,23 @@ def test_active_ingestion_is_reused_without_duplicate_execution(
         ingestion, created = service.create_ingestion(source["id"])
         assert created is True
 
+        scoped, scoped_created = service.create_ingestion(
+            source["id"],
+            trigger="scope_repair",
+            scope_prefix="つ_0408_筑波大学",
+            retry_statuses=["observed", "failed"],
+        )
+        assert scoped_created is True
+        assert scoped.id != ingestion.id
+        repeated_scoped, repeated_scoped_created = service.create_ingestion(
+            source["id"],
+            trigger="scope_repair",
+            scope_prefix="つ_0408_筑波大学",
+            retry_statuses=["observed", "failed"],
+        )
+        assert repeated_scoped_created is False
+        assert repeated_scoped.id == scoped.id
+
         repeated = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         )
@@ -3008,6 +3330,85 @@ def test_active_ingestion_is_reused_without_duplicate_execution(
         ).text
         assert events.count("event: knowledge.ingestion.started") == 1
         assert events.count("event: knowledge.collection.started") == 1
+
+
+def test_scoped_ingestion_starts_at_prefix_and_preserves_other_scope_entries(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "customer-source"
+    target_scope = source_root / "つ_0408_筑波大学"
+    other_scope = source_root / "し_0276_滋賀大学"
+    target_scope.mkdir(parents=True)
+    other_scope.mkdir(parents=True)
+    (target_scope / "customization.txt").write_text(
+        "筑波大学向け帳票カスタマイズ",
+        encoding="utf-8",
+    )
+    outside_file = other_scope / "environment.txt"
+    outside_file.write_text("滋賀大学本番環境", encoding="utf-8")
+
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Scoped customer source",
+                "source_type": "local_directory",
+                "location": str(source_root),
+                "scope": "tenant",
+            },
+        ).json()
+        initial = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        )
+        assert wait_for_ingestion(client, initial.json()["id"])["status"] == "completed"
+
+        outside_file.unlink()
+        collected_subpaths: list[str | None] = []
+        original_collect = service._connectors.collect
+
+        def capture_collect(source_config, *args, **kwargs):
+            collected_subpaths.append(source_config.subpath)
+            return original_collect(source_config, *args, **kwargs)
+
+        service._connectors.collect = capture_collect
+        scoped, created = service.create_ingestion(
+            source["id"],
+            trigger="scope_repair",
+            scope_prefix="つ_0408_筑波大学",
+            retry_statuses=["observed", "failed"],
+        )
+        assert created is True
+        asyncio.run(service.ingest(scoped.id))
+
+        assert collected_subpaths == ["つ_0408_筑波大学"]
+        with app.state.database.session_factory() as session:
+            paths = set(
+                session.scalars(
+                    select(KnowledgeDocument.canonical_path).where(
+                        KnowledgeDocument.source_id == source["id"]
+                    )
+                )
+            )
+            outside_entry = session.scalar(
+                select(KnowledgeSourceEntry).where(
+                    KnowledgeSourceEntry.source_id == source["id"],
+                    KnowledgeSourceEntry.relative_path
+                    == "し_0276_滋賀大学/environment.txt",
+                )
+            )
+        assert "つ_0408_筑波大学/customization.txt" in paths
+        assert outside_entry is not None
+        assert outside_entry.present is True
+        assert outside_entry.processing_status != "removed"
+        assert all(
+            "つ_0408_筑波大学/つ_0408_筑波大学/" not in text
+            for text in service._provider.embedded_texts
+        )
 
 
 def test_connector_credentials_avoid_command_arguments(

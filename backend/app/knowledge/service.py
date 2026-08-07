@@ -6,7 +6,7 @@ import json
 import math
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections.abc import Awaitable, Callable
@@ -127,6 +127,83 @@ class PreparedChunk:
     language: str
     encoding: str
     metadata: dict[str, Any]
+
+
+EMBEDDING_BATCH_SIZE = 8
+
+
+def customer_field_output_schema(
+    requested_fields: list[dict[str, Any]],
+    schema_registry: dict[str, Any],
+    allowed_evidence_ids: set[str],
+) -> dict[str, Any]:
+    common_properties = {
+        "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+        },
+        "evidence_chunk_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": True,
+            "items": {
+                "type": "string",
+                "enum": sorted(allowed_evidence_ids),
+            },
+        },
+        "effective_from": {"type": ["string", "null"]},
+        "effective_to": {"type": ["string", "null"]},
+    }
+    variants: list[dict[str, Any]] = []
+    for contract in requested_fields:
+        field_type = str(contract.get("type", ""))
+        if field_type == "object_list":
+            value_schema = schema_registry.get(str(contract.get("schema_ref", "")))
+            if value_schema is None:
+                continue
+        elif field_type in {"string", "text"}:
+            value_schema = {"type": "string"}
+        else:
+            value_schema = {}
+        option_ids = [str(item["id"]) for item in contract.get("options", [])]
+        option_schema: dict[str, Any] = (
+            {"type": "string", "enum": option_ids}
+            if field_type in {"enum", "master_reference"}
+            else {"type": "null"}
+        )
+        variants.append(
+            {
+                "type": "object",
+                "properties": {
+                    "field_code": {"type": "string", "const": str(contract["code"])},
+                    "value": value_schema,
+                    "option_id": option_schema,
+                    **common_properties,
+                },
+                "required": [
+                    "field_code",
+                    "value",
+                    "option_id",
+                    "confidence",
+                    "evidence_chunk_ids",
+                    "effective_from",
+                    "effective_to",
+                ],
+                "additionalProperties": False,
+            }
+        )
+    return {
+        "type": "object",
+        "properties": {
+            "fields": {
+                "type": "array",
+                "items": {"oneOf": variants},
+            }
+        },
+        "required": ["fields"],
+        "additionalProperties": False,
+    }
 
 
 class KnowledgeService:
@@ -562,6 +639,9 @@ class KnowledgeService:
                 .where(
                     KnowledgeIngestion.source_id == source_id,
                     KnowledgeIngestion.status.in_(("queued", "running")),
+                    KnowledgeIngestion.analysis_scope_id
+                    == analysis_scope_id,
+                    KnowledgeIngestion.scope_prefix == scope_prefix,
                 )
                 .order_by(KnowledgeIngestion.created_at.desc())
             )
@@ -634,13 +714,24 @@ class KnowledgeService:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
                 return
-            if ingestion.status != "queued":
+            started_at = utc_now()
+            claimed = session.execute(
+                update(KnowledgeIngestion)
+                .where(
+                    KnowledgeIngestion.id == ingestion_id,
+                    KnowledgeIngestion.status == "queued",
+                )
+                .values(status="running", started_at=started_at)
+            )
+            if claimed.rowcount != 1:
+                session.rollback()
                 return
             source = session.get(KnowledgeSource, ingestion.source_id)
             if source is None:
+                session.rollback()
                 return
             ingestion.status = "running"
-            ingestion.started_at = utc_now()
+            ingestion.started_at = started_at
             self._append_ingestion_event(
                 session,
                 ingestion,
@@ -650,8 +741,24 @@ class KnowledgeService:
             session.commit()
             source_id = source.id
             source_config = self._source_config(source)
+            embedding_path_prefix = source_config.subpath or ""
             reusable_files = self._reusable_files(session, source)
             scope_prefix = (ingestion.scope_prefix or "").replace("\\", "/").strip("/")
+            if scope_prefix:
+                source_subpath = (source_config.subpath or "").replace("\\", "/").strip("/")
+                source_config = replace(
+                    source_config,
+                    subpath="/".join(
+                        part for part in (source_subpath, scope_prefix) if part
+                    ),
+                )
+                scoped_reusable_files = {}
+                prefix = f"{scope_prefix}/"
+                for path, reusable in reusable_files.items():
+                    normalized = path.replace("\\", "/").strip("/")
+                    if normalized.startswith(prefix):
+                        scoped_reusable_files[normalized[len(prefix):]] = reusable
+                reusable_files = scoped_reusable_files
 
         try:
             self._record_ingestion_event(
@@ -674,6 +781,11 @@ class KnowledgeService:
             def report_collection_rejection(
                 item: CollectionRejection,
             ) -> None:
+                if scope_prefix:
+                    item = replace(
+                        item,
+                        relative_path=f"{scope_prefix}/{item.relative_path}",
+                    )
                 rejection_buffer.append(item)
                 if len(rejection_buffer) >= 100:
                     flush_rejections()
@@ -681,6 +793,11 @@ class KnowledgeService:
             def report_collection_observation(
                 item: CollectionObservation,
             ) -> None:
+                if scope_prefix:
+                    item = replace(
+                        item,
+                        relative_path=f"{scope_prefix}/{item.relative_path}",
+                    )
                 observation_buffer.append(item)
                 if len(observation_buffer) >= 500:
                     flush_observations()
@@ -694,6 +811,22 @@ class KnowledgeService:
                 reusable_files,
             )
             if scope_prefix:
+                collected = CollectionResult(
+                    revision=collected.revision,
+                    documents=[
+                        replace(item, path=f"{scope_prefix}/{item.path}")
+                        for item in collected.documents
+                    ],
+                    files_seen=collected.files_seen,
+                    rejected_files=collected.rejected_files,
+                    skipped_files=collected.skipped_files,
+                    duplicate_files=collected.duplicate_files,
+                    reused_paths=tuple(
+                        f"{scope_prefix}/{path}"
+                        for path in collected.reused_paths
+                    ),
+                )
+
                 def in_scope(path: str) -> bool:
                     normalized = path.replace("\\", "/").strip("/")
                     return normalized == scope_prefix or normalized.startswith(
@@ -954,7 +1087,6 @@ class KnowledgeService:
                     "removed_files": len(removed_paths),
                 },
             )
-            embedding_path_prefix = source_config.subpath or ""
             await self._cache_ingestion_embeddings(
                 ingestion_id,
                 chunks,
@@ -1457,21 +1589,26 @@ class KnowledgeService:
             if ingestion is None:
                 raise KeyError(ingestion_id)
             removed_at = utc_now()
-            session.execute(
-                update(KnowledgeSourceEntry)
-                .where(
-                    KnowledgeSourceEntry.source_id
-                    == ingestion.source_id,
-                    KnowledgeSourceEntry.present.is_(True),
+            statement = update(KnowledgeSourceEntry).where(
+                KnowledgeSourceEntry.source_id == ingestion.source_id,
+                KnowledgeSourceEntry.present.is_(True),
+                or_(
+                    KnowledgeSourceEntry.last_seen_ingestion_id.is_(None),
+                    KnowledgeSourceEntry.last_seen_ingestion_id != ingestion_id,
+                ),
+            )
+            scope_prefix = (ingestion.scope_prefix or "").replace("\\", "/").strip("/")
+            if scope_prefix:
+                statement = statement.where(
                     or_(
-                        KnowledgeSourceEntry.last_seen_ingestion_id.is_(
-                            None
+                        KnowledgeSourceEntry.relative_path == scope_prefix,
+                        KnowledgeSourceEntry.relative_path.startswith(
+                            f"{scope_prefix}/"
                         ),
-                        KnowledgeSourceEntry.last_seen_ingestion_id
-                        != ingestion_id,
-                    ),
+                    )
                 )
-                .values(
+            session.execute(
+                statement.values(
                     present=False,
                     processing_status="removed",
                     removed_at=removed_at,
@@ -2757,54 +2894,22 @@ class KnowledgeService:
             return [], []
         allowed_ids = {item.id for item in results}
         result_by_id = {item.id: item for item in results}
+        safe_text_by_id = {
+            item.id: scan_knowledge_text(item.text).safe_text for item in results
+        }
         field_by_code = {
             str(item["code"]): item for item in requested_fields
         }
-        allowed_codes = sorted(field_by_code)
-        schema = {
-            "type": "object",
-            "properties": {
-                "fields": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "field_code": {"type": "string", "enum": allowed_codes},
-                            "value": {},
-                            "option_id": {"type": ["string", "null"]},
-                            "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1,
-                            },
-                            "evidence_chunk_ids": {
-                                "type": "array",
-                                "minItems": 1,
-                                "uniqueItems": True,
-                                "items": {"type": "string", "enum": sorted(allowed_ids)},
-                            },
-                            "effective_from": {"type": ["string", "null"]},
-                            "effective_to": {"type": ["string", "null"]},
-                        },
-                        "required": [
-                            "field_code",
-                            "value",
-                            "option_id",
-                            "confidence",
-                            "evidence_chunk_ids",
-                            "effective_from",
-                            "effective_to",
-                        ],
-                    },
-                }
-            },
-            "required": ["fields"],
-        }
+        schema = customer_field_output_schema(
+            requested_fields,
+            schema_registry,
+            allowed_ids,
+        )
         evidence = [
             {
                 "chunk_id": item.id,
                 "path": item.path,
-                "text": item.text[:4_000],
+                "text": safe_text_by_id[item.id][:4_000],
             }
             for item in results
         ]
@@ -2815,6 +2920,10 @@ class KnowledgeService:
             "values. For enum and master_reference fields, option_id must be one "
             "of the supplied option IDs. A document modification date is not a "
             "business effective date.\n"
+            "For object_list fields, value must be a JSON array that exactly "
+            "matches the registered schema for that field. Use the schema's "
+            "snake_case property names, include every required property, and "
+            "return no unregistered property.\n"
             f"Requested fields: {json.dumps(requested_fields, ensure_ascii=False)}\n"
             f"Registered object schemas: {json.dumps(schema_registry, ensure_ascii=False)}\n"
             f"Evidence: {json.dumps(evidence, ensure_ascii=False)}",
@@ -2863,33 +2972,12 @@ class KnowledgeService:
                 (
                     result_by_id[value].path
                     + "\n"
-                    + result_by_id[value].text
+                    + safe_text_by_id[value]
                 )
                 for value in (evidence_ids or [])
                 if value in result_by_id
             ).casefold()
             field_value = raw.get("value")
-            if code == "remote_access" and isinstance(field_value, list):
-                connection_types = [
-                    str(item.get("connection_type", "")).strip().casefold()
-                    for item in field_value
-                    if isinstance(item, dict)
-                ]
-                if any(
-                    connection_type
-                    not in {
-                        "ssh",
-                        "ldap",
-                        "vpn",
-                        "rdp",
-                        "citrix",
-                        "teraterm",
-                        "winscp",
-                    }
-                    or connection_type not in cited_text
-                    for connection_type in connection_types
-                ):
-                    reasons.append("remote_protocol_not_cited")
             if code == "repositories" and isinstance(field_value, list):
                 repository_types = [
                     str(item.get("repository_type", "")).strip().casefold()
@@ -3256,8 +3344,8 @@ class KnowledgeService:
         path_prefix: str = "",
     ) -> None:
         completed = 0
-        for start in range(0, len(chunks), 8):
-            batch = chunks[start : start + 8]
+        for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
+            batch = chunks[start : start + EMBEDDING_BATCH_SIZE]
             texts = [
                 self._embedding_text(item.path, item.text, path_prefix)
                 for item in batch
@@ -3275,11 +3363,12 @@ class KnowledgeService:
                 now = utc_now()
                 for item in cached.values():
                     item.last_used_at = now
-                missing = [
-                    (key, text)
+                missing_by_key = {
+                    key: text
                     for key, text in zip(keys, texts, strict=True)
                     if key not in cached
-                ]
+                }
+                missing = list(missing_by_key.items())
                 if missing:
                     generated = await self._provider.embed(
                         [text for _, text in missing]

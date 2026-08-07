@@ -290,6 +290,25 @@ class QueueService:
             )
         )
         with self._database.session_factory() as session:
+            expired = list(
+                session.scalars(
+                    select(QueueItem)
+                    .where(
+                        QueueItem.queue_name == queue_name,
+                        QueueItem.status == QueueItemStatus.LEASED,
+                        QueueItem.lease_expires_at <= now,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            for expired_item in expired:
+                self._requeue_locked(
+                    session,
+                    expired_item,
+                    reason="worker_lease_expired",
+                )
+            if expired:
+                session.flush()
             item = session.scalar(
                 select(QueueItem)
                 .where(

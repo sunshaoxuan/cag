@@ -517,6 +517,36 @@ class SourceConnectorManager:
                             ),
                         )
                     continue
+                if decision.mode == "metadata_only":
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        file_size=file_size,
+                        modified_at=modified_at,
+                        processing_mode=decision.mode,
+                        processing_status="metadata_only",
+                        reason_code=decision.reason_code,
+                    )
+                    skipped += 1
+                    files_processed += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        entry_kind="file",
+                        disposition="skipped",
+                        file_size=file_size,
+                        reason_code=(
+                            decision.reason_code or "metadata_only_policy"
+                        ),
+                    )
+                    append_path_document(
+                        path,
+                        decision.reason_code or "metadata_only_policy",
+                    )
+                    continue
                 try:
                     raw_content_hash = (
                         reusable.raw_content_hash
@@ -565,26 +595,6 @@ class SourceConnectorManager:
                     reason_code=decision.reason_code,
                     raw_content_hash=raw_content_hash,
                 )
-                if decision.mode == "metadata_only":
-                    skipped += 1
-                    files_processed += 1
-                    self._report_rejection(
-                        rejection,
-                        root=root,
-                        path=path,
-                        entry_kind="file",
-                        disposition="skipped",
-                        file_size=file_size,
-                        reason_code=(
-                            decision.reason_code
-                            or "metadata_only_policy"
-                        ),
-                    )
-                    append_path_document(
-                        path,
-                        decision.reason_code or "metadata_only_policy",
-                    )
-                    continue
                 if decision.mode == "path_only":
                     files_processed += 1
                     text = path_semantic_text(

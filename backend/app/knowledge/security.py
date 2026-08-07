@@ -29,6 +29,13 @@ SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:https?|ssh|svn)://[^\s/:]+:[^\s/@]+@[^\s]+"
     ),
+    re.compile(
+        r"(?i)(?<![A-Za-z0-9._/-])"
+        r"[A-Za-z][A-Za-z0-9._-]{2,31}/"
+        r"(?=[^\s/]{8,64}(?:\s|$))"
+        r"(?=[^\s/]*[A-Za-z])(?=[^\s/]*\d)"
+        r"(?=[^\s/]*[^A-Za-z0-9\s/])[^\s/]{8,64}"
+    ),
 )
 PROMPT_INJECTION_PATTERNS = (
     re.compile(r"(?i)ignore (?:all |the )?(?:previous|prior) instructions"),
