@@ -9,7 +9,7 @@
 | Template contract | Version 2, `customer-ledger-v2` |
 | Unit and integration tests | 160 passed, 3 skipped, Coverage 85.36% |
 | Runtime | `/health/ready` returned 200 and `ready` |
-| Queue | Final state is recorded in `FINAL_ACCEPTANCE_CHECKLIST.md` |
+| Queue | Task extraction terminal, queued count 0; unrelated scheduled full ingestion preserved |
 | Generic classification | Production search contains no sample organization code or name |
 
 OneOps page screenshots and applied physical record evidence are stored in `D:\nginx\docs\evidence\customer-customization-remote-ledger-0.13.0`.

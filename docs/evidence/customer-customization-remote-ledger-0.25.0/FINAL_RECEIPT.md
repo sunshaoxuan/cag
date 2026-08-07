@@ -17,4 +17,6 @@ CAG 0.25.0 implements customer customization, VPN and environment extraction as 
 
 Extraction `fc2519ed-509f-49de-8c49-625e330412d3` produced reviewable customization, VPN and environment candidates. Its partial coverage status is preserved as explicit operational truth.
 
-Commit, push, tag and remote equality are recorded after publication in `FINAL_ACCEPTANCE_CHECKLIST.md`.
+Implementation commit `9a0ded18af8a4704406441bc413ac3447b31b836` was pushed directly to `origin/master`. The final receipt commit is tagged `v0.25.0` and pushed with remote equality verified.
+
+The task extraction and linked OneOps scan are terminal. A separate scheduled full source ingestion remains active with current collection progress and healthy lease renewal. It was preserved as unrelated operational work.
