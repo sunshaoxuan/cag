@@ -8,6 +8,25 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $backendRoot = Join-Path $repositoryRoot "backend"
 $pythonExecutable = Join-Path $backendRoot ".venv\Scripts\python.exe"
 
+function Stop-OwnedProcessTree {
+    param(
+        [Parameter(Mandatory)]
+        [int]$RootProcessId
+    )
+
+    $children = @(
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $RootProcessId }
+    )
+    foreach ($child in $children) {
+        Stop-OwnedProcessTree -RootProcessId $child.ProcessId
+    }
+    $process = Get-Process -Id $RootProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $process) {
+        Stop-Process -Id $RootProcessId -Force
+    }
+}
+
 if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
     throw "Backend virtual environment is missing. Install backend development dependencies first."
 }
@@ -186,11 +205,8 @@ try {
     }
     finally {
         foreach ($process in @($workerProcess, $apiProcess)) {
-            if ($null -ne $process -and -not $process.HasExited) {
-                Stop-Process -Id $process.Id -Force
-                $process.WaitForExit()
-            }
             if ($null -ne $process) {
+                Stop-OwnedProcessTree -RootProcessId $process.Id
                 $process.Dispose()
             }
         }

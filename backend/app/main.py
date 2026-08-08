@@ -161,6 +161,7 @@ def create_app(
         extraction_service=extraction_service,
         interactive_workers=active_settings.queue_interactive_workers,
         knowledge_workers=active_settings.queue_knowledge_workers,
+        extraction_workers=active_settings.queue_extraction_workers,
         operations_workers=active_settings.queue_operations_workers,
         operational_issue_service=operational_issue_service,
         poll_seconds=active_settings.queue_poll_seconds,

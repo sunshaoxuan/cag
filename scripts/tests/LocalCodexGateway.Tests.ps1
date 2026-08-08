@@ -34,6 +34,8 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'AGENT_GATEWAY_PROCESS_ROLE = "worker"'
         $content | Should Match 'AGENT_GATEWAY_PROCESS_ROLE = "api"'
         $content | Should Match 'app\.worker'
+        $content | Should Match 'function Stop-OwnedProcessTree'
+        $content | Should Match 'ParentProcessId -eq \$RootProcessId'
         $content | Should Not Match 'sqlite\+pysqlite'
         $content | Should Not Match 'agent_gateway\.db'
     }

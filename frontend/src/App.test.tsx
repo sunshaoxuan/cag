@@ -167,6 +167,8 @@ describe("One Agent Gateway conversation page", () => {
             configured_workers: {
               interactive: 2,
               knowledge: 1,
+              extraction: 1,
+              operations: 1,
             },
             redis: {
               enabled: true,
@@ -185,6 +187,12 @@ describe("One Agent Gateway conversation page", () => {
                 counts: { queued: 1, leased: 1 },
                 oldest_queued_at: "2026-07-29T01:00:00Z",
                 oldest_wait_seconds: 12,
+              },
+              {
+                name: "extraction",
+                counts: { queued: 2, leased: 0 },
+                oldest_queued_at: "2026-07-29T01:00:00Z",
+                oldest_wait_seconds: 4,
               },
             ],
             workers: [
@@ -722,6 +730,7 @@ describe("One Agent Gateway conversation page", () => {
       await screen.findByRole("region", { name: "队列实时状态" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Redis 唤醒")).toBeInTheDocument();
+    expect(screen.getByText("客户知识提取等待")).toBeInTheDocument();
     expect(screen.getByText("已连接")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "交互式 OpenAPI" }),
@@ -740,7 +749,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.24.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.26.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();

@@ -108,6 +108,7 @@ def settings(tmp_path: Path, projects_dir: Path) -> Settings:
         queue_redis_enabled=False,
         queue_interactive_workers=1,
         queue_knowledge_workers=1,
+        queue_extraction_workers=1,
         queue_poll_seconds=0.1,
         queue_heartbeat_seconds=1,
         queue_shutdown_seconds=2,

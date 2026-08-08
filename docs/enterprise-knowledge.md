@@ -103,8 +103,9 @@ accepted only by isolated tests and the one-time migration reader.
 The API and durable queue worker run in separate operating-system processes.
 Knowledge saturation therefore does not occupy the API event loop. Retrieval
 events expose stage, profile, elapsed time, candidate counts, Source IDs and
-active Generation IDs. Customer ledger extraction uses a dedicated knowledge
-job, resolves one Catalog Scope from the Source and organization attributes,
+active Generation IDs. Customer ledger extraction uses a dedicated
+`extraction` queue and Worker pool, resolves one Catalog Scope from the Source
+and organization attributes,
 builds an exhaustive file manifest and validates typed candidates against
 authoritative Chunk and Document Version citations.
 

@@ -46,14 +46,19 @@ class QueueService:
 
     @staticmethod
     def add_task_item(session, task: Task) -> QueueItem:
+        is_extraction = task.trigger_source == "knowledge_extraction"
         item = QueueItem(
-            queue_name="interactive",
-            job_type="agent_task",
+            queue_name="extraction" if is_extraction else "interactive",
+            job_type=(
+                "customer_knowledge_extraction"
+                if is_extraction
+                else "agent_task"
+            ),
             task_id=task.id,
             project_id=task.project_id,
             conversation_id=task.conversation_id,
             client_id=task.client_id,
-            priority=100,
+            priority=120 if is_extraction else 100,
         )
         session.add(item)
         session.flush()

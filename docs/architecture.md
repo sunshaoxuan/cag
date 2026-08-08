@@ -230,7 +230,8 @@ tasks and knowledge ingestions. Workers claim rows with row locking and
 at startup. `QueueWorker` records expose active capacity and current ownership.
 
 The API and all queue consumers run in independent operating-system processes.
-Interactive and knowledge jobs use separate pools inside the worker process. A correlated
+Interactive tasks, knowledge ingestions, customer extractions and operational
+issues use separate pools inside the worker process. A correlated
 Conversation ordering guard prevents a later task from being claimed while an
 earlier task in the same Conversation remains queued or leased. Independent
 Conversations can run in parallel.
@@ -244,6 +245,10 @@ interactive user who owns the local Codex ChatGPT or API Key session. It starts 
 sign-in, checks the all-interface listener and `/health/live`, starts a missing
 Gateway, and restarts a recognized non-live Gateway after a bounded failure
 threshold. Unexpected port owners are logged and left untouched.
+The managed launcher recursively terminates only the worker and API process
+trees it created. This includes the base Python child behind a Windows virtual
+environment launcher, preventing an old worker from renewing leases after a
+supervisor restart.
 
 ### Project registry
 
@@ -376,7 +381,8 @@ Indexing and task feedback remain CAG-owned SSE streams. Frontends never connect
 
 ### Scoped customer ledger analysis
 
-Customer ledger extraction is a dedicated knowledge queue job. The request
+Customer ledger extraction is a dedicated `extraction` queue job with at least
+one worker that never claims full-source ingestion. The request
 contains Source and organization physical identities plus Code and names used
 only for Catalog resolution. CAG resolves one `KnowledgeAnalysisScope`, records
 its canonical prefix and creates one `KnowledgeExtractionTaskDocument` for
@@ -390,6 +396,19 @@ Document and Document Version physical IDs. Aggregation applies Template source
 priority, confidence, conflict and evidence policies. The response reports
 coverage, exclusions, unresolved fields and document failures without updating
 the calling system's ledger.
+
+The per-document deadline is passed into the Ollama HTTP client. The model
+request therefore closes at the same boundary recorded as `MODEL_TIMEOUT`,
+including runner loading and response reads. Structured generation uses an
+8192-token context so accepted evidence is not silently truncated at Ollama's
+smaller runtime default.
+
+Directory taxonomy compares NFKC-normalized segments. Governed aliases include
+the observed `2.カスタイズ情報` spelling as well as the formal
+`２．カスタマイズ情報` spelling, and both request only customization fields.
+Each document prompt includes only schemas referenced by those selected fields.
+Evidence is capped at eight ordered chunks and 4,000 characters across the
+whole document, with at most 2,000 characters from one chunk.
 
 Technical processing and business time are independent axes. A successful new
 processor creates an Active `KnowledgeProcessingVersion` and marks the prior

@@ -316,7 +316,7 @@ async def create_customer_extraction(
             knowledge_mode="required",
             harness_profile="single",
             learning_mode="off",
-            queue_name="knowledge",
+            queue_name="extraction",
             job_type="customer_knowledge_extraction",
             priority=120,
         )
@@ -341,7 +341,7 @@ async def create_customer_extraction(
     )
     session.add(extraction)
     session.commit()
-    await coordinator.notify("knowledge")
+    await coordinator.notify("extraction")
     return _task_response(extraction)
 
 
@@ -372,7 +372,7 @@ async def cancel_customer_extraction(
     if item is None or item.job_type != "customer_knowledge_extraction":
         raise _error(404, "EXTRACTION_NOT_FOUND", "Customer extraction was not found.")
     queue_status = queue_service.request_cancel(item.id)
-    await coordinator.notify("knowledge")
+    await coordinator.notify("extraction")
     return {"id": task.id, "status": queue_status}
 
 

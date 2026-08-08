@@ -29,7 +29,7 @@ limits. `fast` uses text and identifier paths. `balanced` adds pgvector Top K.
 Chunk text, document paths and Code symbol names. Every profile has an overall
 deadline and every PostgreSQL retrieval transaction has statement timeout.
 
-Customer ledger extraction is a dedicated knowledge queue job backed by the
+Customer ledger extraction is a dedicated `extraction` queue job backed by the
 existing physical Task, TaskEvent and QueueItem records. CAG owns its structured
 result schema and rejects candidates without authoritative returned Chunk
 citations. Candidate IDs are independent physical UUIDs. Extraction first

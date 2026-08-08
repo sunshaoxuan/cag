@@ -144,13 +144,16 @@ poll interval and does not lose accepted jobs.
 
 * `GET /api/v1/queue/status`
 * `GET /api/v1/queue/items?queue_name=interactive&status=queued`
+* `GET /api/v1/queue/items?queue_name=extraction&status=queued`
 * `POST /api/v1/queue/items/{item_id}/cancel`
 
-Interactive Agent tasks and knowledge ingestions use separate worker pools.
+Interactive Agent tasks, knowledge ingestions, customer extractions and
+self-operations issues use separate worker pools. A running full-source
+ingestion cannot consume customer extraction capacity.
 Tasks in the same Conversation are claimed in creation order. Tasks belonging
 to different Conversations can run concurrently.
 
-The self-operations issue center uses a third `operations` Worker pool.
+The self-operations issue center uses the `operations` Worker pool.
 
 Example:
 

@@ -2889,30 +2889,59 @@ class KnowledgeService:
         requested_fields: list[dict[str, Any]],
         results: list[SearchResult],
         schema_registry: dict[str, Any],
+        timeout_seconds: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not results:
             return [], []
-        allowed_ids = {item.id for item in results}
-        result_by_id = {item.id: item for item in results}
+        selected_results = results[: self._settings.knowledge_max_chunks]
+        allowed_ids = {item.id for item in selected_results}
+        result_by_id = {item.id: item for item in selected_results}
         safe_text_by_id = {
-            item.id: scan_knowledge_text(item.text).safe_text for item in results
+            item.id: scan_knowledge_text(item.text).safe_text
+            for item in selected_results
         }
         field_by_code = {
             str(item["code"]): item for item in requested_fields
         }
+        requested_schema_refs = {
+            str(item["schema_ref"])
+            for item in requested_fields
+            if item.get("schema_ref")
+        }
+        relevant_schema_registry = {
+            key: value
+            for key, value in schema_registry.items()
+            if key in requested_schema_refs
+        }
+        evidence: list[dict[str, Any]] = []
+        remaining_evidence_chars = 4_000
+        for item in selected_results:
+            if remaining_evidence_chars <= 0:
+                break
+            snippet = safe_text_by_id[item.id][
+                : min(2_000, remaining_evidence_chars)
+            ]
+            if not snippet:
+                continue
+            evidence.append(
+                {
+                    "chunk_id": item.id,
+                    "path": item.path,
+                    "text": snippet,
+                }
+            )
+            remaining_evidence_chars -= len(snippet)
+        if not evidence:
+            return [], []
+        allowed_ids = {str(item["chunk_id"]) for item in evidence}
+        result_by_id = {
+            item.id: item for item in selected_results if item.id in allowed_ids
+        }
         schema = customer_field_output_schema(
             requested_fields,
-            schema_registry,
+            relevant_schema_registry,
             allowed_ids,
         )
-        evidence = [
-            {
-                "chunk_id": item.id,
-                "path": item.path,
-                "text": safe_text_by_id[item.id][:4_000],
-            }
-            for item in results
-        ]
         output = await self._provider.structured_generate(
             "Extract each requested business field only from this single file. "
             "Return no field without direct evidence. Never return usernames, "
@@ -2925,9 +2954,11 @@ class KnowledgeService:
             "snake_case property names, include every required property, and "
             "return no unregistered property.\n"
             f"Requested fields: {json.dumps(requested_fields, ensure_ascii=False)}\n"
-            f"Registered object schemas: {json.dumps(schema_registry, ensure_ascii=False)}\n"
+            "Registered object schemas: "
+            f"{json.dumps(relevant_schema_registry, ensure_ascii=False)}\n"
             f"Evidence: {json.dumps(evidence, ensure_ascii=False)}",
             schema,
+            timeout_seconds=timeout_seconds,
         )
         fields: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []

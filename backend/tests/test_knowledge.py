@@ -47,7 +47,11 @@ from app.knowledge.security import (
     load_knowledge_cipher,
     scan_knowledge_text,
 )
-from app.knowledge.service import KnowledgeService, customer_field_output_schema
+from app.knowledge.service import (
+    KnowledgeService,
+    SearchResult,
+    customer_field_output_schema,
+)
 from app.main import create_app
 from app.models import (
     CodeDocumentLink,
@@ -57,6 +61,7 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeEmbeddingCache,
     KnowledgeDocumentVersion,
+    KnowledgeExtractionTask,
     KnowledgeExtractionTaskDocument,
     KnowledgeFieldConflict,
     KnowledgeIngestion,
@@ -112,7 +117,9 @@ class CompleteRerankFakeOllama(FakeOllamaClient):
         self,
         prompt: str,
         schema: dict,
+        timeout_seconds: int | None = None,
     ) -> dict:
+        del timeout_seconds
         if "候補JSON: " not in prompt:
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
@@ -156,7 +163,13 @@ class CustomerExtractionFakeOllama(FakeOllamaClient):
         super().__init__()
         self.authoritative_citation = authoritative_citation
 
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
@@ -182,7 +195,13 @@ class CustomerExtractionFakeOllama(FakeOllamaClient):
 
 
 class RemoteInformationExtractionFakeOllama(FakeOllamaClient):
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
@@ -230,7 +249,13 @@ class RemoteInformationExtractionFakeOllama(FakeOllamaClient):
 
 
 class MultipleVpnExtractionFakeOllama(FakeOllamaClient):
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -252,7 +277,13 @@ class MultipleVpnExtractionFakeOllama(FakeOllamaClient):
 
 
 class ConflictingFieldFakeOllama(FakeOllamaClient):
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -274,7 +305,13 @@ class ConflictingFieldFakeOllama(FakeOllamaClient):
 
 
 class TemporalFieldFakeOllama(FakeOllamaClient):
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -304,7 +341,13 @@ class TemporalFieldFakeOllama(FakeOllamaClient):
 
 
 class PartiallyFailingExtractionFakeOllama(FakeOllamaClient):
-    async def structured_generate(self, prompt: str, schema: dict) -> dict:
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -475,6 +518,13 @@ def test_customer_ledger_special_fields_follow_business_directory_taxonomy() -> 
     assert [
         item["code"]
         for item in requested_fields_for_document(
+            "任意顧客/2.カスタイズ情報/TABLE/顧客.sql",
+            fields,
+        )
+    ] == ["customizations"]
+    assert [
+        item["code"]
+        for item in requested_fields_for_document(
             "別組織/６．リモート接続情報/VPN手順.pdf",
             fields,
         )
@@ -486,6 +536,62 @@ def test_customer_ledger_special_fields_follow_business_directory_taxonomy() -> 
             fields,
         )
     ] == ["organization_name"]
+
+
+@pytest.mark.anyio
+async def test_customer_document_prompt_is_schema_and_evidence_bounded(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    provider = FakeOllamaClient()
+    service._provider = provider
+    results = [
+        SearchResult(
+            id=str(uuid.uuid4()),
+            source_entry_id=str(uuid.uuid4()),
+            path=f"2.カスタイズ情報/document-{index}.sql",
+            text="X" * 5_000,
+            score=1.0,
+            scope="tenant",
+            source_id=str(uuid.uuid4()),
+            source_name="bounded prompt source",
+            source_type="local_directory",
+            source_commit=None,
+            resource_uri=f"knowledge://document-{index}",
+            generation_id=None,
+            prompt_injection_detected=False,
+        )
+        for index in range(12)
+    ]
+
+    await service.extract_customer_fields(
+        requested_fields=[
+            {
+                "code": "customizations",
+                "type": "object_list",
+                "required": False,
+                "schema_ref": "CUSTOMER_CUSTOMIZATION_V1",
+            }
+        ],
+        results=results,
+        schema_registry=customer_ledger_schema_registry(),
+        timeout_seconds=15,
+    )
+
+    prompt = provider.generated[-1]
+    evidence = json.loads(prompt.split("Evidence: ", 1)[1])
+    registered = json.loads(
+        prompt.split("Registered object schemas: ", 1)[1].split(
+            "\nEvidence: ",
+            1,
+        )[0]
+    )
+    assert len(evidence) <= active_settings.knowledge_max_chunks
+    assert sum(len(item["text"]) for item in evidence) <= 4_000
+    assert set(registered) == {"CUSTOMER_CUSTOMIZATION_V1"}
 
 
 def test_scoped_manifest_uses_ingestion_support_for_sql() -> None:
@@ -1160,6 +1266,21 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
             ),
         )
         assert created.status_code == 202
+        extraction_items = client.get(
+            "/api/v1/queue/items",
+            params={"queue_name": "extraction"},
+        ).json()
+        with app.state.database.session_factory() as session:
+            created_extraction = session.get(
+                KnowledgeExtractionTask,
+                created.json()["id"],
+            )
+            assert created_extraction is not None
+            created_generic_task_id = created_extraction.generic_task_id
+        assert any(
+            item["task_id"] == created_generic_task_id
+            for item in extraction_items
+        )
         report = wait_for_extraction(client, created.json()["id"])
         assert report["status"] == "review_required"
         assert report["schema_version"] == 1
@@ -1607,7 +1728,6 @@ def test_scoped_extraction_selects_business_version_at_analysis_time(
         )
         assert created.status_code == 202
         report = wait_for_extraction(client, created.json()["id"])
-
     assert report["status"] == "review_required"
     assert len(report["field_candidates"]) == 1
     selected = report["field_candidates"][0]
@@ -1669,6 +1789,41 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
         )
         assert created.status_code == 202
         report = wait_for_extraction(client, created.json()["id"])
+        with app.state.database.session_factory() as session:
+            timed_out = session.scalar(
+                select(KnowledgeExtractionTaskDocument).where(
+                    KnowledgeExtractionTaskDocument.extraction_task_id
+                    == created.json()["id"],
+                    KnowledgeExtractionTaskDocument.failure_code
+                    == "MODEL_TIMEOUT",
+                )
+            )
+            assert timed_out is not None
+            timed_out_id = timed_out.id
+        service._provider = ConflictingFieldFakeOllama()
+        asyncio.run(
+            app.state.extraction_service._extract_document(
+                created.json()["id"],
+                timed_out_id,
+                [
+                    {
+                        "code": "organization_name",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+                customer_ledger_schema_registry(),
+                1,
+                3,
+            )
+        )
+        with app.state.database.session_factory() as session:
+            recovered = session.get(
+                KnowledgeExtractionTaskDocument,
+                timed_out_id,
+            )
+            assert recovered.extraction_status == "analyzed"
+            assert recovered.failure_code is None
 
     assert report["status"] == "review_required"
     assert report["error_code"] == "EXTRACTION_PARTIAL"
@@ -1953,6 +2108,7 @@ def test_failed_embedding_refresh_resumes_from_durable_checkpoints(
         settings,
         project_repository.parent,
     )
+    active_settings.queue_enabled = False
     app = create_app(settings=active_settings)
     service = install_fake_knowledge(app, active_settings)
     provider = FailingSecondBatchOllama()
@@ -2791,6 +2947,45 @@ def test_interactive_worker_remains_available_during_knowledge_ingestion(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
         assert knowledge_started.wait(2)
+        extraction = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("extraction-during-knowledge"),
+            json=scoped_extraction_request(
+                source,
+                code="0001",
+                name="Queue isolation customer",
+                fields=[
+                    {
+                        "code": "contract_code",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
+        )
+        assert extraction.status_code == 202
+        extraction_report = wait_for_extraction(
+            client,
+            extraction.json()["id"],
+        )
+        extraction_items = client.get(
+            "/api/v1/queue/items",
+            params={"queue_name": "extraction"},
+        ).json()
+        with app.state.database.session_factory() as session:
+            stored_extraction = session.get(
+                KnowledgeExtractionTask,
+                extraction.json()["id"],
+            )
+            assert stored_extraction is not None
+            generic_task_id = stored_extraction.generic_task_id
+        extraction_item = next(
+            item
+            for item in extraction_items
+            if item["task_id"] == generic_task_id
+        )
+        assert extraction_report["status"] == "failed"
+        assert extraction_item["attempt_count"] == 1
         created = client.post(
             "/api/v1/tasks",
             headers={
@@ -2811,6 +3006,7 @@ def test_interactive_worker_remains_available_during_knowledge_ingestion(
         assert queue_status.json()["configured_workers"] == {
             "interactive": 1,
             "knowledge": 1,
+            "extraction": 1,
             "operations": 1,
         }
         knowledge_release.set()
@@ -3502,9 +3698,11 @@ class _Response:
 
 class _AsyncClient:
     responses: list[_Response] = []
+    timeouts: list[object] = []
+    requests: list[dict] = []
 
-    def __init__(self, **_: object) -> None:
-        pass
+    def __init__(self, **kwargs: object) -> None:
+        self.timeouts.append(kwargs.get("timeout"))
 
     async def __aenter__(self):
         return self
@@ -3516,6 +3714,7 @@ class _AsyncClient:
         return self.responses.pop(0)
 
     async def post(self, _: str, json: dict) -> _Response:
+        self.requests.append(json)
         return self.responses.pop(0)
 
 
@@ -3540,8 +3739,12 @@ async def test_real_ollama_adapter_contract(monkeypatch) -> None:
 
     _AsyncClient.responses = [_Response(200, {"response": '{"value": 1}'})]
     assert await client.structured_generate(
-        "prompt", {"type": "object"}
+        "prompt",
+        {"type": "object"},
+        timeout_seconds=3,
     ) == {"value": 1}
+    assert _AsyncClient.timeouts[-1] == 3
+    assert _AsyncClient.requests[-1]["options"]["num_ctx"] == 8_192
 
     _AsyncClient.responses = [_Response(500, {})]
     with pytest.raises(OllamaError):

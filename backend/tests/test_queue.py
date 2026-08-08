@@ -410,7 +410,51 @@ def test_bootstrap_recreates_missing_task_queue_item(
     assert result["tasks_enqueued"] == 1
     assert rebuilt is not None
     assert rebuilt.status == "queued"
+    assert rebuilt.queue_name == "interactive"
+    assert rebuilt.job_type == "agent_task"
     assert "task.requeued" in events
+
+
+def test_bootstrap_restores_extraction_to_dedicated_queue(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app):
+        with app.state.database.session_factory() as session:
+            task = app.state.task_service.create_task(
+                session,
+                project_reference="test-project",
+                prompt="restore extraction queue routing",
+                conversation_id=None,
+                runtime_profile="general-engineering",
+                client_request_id="missing-extraction-queue-item",
+                request_hash="missing-extraction-queue-item",
+                trigger_source="knowledge_extraction",
+                client_id="oneops-system",
+                knowledge_mode="required",
+                harness_profile="single",
+                learning_mode="off",
+                queue_name="extraction",
+                job_type="customer_knowledge_extraction",
+                priority=120,
+            )
+            item = session.query(QueueItem).filter_by(task_id=task.id).one()
+            session.delete(item)
+            stored = session.get(Task, task.id)
+            stored.status = "running"
+            session.commit()
+
+        result = app.state.queue_service.bootstrap()
+        rebuilt = app.state.queue_service.get_item_for_task(task.id)
+
+    assert result["tasks_enqueued"] == 1
+    assert rebuilt is not None
+    assert rebuilt.status == "queued"
+    assert rebuilt.queue_name == "extraction"
+    assert rebuilt.job_type == "customer_knowledge_extraction"
+    assert rebuilt.priority == 120
 
 
 @pytest.mark.anyio

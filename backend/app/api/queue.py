@@ -55,5 +55,6 @@ async def cancel_queue_item(
         ) from error
     await coordinator.notify("interactive")
     await coordinator.notify("knowledge")
+    await coordinator.notify("extraction")
     await coordinator.notify("operations")
     return {"id": item_id, "status": queue_status_value}

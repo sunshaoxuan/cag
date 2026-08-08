@@ -28,6 +28,7 @@ class QueueCoordinator:
         extraction_service: CustomerKnowledgeExtractionService,
         interactive_workers: int,
         knowledge_workers: int,
+        extraction_workers: int,
         operations_workers: int,
         operational_issue_service: OperationalIssueService,
         poll_seconds: float,
@@ -43,6 +44,7 @@ class QueueCoordinator:
         self._worker_counts = {
             "interactive": interactive_workers,
             "knowledge": knowledge_workers,
+            "extraction": extraction_workers,
             "operations": operations_workers,
         }
         self._poll_seconds = poll_seconds

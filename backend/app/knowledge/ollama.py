@@ -17,6 +17,7 @@ class OllamaProvider(Protocol):
         self,
         prompt: str,
         schema: dict[str, Any],
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -84,8 +85,10 @@ class OllamaClient:
         self,
         prompt: str,
         schema: dict[str, Any],
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        request_timeout = timeout_seconds or self._timeout
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
             response = await client.post(
                 f"{self._base_url}/api/generate",
                 json={
@@ -94,7 +97,10 @@ class OllamaClient:
                     "stream": False,
                     "think": False,
                     "format": schema,
-                    "options": {"temperature": 0},
+                    "options": {
+                        "temperature": 0,
+                        "num_ctx": 8_192,
+                    },
                     "keep_alive": "5m",
                 },
             )
@@ -144,7 +150,9 @@ class FakeOllamaClient:
         self,
         prompt: str,
         schema: dict[str, Any],
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
+        del timeout_seconds
         self.generated.append(prompt)
         if "memories" in schema.get("properties", {}):
             return {

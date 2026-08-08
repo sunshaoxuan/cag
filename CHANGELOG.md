@@ -2,6 +2,28 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.26.0
+
+发布日期：2026-08-08
+
+### Changed
+
+* 顧客台帳 Extraction を全量 Knowledge Ingestion から独立した `extraction` Queue と専用 Worker Pool へ分離する。長時間の Embedding が実行中でも OneOps の顧客情報要求を直ちに Claim できる。
+* Queue Bootstrap は `knowledge_extraction` Task の欠落 QueueItem を `extraction` Queue、優先度 120、`customer_knowledge_extraction` Job として復元する。
+* Queue Status と API 文書画面に顧客知識抽出の待機数、実行数及び専用 Worker 数を表示する。
+* 顧客単位の Document Timeout を Ollama HTTP Request へ直接適用し、構造化抽出 Context を 8192 Token に固定する。
+* Directory Taxonomy を NFKC 正規化し、実データの `2.カスタイズ情報` を Customize 専用 Field 契約へ分類する。
+* Document Prompt は要求 Field が参照する Object Schema だけを含め、Evidence を最大 8 Chunk、合計 4,000 文字へ制限する。
+
+### Fixed
+
+* 742,066 Chunk の全量 Embedding が唯一の Knowledge Worker を占有し、高優先度の OneOps 顧客知識抽出が長時間 `queued` のままになる資源飢餓を解消する。
+* 外側の asyncio Timeout 後も Ollama HTTP Cleanup が Runner 応答まで残り、CUDA Runner 障害時に Extraction が `running` のまま進捗しない問題を解消する。
+* ASCII 番号又は既存の短縮表記を含む Customize Directory が全台帳 Field を要求し、SQL 単位の Prompt を不要に拡大する問題を解消する。
+* 全 Schema と Chunk ごとの 4,000 文字を連結して 16,000 Token を超え、Ollama が入力を切り捨てて連続 Timeout する問題を解消する。
+* Retry 成功後の Document から旧 `MODEL_TIMEOUT` Failure Code を消去し、分析済み状態と失敗状態の物理矛盾を解消する。
+* Windows venv Launcher の終了時に所有する子 Process Tree を再帰的に停止し、Supervisor 再起動後に旧 Worker が Lease を更新し続ける問題を解消する。
+
 ## 0.25.0
 
 发布日期：2026-08-07

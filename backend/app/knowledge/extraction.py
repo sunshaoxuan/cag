@@ -41,8 +41,13 @@ from app.services.task_service import TaskService
 
 
 TERMINAL_EXTRACTION_STATUSES = {"review_required", "completed", "failed"}
-CUSTOMIZATION_DIRECTORY = "２．カスタマイズ情報"
-REMOTE_INFORMATION_DIRECTORY = "６．リモート接続情報"
+CUSTOMIZATION_DIRECTORIES = {
+    "2.カスタマイズ情報",
+    "2.カスタイズ情報",
+}
+REMOTE_INFORMATION_DIRECTORIES = {
+    "6.リモート接続情報",
+}
 SPECIAL_LEDGER_FIELDS = {"customizations", "vpns", "environments"}
 
 
@@ -50,10 +55,13 @@ def requested_fields_for_document(
     canonical_path: str,
     requested_fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    segments = set(canonical_path.replace("\\", "/").split("/"))
-    if CUSTOMIZATION_DIRECTORY in segments:
+    segments = {
+        re.sub(r"\s+", "", _normalized(segment))
+        for segment in canonical_path.replace("\\", "/").split("/")
+    }
+    if segments & CUSTOMIZATION_DIRECTORIES:
         allowed = {"customizations"}
-    elif REMOTE_INFORMATION_DIRECTORY in segments:
+    elif segments & REMOTE_INFORMATION_DIRECTORIES:
         allowed = {"vpns", "environments"}
     else:
         allowed = {str(item["code"]) for item in requested_fields} - (
@@ -583,6 +591,10 @@ class CustomerKnowledgeExtractionService:
                             requested_fields=document_requested_fields,
                             results=results,
                             schema_registry=schema_registry,
+                            timeout_seconds=(
+                                self._settings
+                                .knowledge_customer_document_timeout_seconds
+                            ),
                         )
                     )
             else:
@@ -691,6 +703,7 @@ class CustomerKnowledgeExtractionService:
                     )
                 )
             row.extraction_status = "analyzed"
+            row.failure_code = None
             row.checkpoint = {
                 "batch": 1,
                 "status": "completed",

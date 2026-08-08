@@ -282,6 +282,13 @@ export default function ApiDocsPage() {
             </small>
           </article>
           <article>
+            <span>客户知识提取等待</span>
+            <strong>{countFor(queueStatus, "extraction", "queued")}</strong>
+            <small>
+              {queueStatus?.configured_workers.extraction ?? 0} 个工作器
+            </small>
+          </article>
+          <article>
             <span>问题处理等待</span>
             <strong>{countFor(queueStatus, "operations", "queued")}</strong>
             <small>
@@ -293,6 +300,7 @@ export default function ApiDocsPage() {
             <strong>
               {countFor(queueStatus, "interactive", "leased") +
                 countFor(queueStatus, "knowledge", "leased") +
+                countFor(queueStatus, "extraction", "leased") +
                 countFor(queueStatus, "operations", "leased")}
             </strong>
             <small>{queueStatus?.workers.length ?? 0} 个活跃工作器</small>

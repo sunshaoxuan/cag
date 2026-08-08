@@ -36,7 +36,7 @@ Legend:
 | Global API action audit stream | Implemented | Global TaskEvent sequence, `/api/v1/audit/events`, resume and filter tests |
 | PostgreSQL plus Redis durable gateway queue | Implemented | QueueItem, QueueWorker, `FOR UPDATE SKIP LOCKED`, Redis wake, lease recovery and queue API tests |
 | API and queue worker process isolation | Implemented | `app.worker`, host dual-process launcher, API-only Redis notifier lifecycle test and ADR 0025 |
-| Separate interactive and knowledge worker pools | Implemented | Worker-process QueueCoordinator pools, queue status API, recovery tests and interactive completion during delayed knowledge ingestion |
+| Separate interactive, ingestion, customer extraction and operations worker pools | Implemented | Worker-process QueueCoordinator pools, queue status API, extraction bootstrap recovery and interactive plus extraction completion during delayed knowledge ingestion |
 | Durable self-operations issue queue | Implemented | `OperationalIssue`, `QueueItem.issue_id`, operations Worker and queue recovery tests |
 | Universal operational failure intake | Implemented | Task, ingestion, API, supervisor spool and public intake API |
 | AI boundary, planning and independent Review | Implemented | read-only triage and Review runtime phases, sequence-addressed fresh workspaces, versioned artifacts and tests |
@@ -88,7 +88,7 @@ Legend:
 | Code and documentation linkage | Implemented | Deterministic path and symbol evidence, detail API and retrieval graph expansion |
 | Multilingual semantic and exact hybrid retrieval | Implemented | Qwen3 path and content embeddings, Japanese, Chinese and English query instruction, exact path and lexical channels, RRF and optional local reranking |
 | Bounded indexed knowledge retrieval | Implemented | pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
-| Scoped customer ledger knowledge extraction | Implemented | request schema v1 with analysis Template v2, Catalog Scope resolution, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
+| Scoped customer ledger knowledge extraction | Implemented | request schema v1 with analysis Template v2, dedicated extraction queue, HTTP-enforced per-file model deadline, Catalog Scope resolution, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
 | Customer customization and remote ledger classification | Implemented | customization schema, field-specific model output schema, shared ingestion and manifest support policy, SQL and XLSM processing, VPN and Environment field contracts, physical-record apply tests |
 | Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |
 | Independent processing and business versions | Implemented | Active and Superseded Processing Versions, failed refresh protection, immutable Knowledge Blocks, Applicability Revisions and `analysis_context.as_of` selection |
