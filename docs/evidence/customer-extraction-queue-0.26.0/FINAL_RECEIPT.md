@@ -17,3 +17,9 @@ Customer-facing ledger extraction now has an independent durable queue and worke
 ## Rollback
 
 Restore the previous Git revision and VERSION 0.25.0. Stop the scheduled Gateway, move queued extraction items to `knowledge`, restart the prior runtime and verify worker leases. Do not delete completed extraction results, candidates or citations.
+
+## Release provenance
+
+Implementation commit: `5f87e8c` (`fix: isolate customer extraction queue`).
+The release tag is `v0.26.0`; remote equality is checked after the evidence
+receipt commit and tag are pushed.

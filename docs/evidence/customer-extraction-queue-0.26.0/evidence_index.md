@@ -13,3 +13,4 @@
 | OneOps browser verification is blocked | `oneops-iab-domain-auth-pending.png`, Edge DOM `ERR_BLOCKED_BY_CLIENT` | High | Authenticated OneOps screenshot missing |
 | Final runtime has one current worker set | Queue API returned five current worker registrations, all owned by PID 13800; process inspection found one worker child and one API listener | High | Historical worker rows remain as audit records with stopped heartbeats |
 | Target remains terminal after restart | QueueItem `d567e012-4610-446f-adc1-b0a052aea091` is `completed` in `extraction`, attempt count 5, with no lease owner or lease expiry | High | Current production PostgreSQL query |
+| Versioned implementation is committed | Commit `5f87e8c` contains the 0.26.0 code, tests, documentation and evidence | High | Remote equality checked after push |
