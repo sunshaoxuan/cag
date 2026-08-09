@@ -68,6 +68,7 @@ import "./styles.css";
 const EVENT_TYPES = [
   "task.created",
   "task.started",
+  "task.progress",
   "workspace.preparing",
   "workspace.ready",
   "harness.started",
@@ -128,6 +129,7 @@ const EVENT_TYPES = [
 const EVENT_LABELS: Record<string, string> = {
   "task.created": "新一轮已创建",
   "task.started": "本轮已启动",
+  "task.progress": "任务进度已更新",
   "workspace.preparing": "正在准备独立工作区",
   "workspace.ready": "工作区已就绪",
   "harness.started": "Harness 已启动",
@@ -577,6 +579,7 @@ export default function App() {
   const knowledgeIngestionIdRef = useRef<string | null>(null);
   const knowledgeLastSequenceRef = useRef(0);
   const auditEventIdsRef = useRef<Set<string>>(new Set());
+  const auditRefreshPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -707,10 +710,20 @@ export default function App() {
     refreshGovernance();
   }, []);
 
-  function refreshAudit() {
-    listAuditTasks()
+  function refreshAudit(): Promise<void> {
+    if (auditRefreshPromiseRef.current) {
+      return auditRefreshPromiseRef.current;
+    }
+    const request = listAuditTasks()
       .then(setAuditTasks)
-      .catch((reason: Error) => setError(reason.message));
+      .catch((reason: Error) => setError(reason.message))
+      .finally(() => {
+        if (auditRefreshPromiseRef.current === request) {
+          auditRefreshPromiseRef.current = null;
+        }
+      });
+    auditRefreshPromiseRef.current = request;
+    return request;
   }
 
   useEffect(() => {

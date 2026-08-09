@@ -390,7 +390,14 @@ every Catalog entry below that prefix. Ready documents reuse their active
 versions. Missing, metadata-only, changed or failed documents remain explicit
 Manifest outcomes and can be prepared by a separate Scope Ingestion.
 
-Extraction runs one file at a time. Every accepted field has a physical
+Extraction runs one durable document work item at a time. Each manifest row
+commits its own terminal checkpoint and publishes a `task.progress` event to
+the Generic Task audit stream. The parent Extraction has no fixed wall-clock
+deadline. QueueItem lease renewal proves worker liveness, and the bounded
+per-document HTTP deadline detects a stalled model call. A worker loss leaves
+completed rows intact and lease recovery continues from the first unfinished
+row. Aggregation starts only after every manifest row reaches a terminal
+state. Every accepted field has a physical
 candidate ID, a Knowledge Block Version ID and evidence linked to Chunk,
 Document and Document Version physical IDs. Aggregation applies Template source
 priority, confidence, conflict and evidence policies. The response reports

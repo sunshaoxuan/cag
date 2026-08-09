@@ -205,7 +205,6 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_KNOWLEDGE_FAST_TIMEOUT_SECONDS` | Overall indexed fast-search deadline |
 | `AGENT_GATEWAY_KNOWLEDGE_BALANCED_TIMEOUT_SECONDS` | Overall balanced-search deadline |
 | `AGENT_GATEWAY_KNOWLEDGE_DEEP_TIMEOUT_SECONDS` | Overall deep-search deadline |
-| `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_EXTRACTION_TIMEOUT_SECONDS` | Overall scoped customer extraction deadline, default 900 seconds |
 | `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_DOCUMENT_TIMEOUT_SECONDS` | Per document customer extraction deadline, default 15 seconds |
 | `AGENT_GATEWAY_KNOWLEDGE_STATEMENT_TIMEOUT_MS` | PostgreSQL timeout for each retrieval transaction |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 
 from app.config import Settings
+from app.api.knowledge_extractions import _task_response
 from app.knowledge.ollama import FakeOllamaClient, OllamaClient, OllamaError
 from app.knowledge.ocr import OcrResult
 from app.knowledge.provenance_backfill import backfill_raw_content_hashes
@@ -69,6 +70,7 @@ from app.models import (
     KnowledgeIngestionRejection,
     KnowledgeSource,
     KnowledgeSourceEntry,
+    TaskEvent,
 )
 from tests.waiters import wait_for_ingestion, wait_for_task
 from app.models.base import utc_now
@@ -1751,7 +1753,18 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
     (customer / "timeout.txt").write_text("筑波大学 timeout", encoding="utf-8")
     (customer / "broken.txt").write_text("筑波大学 broken", encoding="utf-8")
     (customer / "ready.txt").write_text("筑波大学", encoding="utf-8")
+    (customer / "metadata.txt").write_text("筑波大学 metadata", encoding="utf-8")
+    (customer / "unsupported.bin").write_bytes(b"\x00")
     active_settings = knowledge_settings(settings, project_repository.parent)
+    assert not hasattr(
+        active_settings,
+        "knowledge_customer_extraction_timeout_seconds",
+    )
+    object.__setattr__(
+        active_settings,
+        "knowledge_customer_extraction_timeout_seconds",
+        0.000001,
+    )
     app = create_app(settings=active_settings)
     service = install_fake_knowledge(app, active_settings)
     service._provider = PartiallyFailingExtractionFakeOllama()
@@ -1771,6 +1784,16 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
         assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        with app.state.database.session_factory() as session:
+            metadata_entry = session.scalar(
+                select(KnowledgeSourceEntry).where(
+                    KnowledgeSourceEntry.relative_path.endswith("metadata.txt")
+                )
+            )
+            assert metadata_entry is not None
+            metadata_entry.processing_mode = "metadata_only"
+            metadata_entry.processing_status = "metadata_only"
+            session.commit()
         created = client.post(
             "/api/v1/knowledge/extractions/customer-ledger",
             headers=extraction_headers("partial-timeout-0408"),
@@ -1790,6 +1813,50 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
         assert created.status_code == 202
         report = wait_for_extraction(client, created.json()["id"])
         with app.state.database.session_factory() as session:
+            extraction = session.get(
+                KnowledgeExtractionTask,
+                created.json()["id"],
+            )
+            assert extraction is not None
+            public_events = list(
+                session.scalars(
+                    select(TaskEvent)
+                    .where(TaskEvent.task_id == extraction.generic_task_id)
+                    .order_by(TaskEvent.sequence)
+                )
+            )
+            document_reports = [
+                event
+                for event in public_events
+                if str(event.data.get("extraction_event_type", "")).startswith(
+                    "document."
+                )
+            ]
+            assert [event.type for event in public_events].count("task.started") == 1
+            assert [event.type for event in public_events].count("task.completed") == 1
+            assert len(document_reports) == 5
+            assert {
+                event.data["extraction_event_type"] for event in document_reports
+            } == {
+                "document.extracted",
+                "document.extraction_failed",
+                "document.excluded",
+            }
+            assert all(
+                event.data["processed"] <= event.data["total"]
+                for event in document_reports
+            )
+            extraction.result_json = None
+            extraction.status = "extracting"
+            session.flush()
+            progress = _task_response(session, extraction)["progress"]
+            assert progress["total_documents"] == 5
+            assert progress["terminal_documents"] == 5
+            assert progress["analyzed_documents"] == 1
+            assert progress["failed_documents"] == 3
+            assert progress["excluded_documents"] == 1
+            assert progress["progress_rate"] == 1.0
+            assert progress["last_progress_at"] is not None
             timed_out = session.scalar(
                 select(KnowledgeExtractionTaskDocument).where(
                     KnowledgeExtractionTaskDocument.extraction_task_id
@@ -1828,16 +1895,17 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
     assert report["status"] == "review_required"
     assert report["error_code"] == "EXTRACTION_PARTIAL"
     assert report["coverage"] == {
-        "total_documents": 3,
+        "total_documents": 5,
         "ready_documents": 3,
         "analyzed_documents": 1,
-        "failed_documents": 2,
-        "excluded_documents": 0,
-        "coverage_rate": 0.333333,
+        "failed_documents": 3,
+        "excluded_documents": 1,
+        "coverage_rate": 0.25,
     }
     assert report["field_candidates"][0]["value"] == "筑波大学"
     assert {item["reason_code"] for item in report["document_failures"]} == {
         "EXTRACTION_FAILED",
+        "METADATA_ONLY",
         "MODEL_TIMEOUT",
     }
 

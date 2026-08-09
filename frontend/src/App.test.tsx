@@ -749,7 +749,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.26.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.27.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -990,6 +990,12 @@ describe("One Agent Gateway conversation page", () => {
     fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
     await screen.findByRole("heading", { name: "全局审计事件流" });
 
+    const auditTaskRequestCount = () =>
+      vi.mocked(fetch).mock.calls.filter(([input]) =>
+        String(input).endsWith("/api/v1/audit/tasks?limit=100"),
+      ).length;
+    await waitFor(() => expect(auditTaskRequestCount()).toBe(1));
+
     const auditSource = MockEventSource.instances.find((source) =>
       source.url.includes("/api/v1/audit/events"),
     );
@@ -1011,19 +1017,41 @@ describe("One Agent Gateway conversation page", () => {
         project_code: project.code,
         data: {},
       });
+      auditSource?.emit("audit.event", {
+        event_id: "audit-event-2",
+        trace_id: "22222222-2222-4222-8222-222222222222",
+        task_id: "22222222-2222-4222-8222-222222222222",
+        sequence: 43,
+        task_sequence: 4,
+        conversation_id: null,
+        type: "task.progress",
+        timestamp: "2026-07-27T00:00:04Z",
+        trigger_source: "external_api",
+        client_id: "erp-integration",
+        client_request_id: "erp-request-001",
+        project_id: project.id,
+        project_code: project.code,
+        data: {
+          extraction_event_type: "document.extracted",
+          processed: 80,
+          total: 452,
+        },
+      });
     });
 
     expect(
       await screen.findAllByText("正在准备独立工作区"),
     ).toHaveLength(2);
-    expect(screen.getByText(/erp-integration/)).toBeInTheDocument();
+    expect(screen.getAllByText(/erp-integration/)).toHaveLength(2);
     expect(
       screen.getAllByText(
         (_, element) =>
           element?.textContent ===
-          "后端已反馈 1 条 · 当前显示 1 条",
+          "后端已反馈 2 条 · 当前显示 2 条",
       ),
     ).toHaveLength(1);
+    expect(screen.getAllByText("任务进度已更新")).toHaveLength(2);
+    await waitFor(() => expect(auditTaskRequestCount()).toBe(2));
   });
 
   it("creates a CAG conversation and opens one persistent SSE stream", async () => {

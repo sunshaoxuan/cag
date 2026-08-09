@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.24.0`
+Current version: `0.27.0`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.24.0"
+    "version": "0.27.0"
 }
 ```
 
@@ -135,6 +135,31 @@ independent from business applicability. Scope ingestion requires
 `X-CAG-Client-Role: system-admin` and its own idempotency key. It creates a
 repair Ingestion only for the resolved Scope. Reanalysis uses a new Extraction
 Task and reuses ready versions.
+
+An active Extraction has no fixed wall-clock deadline. Its worker keeps the
+QueueItem lease alive, while every document model request retains its own
+bounded deadline. Every document writes one durable terminal checkpoint and a
+public `task.progress` event. Worker loss is recovered by the queue lease, and
+the parent Extraction aggregates only after every manifest row is terminal.
+
+The running response contains:
+
+```json
+{
+  "status": "extracting",
+  "progress": {
+    "total_documents": 452,
+    "terminal_documents": 304,
+    "analyzed_documents": 80,
+    "failed_documents": 184,
+    "excluded_documents": 39,
+    "extracting_documents": 1,
+    "pending_documents": 148,
+    "progress_rate": 0.672566,
+    "last_progress_at": "2026-08-09T14:05:43.793419Z"
+  }
+}
+```
 
 ## Durable queue
 

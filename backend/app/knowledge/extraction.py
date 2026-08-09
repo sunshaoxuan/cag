@@ -177,18 +177,9 @@ class CustomerKnowledgeExtractionService:
             session.commit()
 
         try:
-            async with asyncio.timeout(
-                self._settings.knowledge_customer_extraction_timeout_seconds
-            ):
-                await self._run(extraction.id)
+            await self._run(extraction.id)
         except ScopedExtractionError as error:
             self._fail(extraction.id, generic_task_id, error)
-        except TimeoutError:
-            self._fail(
-                extraction.id,
-                generic_task_id,
-                ScopedExtractionError("EXTRACTION_FAILED", "overall_deadline"),
-            )
         except Exception:
             self._fail(
                 extraction.id,
@@ -555,13 +546,56 @@ class CustomerKnowledgeExtractionService:
             )
             if task_document is None:
                 return
-            if task_document.extraction_status in {"excluded", "analyzed"}:
+            if task_document.extraction_status == "analyzed":
+                return
+            if task_document.extraction_status == "excluded":
+                if task_document.checkpoint.get("status") == "excluded":
+                    return
+                task = session.get(KnowledgeExtractionTask, extraction_id)
+                task_document.checkpoint = {
+                    "batch": 0,
+                    "status": "excluded",
+                    "reason_code": task_document.excluded_reason,
+                }
+                if task is not None:
+                    self._append_event(
+                        session,
+                        task,
+                        "document.excluded",
+                        {
+                            "task_document_id": task_document.id,
+                            "processed": ordinal,
+                            "total": total,
+                            "reason_code": task_document.excluded_reason,
+                        },
+                    )
+                session.commit()
                 return
             if task_document.manifest_status != "ready" or not task_document.document_id:
+                if task_document.checkpoint.get("status") == "failed":
+                    return
+                task = session.get(KnowledgeExtractionTask, extraction_id)
                 task_document.extraction_status = "failed"
                 task_document.failure_code = self._failure_for_manifest(
                     task_document.manifest_status
                 )
+                task_document.checkpoint = {
+                    "batch": 0,
+                    "status": "failed",
+                    "failure_code": task_document.failure_code,
+                }
+                if task is not None:
+                    self._append_event(
+                        session,
+                        task,
+                        "document.extraction_failed",
+                        {
+                            "task_document_id": task_document.id,
+                            "processed": ordinal,
+                            "total": total,
+                            "failure_code": task_document.failure_code,
+                        },
+                    )
                 session.commit()
                 return
             task_document.extraction_status = "extracting"
@@ -571,10 +605,28 @@ class CustomerKnowledgeExtractionService:
         results = self._knowledge_service.document_results(task_document.document_id)
         if not results:
             with self._database.session_factory() as session:
+                task = session.get(KnowledgeExtractionTask, extraction_id)
                 row = session.get(KnowledgeExtractionTaskDocument, task_document_id)
                 if row:
                     row.extraction_status = "failed"
                     row.failure_code = "EMPTY_TEXT"
+                    row.checkpoint = {
+                        "batch": 0,
+                        "status": "failed",
+                        "failure_code": "EMPTY_TEXT",
+                    }
+                    if task is not None:
+                        self._append_event(
+                            session,
+                            task,
+                            "document.extraction_failed",
+                            {
+                                "task_document_id": row.id,
+                                "processed": ordinal,
+                                "total": total,
+                                "failure_code": "EMPTY_TEXT",
+                            },
+                        )
                     session.commit()
             return
         document_requested_fields = requested_fields_for_document(
@@ -1066,6 +1118,7 @@ class CustomerKnowledgeExtractionService:
         event_type: str,
         data: dict[str, Any],
     ) -> None:
+        task.updated_at = utc_now()
         sequence = session.scalar(
             select(func.max(KnowledgeExtractionTaskEvent.sequence)).where(
                 KnowledgeExtractionTaskEvent.extraction_task_id == task.id
@@ -1080,6 +1133,24 @@ class CustomerKnowledgeExtractionService:
                 data=data,
             )
         )
+        generic = session.get(Task, task.generic_task_id)
+        if generic is not None:
+            public_type = {
+                "scope.resolution.started": "task.started",
+                "aggregation.completed": "task.completed",
+                "extraction.failed": "task.failed",
+            }.get(event_type, "task.progress")
+            self._task_service.append_event(
+                session,
+                task=generic,
+                event_type=public_type,
+                data={
+                    "extraction_task_id": task.id,
+                    "extraction_event_type": event_type,
+                    "stage": task.stage,
+                    **data,
+                },
+            )
 
     def _fail(
         self,

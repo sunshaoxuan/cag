@@ -2,6 +2,24 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.27.0
+
+发布日期：2026-08-10
+
+### Changed
+
+* 顧客台帳 Extraction の生存判定を固定した全体実行時間から Worker Lease、Document Checkpoint 及び Document 単位の Model Request Deadline へ変更する。
+* 各 `KnowledgeExtractionTaskDocument` の成功、失敗又は除外を Generic Task の `task.progress` Event として公開し、外部 API 監視から File 単位の進捗を確認できるようにする。
+* 実行中 Extraction API に全 Document 数、終端数、分析済み数、失敗数、除外数、実行中数、待機数、進捗率及び最終進捗時刻を追加する。
+* API 監視画面で `task.progress` を「任务进度已更新」として表示する。
+
+### Fixed
+
+* Document が継続的に完了し Worker Heartbeat も正常な Exhaustive Extraction を 900 秒経過時点で `overall_deadline` として失敗させる問題を解消する。
+* 内部 Extraction Event が Generic Task Event へ接続されず、外部 API 監視の動作数と最終 Sequence が Task 作成後に更新されない問題を解消する。
+* Metadata-only、未取込、空本文及び非対応拡張子の Document が個別の終端 Event を返さず、親 Task だけが最後に一括報告する問題を解消する。
+* 大量の Audit SSE 履歴を初期 Task 一覧より先に再生した場合、未知 Task の Event ごとに一覧を再取得する問題を Single-flight 制御で解消する。
+
 ## 0.26.0
 
 发布日期：2026-08-08

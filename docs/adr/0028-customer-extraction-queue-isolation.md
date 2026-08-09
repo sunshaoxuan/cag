@@ -32,8 +32,8 @@ refresh to finish.
 7. Report extraction capacity, queued work and leased work through the queue
    status API and API documentation UI.
 8. Apply the per-document deadline to the Ollama HTTP request itself and use an
-   8192-token generation context. An outer coroutine deadline remains the
-   aggregate safety boundary.
+   8192-token generation context. ADR 0029 replaces the aggregate wall-clock
+   deadline with lease-based liveness and durable document progress.
 9. Normalize directory taxonomy with NFKC and map the observed
    `2.カスタイズ情報` alias to customization-only extraction so path spelling
    variants cannot expand a document prompt to every ledger field.
@@ -50,7 +50,7 @@ refresh to finish.
 A full-source ingestion can occupy its only worker for many hours while a
 customer extraction is claimed by its own worker. Extraction and ingestion may
 still use shared model infrastructure, whose own bounded request scheduling
-remains observable through extraction stages and deadlines. Adding extraction
+remains observable through extraction stages and per-document deadlines. Adding extraction
 capacity uses one additional worker loop and database heartbeat.
 
 ## Acceptance

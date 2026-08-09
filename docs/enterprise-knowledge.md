@@ -179,6 +179,17 @@ refresh and after a refresh failure.
 Queued or running records found during Gateway startup become failed recovery
 records, after which their sources can retry safely.
 
+## Scoped customer extraction progress
+
+Scoped customer extraction treats each
+`KnowledgeExtractionTaskDocument` as a durable child work item. A child commits
+`analyzed`, `failed` or `excluded` together with its checkpoint and publishes a
+Generic Task `task.progress` event containing its physical ID and manifest
+ordinal. The parent waits while the extraction worker renews its QueueItem
+lease. A model call is bounded independently at the document HTTP boundary.
+The parent aggregates only after all children have a terminal state, so source
+size does not turn healthy progress into an overall timeout.
+
 ## Idempotent vector index
 
 Every physical file has a streamed raw byte SHA 256 on its SourceEntry. Cleaned documents and knowledge chunks have separate content hashes because each proves a different transformation boundary. KnowledgeDocument stores a required physical foreign key to SourceEntry, and KnowledgeChunk stores a required foreign key to KnowledgeDocument. A source fingerprint is derived from the sorted path and cleaned hash set. Repeating ingestion with unchanged size, modification time, raw hash and processor fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files create a new Document and Document Version, activate a new Processing Version after quality completion, mark the prior Processing Version superseded and archive prior chunks. Removed files follow the same historical retention rule. Knowledge Block Versions keep immutable values and evidence. Applicability Revisions keep business effective periods independently from Processing Versions. Embeddings of redacted path and content input are checkpointed by model, dimensions and input hash after every successful batch. A failed refresh resumes from these checkpoints and retains the previous Active Processing Version until the replacement transaction completes.

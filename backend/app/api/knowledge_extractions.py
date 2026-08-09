@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -21,6 +21,7 @@ from app.models import (
     KnowledgeAnalysisScope,
     KnowledgeAnalysisTemplateVersion,
     KnowledgeExtractionTask,
+    KnowledgeExtractionTaskDocument,
     KnowledgeIngestion,
     KnowledgeScopeIngestionRequest,
     KnowledgeSource,
@@ -180,15 +181,54 @@ def _error(status_code: int, code: str, message: str, **details: Any) -> HTTPExc
     )
 
 
-def _task_response(task: KnowledgeExtractionTask) -> dict[str, Any]:
+def _task_response(
+    session: Session,
+    task: KnowledgeExtractionTask,
+) -> dict[str, Any]:
     if task.result_json is not None:
         return task.result_json
+    status_counts = {
+        str(extraction_status): int(count)
+        for extraction_status, count in session.execute(
+            select(
+                KnowledgeExtractionTaskDocument.extraction_status,
+                func.count(KnowledgeExtractionTaskDocument.id),
+            )
+            .where(
+                KnowledgeExtractionTaskDocument.extraction_task_id == task.id
+            )
+            .group_by(KnowledgeExtractionTaskDocument.extraction_status)
+        )
+    }
+    total_documents = sum(status_counts.values())
+    terminal_documents = sum(
+        status_counts.get(value, 0)
+        for value in ("analyzed", "failed", "excluded")
+    )
+    last_progress_at = session.scalar(
+        select(func.max(KnowledgeExtractionTaskDocument.updated_at)).where(
+            KnowledgeExtractionTaskDocument.extraction_task_id == task.id
+        )
+    )
     return {
         "id": task.id,
         "schema_version": 1,
         "status": task.status,
         "subject_external_id": task.subject_external_id,
         "scope_id": task.scope_id,
+        "progress": {
+            "total_documents": total_documents,
+            "terminal_documents": terminal_documents,
+            "analyzed_documents": status_counts.get("analyzed", 0),
+            "failed_documents": status_counts.get("failed", 0),
+            "excluded_documents": status_counts.get("excluded", 0),
+            "extracting_documents": status_counts.get("extracting", 0),
+            "pending_documents": status_counts.get("pending", 0),
+            "progress_rate": (
+                terminal_documents / total_documents if total_documents else 0.0
+            ),
+            "last_progress_at": last_progress_at,
+        },
         "created_at": task.created_at,
         "status_url": f"/api/v1/knowledge/extractions/customer-ledger/{task.id}",
     }
@@ -263,7 +303,7 @@ async def create_customer_extraction(
                 "IDEMPOTENCY_CONFLICT",
                 "Idempotency key belongs to a different request.",
             )
-        return _task_response(existing)
+        return _task_response(session, existing)
     source_id = str(request.knowledge_source_id)
     source = session.get(KnowledgeSource, source_id)
     if source is None:
@@ -342,7 +382,7 @@ async def create_customer_extraction(
     session.add(extraction)
     session.commit()
     await coordinator.notify("extraction")
-    return _task_response(extraction)
+    return _task_response(session, extraction)
 
 
 @router.get("/{task_id}")
@@ -353,7 +393,7 @@ def get_customer_extraction(
     task = session.get(KnowledgeExtractionTask, task_id)
     if task is None:
         raise _error(404, "EXTRACTION_NOT_FOUND", "Customer extraction was not found.")
-    return _task_response(task)
+    return _task_response(session, task)
 
 
 @router.post("/{task_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
