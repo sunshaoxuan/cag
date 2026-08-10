@@ -14,6 +14,6 @@
 | OneOps shows every processing outcome | Failure, exclusion and observation are present in deployed Bundle under 資料処理明細 | Tests, Health and Bundle | Passed with browser evidence gap |
 | Tests and builds pass | Backend, frontend and OneOps checks pass | `test_results.md` | Passed |
 | Browser, Console and screenshot | Formal UI is visually and interactively verified | In-app Browser | `evidence_missing`, repeated communication timeout |
-| Runtime and release are exact | CAG 0.28.0 and OneOps 0.16.4 deployed, tagged and equal to origin/master | Health and Git evidence | Pending Git publication |
+| Runtime and release are exact | CAG 0.28.0 and OneOps 0.16.4 deployed, tagged and equal to origin/master | Health and Git evidence | Passed |
 
 Any failed item restarts this checklist from the first row after repair.

@@ -15,9 +15,10 @@ All analyzed version links and database orphan checks passed.
 
 ## Completion gate
 
-Release commits, tags and remote equality remain to be recorded. OneOps formal
-title is discoverable. DOM, Console and screenshot communication timed out
-twice and remain `evidence_missing`; the static production Bundle, Health,
+CAG commit `dd4581e` and OneOps commit `2f68854` were pushed to their respective
+`origin/master` branches. Versions `v0.28.0` and `v0.16.4` were tagged. OneOps
+formal title is discoverable. DOM, Console and screenshot communication timed
+out twice and remain `evidence_missing`; the static production Bundle, Health,
 Gateway, Builder and Portal tests passed.
 
 ## Rollback
