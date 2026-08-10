@@ -1,10 +1,21 @@
+import hashlib
+import json
 from datetime import datetime
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -74,17 +85,83 @@ def to_response(conversation: Conversation) -> ConversationResponse:
 )
 def create_conversation(
     request: ConversationCreate,
+    http_response: Response,
+    client_id: Annotated[
+        str,
+        Header(
+            alias="X-CAG-Client-ID",
+            min_length=1,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._-]+$",
+        ),
+    ] = "anonymous-external",
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=255,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ] = None,
     session: Session = Depends(get_session),
     task_service: TaskService = Depends(get_task_service),
 ) -> ConversationResponse:
+    normalized_request = json.dumps(
+        request.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    request_hash = hashlib.sha256(normalized_request.encode("utf-8")).hexdigest()
+
+    if idempotency_key is not None:
+        existing = task_service.get_conversation_by_idempotency(
+            session,
+            client_id=client_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            if existing.request_hash != request_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Idempotency key already belongs to a different request"
+                    ),
+                )
+            http_response.headers["X-CAG-Idempotent-Replay"] = "true"
+            return to_response(existing)
+
     try:
         conversation = task_service.create_conversation(
             session,
             project_reference=request.project_id,
             title=request.title,
+            client_id=client_id if idempotency_key is not None else None,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash if idempotency_key is not None else None,
         )
+    except IntegrityError as exc:
+        session.rollback()
+        if idempotency_key is None:
+            raise
+        existing = task_service.get_conversation_by_idempotency(
+            session,
+            client_id=client_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is None or existing.request_hash != request_hash:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Idempotency key already belongs to a different request"
+                ),
+            ) from exc
+        http_response.headers["X-CAG-Idempotent-Replay"] = "true"
+        return to_response(existing)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found") from exc
+    http_response.headers["X-CAG-Idempotent-Replay"] = "false"
     return to_response(conversation)
 
 

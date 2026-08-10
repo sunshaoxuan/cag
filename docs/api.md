@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.28.0`
+Current version: `0.28.1`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.28.0"
+  "version": "0.28.1"
 }
 ```
 
@@ -461,6 +461,8 @@ extraction branch.
 
 Creates the durable CAG conversation that owns frontend continuity, event ordering and the internal Codex thread mapping.
 
+The caller may send `X-CAG-Client-ID` and `Idempotency-Key`. Replaying the same client, key and normalized body returns the original Conversation with `X-CAG-Idempotent-Replay: true`. Reusing the key with a different body returns HTTP `409`. This contract allows clients to retry or switch API instances that share the same CAG database without creating duplicate Conversations.
+
 ```json
 {
   "project_id": "cag",
@@ -482,6 +484,8 @@ Response:
 ```
 
 `codex_thread_id` is null until the first successful Task. It is an opaque internal runtime identity and contains no credential material.
+
+OneOps routing payloads use `routing_context.tier` with `SIMPLE` or `GENERAL`. CAG persists the complete routing context with the Task and requires the top-level `model` and `effort` to match the routing context.
 
 ### `GET /api/v1/conversations/{conversation_id}`
 

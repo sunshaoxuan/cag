@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.24.0 | Evidence |
+| Requirement | Status for 0.28.1 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -52,7 +52,8 @@ Legend:
 | Same Conversation serial execution | Implemented | Conversation claim ordering and multiple submission tests |
 | API monitoring frontend | Implemented | `/audit`, live SSE projection, component and browser evidence |
 | Local Codex app-server runtime | Implemented | Fake protocol tests, ChatGPT and API Key account/read tests, live local app-server verification |
-| Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations` |
+| Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations`, client-scoped idempotent replay and request-hash conflict tests |
+| OneOps resilient Task routing contract | Implemented | `SIMPLE` and `GENERAL` tier validation, model and effort consistency, OneOps v3 routing payload persistence tests |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
 | CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
 | Knowledge-first Conversation execution | Implemented | pre-runtime retrieval, bounded fragments, resource URI injection and Conversation SSE tests |

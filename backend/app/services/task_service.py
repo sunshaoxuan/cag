@@ -226,12 +226,37 @@ class TaskService:
         *,
         project_reference: str,
         title: str | None,
+        client_id: str | None = None,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
     ) -> Conversation:
         project = self.resolve_project(session, project_reference)
-        conversation = Conversation(project_id=project.id, title=title)
+        conversation = Conversation(
+            project_id=project.id,
+            title=title,
+            client_id=client_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
         session.add(conversation)
         session.commit()
         return self.get_conversation(session, conversation.id)
+
+    def get_conversation_by_idempotency(
+        self,
+        session: Session,
+        *,
+        client_id: str,
+        idempotency_key: str,
+    ) -> Conversation | None:
+        return session.scalar(
+            select(Conversation)
+            .options(selectinload(Conversation.project))
+            .where(
+                Conversation.client_id == client_id,
+                Conversation.idempotency_key == idempotency_key,
+            )
+        )
 
     def get_conversation(
         self,

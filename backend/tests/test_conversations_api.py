@@ -2,8 +2,10 @@ from pathlib import Path
 import json
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
+from app.services.task_service import TaskService
 from tests.waiters import wait_for_task
 
 
@@ -54,6 +56,103 @@ def test_conversation_normalizes_blank_title(client: TestClient) -> None:
 
     assert response.status_code == 201
     assert response.json()["title"] is None
+
+
+def test_conversation_idempotency_replays_same_request(client: TestClient) -> None:
+    headers = {
+        "X-CAG-Client-ID": "oneops-user",
+        "Idempotency-Key": "oneops:conversation:request-1",
+    }
+    payload = {"project_id": "test-project", "title": "安定した会話"}
+
+    first = client.post("/api/v1/conversations", headers=headers, json=payload)
+    replay = client.post("/api/v1/conversations", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert first.headers["X-CAG-Idempotent-Replay"] == "false"
+    assert replay.status_code == 201
+    assert replay.headers["X-CAG-Idempotent-Replay"] == "true"
+    assert replay.json()["id"] == first.json()["id"]
+
+
+def test_conversation_idempotency_rejects_request_hash_conflict(
+    client: TestClient,
+) -> None:
+    headers = {
+        "X-CAG-Client-ID": "oneops-user",
+        "Idempotency-Key": "oneops:conversation:request-2",
+    }
+    first = client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"project_id": "test-project", "title": "最初の会話"},
+    )
+    conflict = client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json={"project_id": "test-project", "title": "別の会話"},
+    )
+
+    assert first.status_code == 201
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == (
+        "Idempotency key already belongs to a different request"
+    )
+
+
+def test_conversation_idempotency_recovers_from_concurrent_insert(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    headers = {
+        "X-CAG-Client-ID": "oneops-user",
+        "Idempotency-Key": "oneops:conversation:request-race",
+    }
+    payload = {"project_id": "test-project", "title": "競合会話"}
+    created = client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json=payload,
+    )
+    original_get = TaskService.get_conversation_by_idempotency
+    calls = 0
+
+    def delayed_get(self, session, *, client_id, idempotency_key):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_get(
+            self,
+            session,
+            client_id=client_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def concurrent_insert(*_args, **_kwargs):
+        raise IntegrityError("insert", {}, Exception("duplicate"))
+
+    monkeypatch.setattr(
+        TaskService,
+        "get_conversation_by_idempotency",
+        delayed_get,
+    )
+    monkeypatch.setattr(
+        TaskService,
+        "create_conversation",
+        concurrent_insert,
+    )
+
+    replay = client.post(
+        "/api/v1/conversations",
+        headers=headers,
+        json=payload,
+    )
+
+    assert created.status_code == 201
+    assert replay.status_code == 201
+    assert replay.headers["X-CAG-Idempotent-Replay"] == "true"
+    assert replay.json()["id"] == created.json()["id"]
 
 
 def test_unknown_conversation_returns_404(client: TestClient) -> None:

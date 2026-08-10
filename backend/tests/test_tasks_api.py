@@ -51,7 +51,7 @@ def test_create_and_get_completed_task(client: TestClient) -> None:
 
 def test_task_persists_model_routing_context(client: TestClient) -> None:
     routing_context = {
-        "routePolicyVersion": "oneops-ai-task-routing-v1",
+        "routePolicyVersion": "oneops-ai-resilient-routing-v3",
         "taskClass": "TRANSLATION",
         "objectiveSummary": "後続の入力を日本語へ翻訳する",
         "targetLanguage": "ja",
@@ -63,8 +63,8 @@ def test_task_persists_model_routing_context(client: TestClient) -> None:
         "modelSettingId": "11111111-1111-4111-8111-111111111111",
         "gatewaySettingId": "22222222-2222-4222-8222-222222222222",
         "model": "gpt-5.6-luna",
-        "reasoningEffort": "low",
-        "selectionReason": "SESSION_TASK_CONTINUATION",
+        "reasoningEffort": "medium",
+        "selectionReason": "LIGHT_TASK_INITIAL_ROUTE",
         "escalationReason": None,
     }
     response = client.post(
@@ -73,7 +73,7 @@ def test_task_persists_model_routing_context(client: TestClient) -> None:
             "project_id": "test-project",
             "prompt": "Translate this text.",
             "model": "gpt-5.6-luna",
-            "effort": "low",
+            "effort": "medium",
             "routing_context": routing_context,
         },
     )
@@ -81,7 +81,7 @@ def test_task_persists_model_routing_context(client: TestClient) -> None:
     assert response.status_code == 202
     created = response.json()
     assert created["model"] == "gpt-5.6-luna"
-    assert created["effort"] == "low"
+    assert created["effort"] == "medium"
     assert created["routing_context"] == routing_context
     audit = client.get(f"/api/v1/audit/tasks/{created['id']}")
     assert audit.status_code == 200
@@ -92,7 +92,7 @@ def test_task_persists_model_routing_context(client: TestClient) -> None:
     )
     plan = next(event for event in events if event["type"] == "agent.plan")
     assert plan["data"]["model"] == "gpt-5.6-luna"
-    assert plan["data"]["reasoning_effort"] == "low"
+    assert plan["data"]["reasoning_effort"] == "medium"
 
 
 def test_task_rejects_inconsistent_model_routing_context(

@@ -2,6 +2,23 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.28.1
+
+发布日期：2026-08-10
+
+### Added
+
+* Conversation 作成へ Client 単位の `Idempotency-Key`、正規化 Request Hash、同一要求の Replay Header を追加する。
+* OneOps の軽量、複雑、同一 Task 再実行 Routing v3 Payload を API 契約テストへ追加する。
+
+### Changed
+
+* 同じ PostgreSQL と Redis Queue を共有する複数 API Instance 間で Conversation 作成を安全に再試行できるようにする。
+
+### Fixed
+
+* 主 API Instance が Conversation を保存した後に応答を返せない場合、予備 Instance への再送で重複 Conversation が作成される問題を解消する。
+
 ## 0.28.0
 
 发布日期：2026-08-10

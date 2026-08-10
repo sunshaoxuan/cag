@@ -469,6 +469,7 @@ Every business record has an independent UUID physical ID.
 * `Project.code` is a unique business identifier.
 * `Conversation.project_id` references `Project.id`.
 * `Conversation.codex_thread_id` stores one opaque runtime thread identity.
+* `Conversation.client_id`, `idempotency_key` and `request_hash` provide database-backed idempotent creation across API instances that share PostgreSQL.
 * `Task.project_id` references `Project.id`.
 * `Task.conversation_id` references `Conversation.id`.
 * `Task.id` is also the external Trace ID.
