@@ -576,12 +576,43 @@ export default function App() {
   const sourceRef = useRef<EventSource | null>(null);
   const auditSourceRef = useRef<EventSource | null>(null);
   const knowledgeSourceRef = useRef<EventSource | null>(null);
+  const appMountedRef = useRef(false);
   const knowledgeIngestionIdRef = useRef<string | null>(null);
   const knowledgeLastSequenceRef = useRef(0);
+  const knowledgePageActiveRef = useRef(page === "knowledge");
+  const knowledgePageGenerationRef = useRef(0);
+  const knowledgeRefreshRequestRef = useRef<{
+    generation: number;
+    promise: Promise<void>;
+  } | null>(null);
+  const memoryRefreshPromiseRef = useRef<Promise<void> | null>(null);
   const auditEventIdsRef = useRef<Set<string>>(new Set());
   const auditRefreshPromiseRef = useRef<Promise<void> | null>(null);
 
+  function closeKnowledgeIngestion() {
+    knowledgeSourceRef.current?.close();
+    knowledgeSourceRef.current = null;
+    knowledgeIngestionIdRef.current = null;
+  }
+
+  function setKnowledgePageActive(active: boolean) {
+    if (knowledgePageActiveRef.current !== active) {
+      knowledgePageActiveRef.current = active;
+      knowledgePageGenerationRef.current += 1;
+    }
+    if (!active) closeKnowledgeIngestion();
+  }
+
+  function isCurrentKnowledgePage(generation: number): boolean {
+    return (
+      appMountedRef.current &&
+      knowledgePageActiveRef.current &&
+      knowledgePageGenerationRef.current === generation
+    );
+  }
+
   useEffect(() => {
+    appMountedRef.current = true;
     let active = true;
     listProjects()
       .then((items) => {
@@ -597,16 +628,18 @@ export default function App() {
       });
     return () => {
       active = false;
+      appMountedRef.current = false;
       sourceRef.current?.close();
       auditSourceRef.current?.close();
-      knowledgeSourceRef.current?.close();
-      knowledgeIngestionIdRef.current = null;
+      closeKnowledgeIngestion();
     };
   }, []);
 
   useEffect(() => {
     const handlePopState = () => {
-      setPage(pageFromPath(window.location.pathname));
+      const nextPage = pageFromPath(window.location.pathname);
+      setKnowledgePageActive(nextPage === "knowledge");
+      setPage(nextPage);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
     };
@@ -614,16 +647,21 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  function refreshKnowledge() {
-    Promise.all([
+  function refreshKnowledge(): Promise<void> {
+    if (!knowledgePageActiveRef.current) return Promise.resolve();
+    const generation = knowledgePageGenerationRef.current;
+    const currentRequest = knowledgeRefreshRequestRef.current;
+    if (currentRequest?.generation === generation) {
+      return currentRequest.promise;
+    }
+    const request = Promise.all([
       getKnowledgeStatus(),
       listKnowledgeSources(),
-      listMemoryCandidates(),
     ])
-      .then(([statusValue, sourcesValue, candidatesValue]) => {
+      .then(([statusValue, sourcesValue]) => {
+        if (!isCurrentKnowledgePage(generation)) return;
         setKnowledgeStatus(statusValue);
         setKnowledgeSources(sourcesValue);
-        setMemoryCandidates(candidatesValue);
         const activeIngestion = sourcesValue
           .map((source) => source.last_ingestion)
           .find(
@@ -635,15 +673,40 @@ export default function App() {
           activeIngestion &&
           knowledgeIngestionIdRef.current !== activeIngestion.id
         ) {
-          connectKnowledgeIngestion(activeIngestion.id);
+          connectKnowledgeIngestion(activeIngestion.id, generation);
         }
       })
-      .catch((reason: Error) => setError(reason.message));
+      .catch((reason: Error) => {
+        if (isCurrentKnowledgePage(generation)) setError(reason.message);
+      });
+    knowledgeRefreshRequestRef.current = { generation, promise: request };
+    void request.finally(() => {
+      if (knowledgeRefreshRequestRef.current?.promise === request) {
+        knowledgeRefreshRequestRef.current = null;
+      }
+    });
+    return request;
   }
 
-  useEffect(() => {
-    refreshKnowledge();
-  }, []);
+  function refreshMemoryCandidates(): Promise<void> {
+    if (memoryRefreshPromiseRef.current) {
+      return memoryRefreshPromiseRef.current;
+    }
+    const request = listMemoryCandidates()
+      .then((items) => {
+        if (appMountedRef.current) setMemoryCandidates(items);
+      })
+      .catch((reason: Error) => {
+        if (appMountedRef.current) setError(reason.message);
+      });
+    memoryRefreshPromiseRef.current = request;
+    void request.finally(() => {
+      if (memoryRefreshPromiseRef.current === request) {
+        memoryRefreshPromiseRef.current = null;
+      }
+    });
+    return request;
+  }
 
   function refreshCodeKnowledge(search = codeSearch, kind = codeKind) {
     if (!projectId) return;
@@ -684,9 +747,25 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (page !== "knowledge") return;
-    const timer = window.setInterval(refreshKnowledge, 10_000);
-    return () => window.clearInterval(timer);
+    if (page !== "knowledge") {
+      setKnowledgePageActive(false);
+      return;
+    }
+    setKnowledgePageActive(true);
+    void refreshKnowledge();
+    const timer = window.setInterval(() => {
+      void refreshKnowledge();
+    }, 10_000);
+    return () => {
+      window.clearInterval(timer);
+      closeKnowledgeIngestion();
+    };
+  }, [page]);
+
+  useEffect(() => {
+    if (page === "knowledge" || page === "memory") {
+      void refreshMemoryCandidates();
+    }
   }, [page]);
 
   function refreshGovernance() {
@@ -1124,7 +1203,7 @@ export default function App() {
       }
       resetKnowledgeSourceForm();
       setKnowledgeFormOpen(false);
-      refreshKnowledge();
+      void refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "知识来源保存失败");
     } finally {
@@ -1143,7 +1222,7 @@ export default function App() {
           ? `${result.message}，版本 ${result.revision.slice(0, 12)}`
           : result.message,
       );
-      refreshKnowledge();
+      void refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "连接验证失败");
     } finally {
@@ -1151,7 +1230,11 @@ export default function App() {
     }
   }
 
-  function connectKnowledgeIngestion(ingestionId: string) {
+  function connectKnowledgeIngestion(
+    ingestionId: string,
+    generation = knowledgePageGenerationRef.current,
+  ) {
+    if (!isCurrentKnowledgePage(generation)) return;
     if (
       knowledgeIngestionIdRef.current === ingestionId &&
       knowledgeSourceRef.current
@@ -1186,6 +1269,12 @@ export default function App() {
       "knowledge.ingestion.failed",
     ];
     const onEvent = (message: MessageEvent<string>) => {
+      if (
+        knowledgeSourceRef.current !== source ||
+        !isCurrentKnowledgePage(generation)
+      ) {
+        return;
+      }
       const item = JSON.parse(message.data) as KnowledgeIngestionEvent;
       if (item.sequence <= knowledgeLastSequenceRef.current) return;
       knowledgeLastSequenceRef.current = item.sequence;
@@ -1205,23 +1294,36 @@ export default function App() {
             ? "采集、清洗、向量索引和来源记忆保存均已完成。"
             : "本轮知识采集失败，请查看失败事件和来源错误。",
         );
-        refreshKnowledge();
+        void refreshKnowledge();
         source.close();
+        knowledgeSourceRef.current = null;
         knowledgeIngestionIdRef.current = null;
       }
     };
     eventTypes.forEach((type) =>
       source.addEventListener(type, onEvent as EventListener),
     );
-    source.onerror = () => setError("知识采集事件流正在重连");
+    source.onerror = () => {
+      if (
+        knowledgeSourceRef.current === source &&
+        isCurrentKnowledgePage(generation)
+      ) {
+        setError("知识采集事件流正在重连");
+      }
+    };
   }
 
   async function handleKnowledgeSourceIngest(sourceId: string) {
+    const generation = knowledgePageGenerationRef.current;
     setKnowledgeBusy(sourceId);
     setError(null);
     setKnowledgeNotice("采集任务已创建，正在接收后端事实事件。");
     try {
       const ingestion = await ingestKnowledgeSource(sourceId);
+      if (!isCurrentKnowledgePage(generation)) {
+        setKnowledgeBusy(null);
+        return;
+      }
       setKnowledgeSources((current) =>
         current.map((source) =>
           source.id === sourceId
@@ -1229,10 +1331,12 @@ export default function App() {
             : source,
         ),
       );
-      connectKnowledgeIngestion(ingestion.id);
+      connectKnowledgeIngestion(ingestion.id, generation);
     } catch (reason) {
       setKnowledgeBusy(null);
-      setError(reason instanceof Error ? reason.message : "知识采集失败");
+      if (isCurrentKnowledgePage(generation)) {
+        setError(reason instanceof Error ? reason.message : "知识采集失败");
+      }
     }
   }
 
@@ -1361,7 +1465,7 @@ export default function App() {
         enabled: !source.enabled,
       });
       setKnowledgeNotice(source.enabled ? "知识来源已停用。" : "知识来源已启用。");
-      refreshKnowledge();
+      void refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "来源状态更新失败");
     } finally {
@@ -1377,7 +1481,7 @@ export default function App() {
     try {
       await deleteKnowledgeSource(source.id);
       setKnowledgeNotice("知识来源、索引、凭据引用和受管快照已删除。");
-      refreshKnowledge();
+      void refreshKnowledge();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "知识来源删除失败");
     } finally {
@@ -1391,7 +1495,7 @@ export default function App() {
   ) {
     try {
       await transitionMemoryCandidate(candidateId, action);
-      refreshKnowledge();
+      void refreshMemoryCandidates();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "记忆操作失败");
     }
@@ -1426,6 +1530,7 @@ export default function App() {
     }
     event.preventDefault();
     window.history.pushState({}, "", PAGE_PATHS[nextPage]);
+    setKnowledgePageActive(nextPage === "knowledge");
     setPage(nextPage);
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;

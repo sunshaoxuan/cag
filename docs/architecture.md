@@ -201,10 +201,15 @@ The Task SSE endpoint reads committed TaskEvent rows in Task sequence order and 
 
 The Conversation SSE endpoint remains open across multiple Tasks. `Conversation.next_event_sequence` assigns a continuous sequence, heartbeat comments keep idle connections alive, and `Last-Event-ID` supports standard EventSource reconnection. The frontend never connects to Codex app-server.
 
-Task and Conversation SSE perform their initial resource existence check in an
-explicit short-lived database Session that closes before `StreamingResponse` is
-returned. Every subsequent polling iteration owns a separate bounded Session,
-so a long-lived client connection does not retain an idle database transaction.
+Task、Conversation、Knowledge Ingestion の各 SSE は、対象 Resource の存在確認を
+明示的な短命 Database Session で実行し、`StreamingResponse` の返却前に閉じる。
+Audit SSE を含む全 Polling は反復ごとに独立した短命 Session を使用し、Database
+Transaction を閉じてから Client へ Event を送信する。Rejection CSV Export も
+500件単位の Keyset Pagination ごとに Session を閉じてから Row を送信するため、
+長時間接続及び低速 Client は `idle in transaction` を保持しない。
+Frontend は実行中 Knowledge Ingestion の SSE を企業知識画面でだけ接続し、
+他画面へ遷移した時点で EventSource を閉じる。Audit、API Test、問題中心などの
+画面は未使用の Ingestion Polling を背後で継続しない。
 
 Every TaskEvent receives a Gateway-wide sequence from the locked
 `AuditCursor`. `/api/v1/audit/events` projects these committed events as one

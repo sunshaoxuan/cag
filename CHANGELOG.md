@@ -2,6 +2,22 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.28.3
+
+リリース日：2026-08-10
+
+### Changed
+
+* 実行中 Knowledge Ingestion の Frontend SSE を企業知識画面に限定し、他画面へ遷移した時点で接続を閉じるようにしました。
+* 企業知識画面の Refresh を Page Generation 単位で共有し、StrictMode の初回表示でも Knowledge Status、Source 及び Memory Candidate を各1回だけ取得するようにしました。
+* Rejection CSV Export を500件単位の Keyset Pagination へ変更し、各 Batch の Database Session を閉じてから Row を送信するようにしました。
+
+### Fixed
+
+* Knowledge Ingestion SSE の存在確認用 Session が長時間接続の終了まで保持され、PostgreSQL に `idle in transaction` を残す問題を修正しました。
+* StreamingResponse Route と低速 CSV Client が Request Session 又は Database Cursor を長時間保持できる問題を、全 Route Validator と Chunk 消費 Test を含めて修正しました。
+* 企業知識画面を離れた後に遅延応答した Source 取得又は Ingestion 作成が SSE を再接続する競合を修正しました。
+
 ## 0.28.2
 
 发布日期：2026-08-10

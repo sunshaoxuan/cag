@@ -15,18 +15,20 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
     get_app_settings,
+    get_database,
     get_knowledge_service,
     get_queue_coordinator,
     get_session,
     get_task_service,
 )
 from app.config import Settings
+from app.database import Database
 from app.knowledge.service import (
     KnowledgeService,
     KnowledgeUnavailableError,
@@ -785,10 +787,11 @@ def export_ingestion_rejections(
     extension: str | None = Query(
         default=None, min_length=1, max_length=64
     ),
-    session: Session = Depends(get_session),
+    database: Database = Depends(get_database),
 ) -> StreamingResponse:
-    if session.get(KnowledgeIngestion, ingestion_id) is None:
-        raise HTTPException(status_code=404, detail="Ingestion not found")
+    with database.session_factory() as session:
+        if session.get(KnowledgeIngestion, ingestion_id) is None:
+            raise HTTPException(status_code=404, detail="Ingestion not found")
     filters = rejection_filters(
         ingestion_id, disposition, reason_code, extension
     )
@@ -820,32 +823,55 @@ def export_ingestion_rejections(
                 "created_at",
             ]
         )
-        result = session.scalars(
-            select(KnowledgeIngestionRejection)
-            .where(*filters)
-            .order_by(
-                KnowledgeIngestionRejection.created_at,
-                KnowledgeIngestionRejection.id,
-            )
-            .execution_options(yield_per=500)
-        )
-        for item in result:
-            yield emit(
-                [
-                    item.id,
-                    item.ingestion_id,
-                    item.relative_path,
-                    item.entry_kind,
-                    item.disposition,
-                    item.extension,
-                    item.file_size,
-                    item.reason_code,
-                    item.extractor,
-                    item.error_type,
-                    item.error_message,
-                    item.created_at.isoformat(),
-                ]
-            )
+        cursor_created_at = None
+        cursor_id = None
+        batch_size = 500
+        while True:
+            statement = select(KnowledgeIngestionRejection).where(*filters)
+            if cursor_created_at is not None and cursor_id is not None:
+                statement = statement.where(
+                    or_(
+                        KnowledgeIngestionRejection.created_at
+                        > cursor_created_at,
+                        and_(
+                            KnowledgeIngestionRejection.created_at
+                            == cursor_created_at,
+                            KnowledgeIngestionRejection.id > cursor_id,
+                        ),
+                    )
+                )
+            with database.session_factory() as session:
+                items = list(
+                    session.scalars(
+                        statement.order_by(
+                            KnowledgeIngestionRejection.created_at,
+                            KnowledgeIngestionRejection.id,
+                        ).limit(batch_size)
+                    )
+                )
+            if not items:
+                return
+            cursor_created_at = items[-1].created_at
+            cursor_id = items[-1].id
+            for item in items:
+                yield emit(
+                    [
+                        item.id,
+                        item.ingestion_id,
+                        item.relative_path,
+                        item.entry_kind,
+                        item.disposition,
+                        item.extension,
+                        item.file_size,
+                        item.reason_code,
+                        item.extractor,
+                        item.error_type,
+                        item.error_message,
+                        item.created_at.isoformat(),
+                    ]
+                )
+            if len(items) < batch_size:
+                return
 
     return StreamingResponse(
         rows(),
@@ -887,14 +913,14 @@ def download_ingestion_rejection_archive(
 
 
 async def stream_ingestion_events(
-    service: KnowledgeService,
+    database: Database,
     ingestion_id: str,
     after_sequence: int,
     follow: bool,
 ) -> AsyncIterator[str]:
     current = after_sequence
     while True:
-        with service._database.session_factory() as session:
+        with database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
                 return
@@ -934,13 +960,18 @@ def get_ingestion_events(
     ingestion_id: str,
     after_sequence: int = Query(default=0, ge=0),
     follow: bool = True,
-    session: Session = Depends(get_session),
-    service: KnowledgeService = Depends(get_knowledge_service),
+    database: Database = Depends(get_database),
 ) -> StreamingResponse:
-    if session.get(KnowledgeIngestion, ingestion_id) is None:
-        raise HTTPException(status_code=404, detail="Ingestion not found")
+    with database.session_factory() as session:
+        if session.get(KnowledgeIngestion, ingestion_id) is None:
+            raise HTTPException(status_code=404, detail="Ingestion not found")
     return StreamingResponse(
-        stream_ingestion_events(service, ingestion_id, after_sequence, follow),
+        stream_ingestion_events(
+            database,
+            ingestion_id,
+            after_sequence,
+            follow,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

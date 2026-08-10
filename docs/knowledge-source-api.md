@@ -100,6 +100,14 @@ GET  /api/v1/knowledge/ingestions/{ingestion_id}/events
 The event endpoint is SSE. It supports `after_sequence` and `follow`, matching
 the resumable CAG event convention.
 
+存在確認用 Session は Streaming Response の返却前に閉じる。Event Polling は反復ごとに
+独立した短命 Session を使用し、Transaction を閉じてから Event を送信する。
+Rejection CSV Export は500件単位の Keyset Pagination を使用し、各 Batch の Session を
+閉じてから CSV Row を送信する。長時間接続及び低速 Client は Database Transaction を
+保持しない。
+管理 Frontend は企業知識画面を表示している間だけ実行中 Ingestion の SSE を接続し、
+別画面へ遷移した時点で接続を閉じる。
+
 Durable stage events:
 
 ```text

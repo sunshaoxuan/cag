@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -82,10 +83,85 @@ function completedTask(task: Task, summary?: string): Task {
   };
 }
 
+function knowledgeIngestionFixture(
+  status: "queued" | "running" = "running",
+): Record<string, unknown> {
+  return {
+    id: "ingestion-1",
+    source_id: "source-1",
+    status,
+    files_seen: status === "running" ? 1 : 0,
+    chunks_written: status === "running" ? 1 : 0,
+    rejected_files: 0,
+    skipped_files: 0,
+    duplicate_files: 0,
+    unchanged_files: 0,
+    vectors_reused: 0,
+    changed_files: status === "running" ? 1 : 0,
+    removed_files: 0,
+    trigger: status === "running" ? "scheduled" : "manual",
+    error: null,
+    created_at: "2026-08-10T00:00:00Z",
+    started_at: status === "running" ? "2026-08-10T00:00:01Z" : null,
+    completed_at: null,
+    rejection_archive_name: null,
+    rejection_archive_sha256: null,
+    rejection_archive_created_at: null,
+  };
+}
+
+function knowledgeSourceFixture(
+  lastIngestion: Record<string, unknown> | null = null,
+): Record<string, unknown> {
+  return {
+    id: "source-1",
+    name: "产品文档",
+    source_type: "local_directory",
+    location: "D:/knowledge",
+    root_path: "D:/knowledge",
+    reference: null,
+    subpath: null,
+    scope: "product",
+    approved_for_codex: false,
+    credential_username: null,
+    credential_configured: false,
+    enabled: true,
+    status: "ready",
+    source_commit: null,
+    index_fingerprint: null,
+    active_generation_id: null,
+    error: null,
+    last_validated_at: "2026-08-10T00:00:00Z",
+    last_collected_at: "2026-08-10T00:00:00Z",
+    next_sync_at: "2026-08-11T00:00:00Z",
+    last_sync_attempt_at: "2026-08-10T00:00:00Z",
+    last_content_change_at: "2026-08-10T00:00:00Z",
+    consecutive_failures: 0,
+    scheduler_claimed: false,
+    entry_summary: {
+      total: 1,
+      code: 0,
+      document: 1,
+      metadata_only: 0,
+      path_only: 0,
+      removed: 0,
+    },
+    retrieval_health: {
+      status: "ready",
+      total_chunks: 1,
+      accessible_chunks: 1,
+      legacy_documents: 0,
+      active_generation_id: null,
+    },
+    last_ingestion: lastIngestion,
+  };
+}
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
   listeners = new Map<string, EventListener[]>();
   onerror: ((event: Event) => void) | null = null;
+  closeCount = 0;
 
   constructor(public readonly url: string) {
     MockEventSource.instances.push(this);
@@ -97,7 +173,9 @@ class MockEventSource {
     this.listeners.set(type, listeners);
   }
 
-  close() {}
+  close() {
+    this.closeCount += 1;
+  }
 
   emit(type: string, data: object) {
     const event = new MessageEvent(type, { data: JSON.stringify(data) });
@@ -124,6 +202,8 @@ describe("One Agent Gateway conversation page", () => {
   let submittedTasks: Task[];
   let pendingApprovals: Array<Record<string, unknown>>;
   let knowledgeSources: Array<Record<string, unknown>>;
+  let knowledgeSourcesResponse: Promise<Response> | null;
+  let knowledgeIngestResponse: Promise<Response> | null;
   let knowledgeSecrets: Record<string, string>;
   let clipboardWrite: ReturnType<typeof vi.fn>;
   let completedSummary: string | undefined;
@@ -134,6 +214,8 @@ describe("One Agent Gateway conversation page", () => {
     submittedTasks = [];
     pendingApprovals = [];
     knowledgeSources = [];
+    knowledgeSourcesResponse = null;
+    knowledgeIngestResponse = null;
     knowledgeSecrets = {};
     completedSummary = undefined;
     clipboardWrite = vi.fn().mockResolvedValue(undefined);
@@ -333,6 +415,7 @@ describe("One Agent Gateway conversation page", () => {
           url.endsWith("/api/v1/knowledge/sources") &&
           (!init?.method || init.method === "GET")
         ) {
+          if (knowledgeSourcesResponse) return knowledgeSourcesResponse;
           return jsonResponse(knowledgeSources);
         }
         if (
@@ -519,6 +602,7 @@ describe("One Agent Gateway conversation page", () => {
           url.endsWith("/api/v1/knowledge/sources/source-1/ingest") &&
           init?.method === "POST"
         ) {
+          if (knowledgeIngestResponse) return knowledgeIngestResponse;
           return jsonResponse(
             {
               id: "ingestion-1",
@@ -749,7 +833,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.28.2")).toBeInTheDocument();
+    expect(screen.getByText("v0.28.3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -1052,6 +1136,159 @@ describe("One Agent Gateway conversation page", () => {
     ).toHaveLength(1);
     expect(screen.getAllByText("任务进度已更新")).toHaveLength(2);
     await waitFor(() => expect(auditTaskRequestCount()).toBe(2));
+  });
+
+  it("企業知識画面以外では実行中 Ingestion の SSE を接続しない", async () => {
+    knowledgeSources = [
+      knowledgeSourceFixture(knowledgeIngestionFixture()),
+    ];
+    window.history.pushState({}, "", "/audit");
+    render(<App />);
+    await screen.findByRole("heading", { name: "全局审计事件流" });
+    await waitFor(() =>
+      expect(
+        MockEventSource.instances.some((source) =>
+          source.url.includes("/api/v1/audit/events"),
+        ),
+      ).toBe(true),
+    );
+    expect(
+      MockEventSource.instances.some((source) =>
+        source.url.includes("/knowledge/ingestions/"),
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
+    await screen.findByRole("heading", { name: "知识来源" });
+    await waitFor(() =>
+      expect(
+        MockEventSource.instances.some((source) =>
+          source.url.includes("/knowledge/ingestions/ingestion-1/events"),
+        ),
+      ).toBe(true),
+    );
+    const ingestionSource = MockEventSource.instances.find((source) =>
+      source.url.includes("/knowledge/ingestions/ingestion-1/events"),
+    );
+    expect(ingestionSource).toBeDefined();
+
+    fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
+    expect(ingestionSource?.closeCount).toBe(1);
+    await screen.findByRole("heading", { name: "全局审计事件流" });
+  });
+
+  it("/knowledge 初回表示では知識 GET を一組だけ実行する", async () => {
+    knowledgeSources = [
+      knowledgeSourceFixture(knowledgeIngestionFixture()),
+    ];
+    window.history.pushState({}, "", "/knowledge");
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await screen.findByRole("heading", { name: "知识来源" });
+
+    const requestCount = (path: string) =>
+      vi.mocked(fetch).mock.calls.filter(([input, init]) => {
+        return String(input).endsWith(path) && !init?.method;
+      }).length;
+    await waitFor(() => {
+      expect(requestCount("/api/v1/knowledge/status")).toBe(1);
+      expect(requestCount("/api/v1/knowledge/sources")).toBe(1);
+      expect(requestCount("/api/v1/memory-candidates")).toBe(1);
+    });
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.includes("/knowledge/ingestions/ingestion-1/events"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("/memory 初回表示では記憶候補だけを取得する", async () => {
+    window.history.pushState({}, "", "/memory");
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await screen.findByRole("heading", { name: "长期记忆" });
+
+    const requestCount = (path: string) =>
+      vi.mocked(fetch).mock.calls.filter(([input]) =>
+        String(input).endsWith(path),
+      ).length;
+    await waitFor(() =>
+      expect(requestCount("/api/v1/memory-candidates")).toBe(1),
+    );
+    expect(requestCount("/api/v1/knowledge/status")).toBe(0);
+    expect(requestCount("/api/v1/knowledge/sources")).toBe(0);
+  });
+
+  it("離脱後に遅延した知識一覧応答から SSE を再接続しない", async () => {
+    let resolveSources!: (response: Response) => void;
+    knowledgeSourcesResponse = new Promise((resolve) => {
+      resolveSources = resolve;
+    });
+    knowledgeSources = [
+      knowledgeSourceFixture(knowledgeIngestionFixture()),
+    ];
+    window.history.pushState({}, "", "/knowledge");
+    render(<App />);
+    await screen.findByRole("heading", { name: "知识来源" });
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetch).mock.calls.filter(([input]) =>
+          String(input).endsWith("/api/v1/knowledge/sources"),
+        ),
+      ).toHaveLength(1),
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
+    await act(async () => {
+      resolveSources(jsonResponse(knowledgeSources));
+      await Promise.resolve();
+    });
+
+    expect(
+      MockEventSource.instances.some((source) =>
+        source.url.includes("/knowledge/ingestions/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("離脱後に遅延した采集開始応答から SSE を再接続しない", async () => {
+    knowledgeSources = [knowledgeSourceFixture()];
+    window.history.pushState({}, "", "/knowledge");
+    render(<App />);
+    await screen.findByText("产品文档");
+
+    let resolveIngestion!: (response: Response) => void;
+    knowledgeIngestResponse = new Promise((resolve) => {
+      resolveIngestion = resolve;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "采集并学习" }));
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetch).mock.calls.some(
+          ([input, init]) =>
+            String(input).endsWith(
+              "/api/v1/knowledge/sources/source-1/ingest",
+            ) && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("link", { name: "API 监控" }));
+    await act(async () => {
+      resolveIngestion(jsonResponse(knowledgeIngestionFixture("queued"), 202));
+      await Promise.resolve();
+    });
+
+    expect(
+      MockEventSource.instances.some((source) =>
+        source.url.includes("/knowledge/ingestions/"),
+      ),
+    ).toBe(false);
   });
 
   it("creates a CAG conversation and opens one persistent SSE stream", async () => {
