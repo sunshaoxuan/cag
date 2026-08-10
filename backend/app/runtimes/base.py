@@ -48,5 +48,7 @@ class AgentRuntime(Protocol):
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
         request_approval: RuntimeApprovalCallback | None = None,
     ) -> RuntimeResult: ...

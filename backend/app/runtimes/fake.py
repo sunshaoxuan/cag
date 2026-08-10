@@ -26,6 +26,8 @@ class FakeAgentRuntime:
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
         request_approval=None,
     ) -> RuntimeResult:
         await emit(
@@ -38,6 +40,8 @@ class FakeAgentRuntime:
                 ],
                 "runtime": "fake",
                 "workspace_ready": workspace_path.is_dir(),
+                "model": model,
+                "reasoning_effort": reasoning_effort,
             },
         )
         await self._pause()

@@ -56,6 +56,8 @@ class CodexAppServerRuntime:
         additional_workspace_roots: tuple[Path, ...],
         developer_instructions: str | None,
         emit: RuntimeEventCallback,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
         request_approval: RuntimeApprovalCallback | None = None,
     ) -> RuntimeResult:
         process = await asyncio.create_subprocess_exec(
@@ -374,6 +376,8 @@ class CodexAppServerRuntime:
                 {
                     "provider": "local-codex-app-server",
                     "authentication": account_type,
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
                 },
             )
 
@@ -407,6 +411,8 @@ class CodexAppServerRuntime:
                     "approvalPolicy": "untrusted" if request_approval else "never",
                     "developerInstructions": developer_instructions,
                 }
+            if model is not None:
+                thread_params["model"] = model
             thread_result = await request(
                 thread_method,
                 thread_params,
@@ -424,15 +430,20 @@ class CodexAppServerRuntime:
                     ),
                 },
             )
+            turn_params = {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": prompt}],
+                "cwd": str(workspace_path),
+                "runtimeWorkspaceRoots": runtime_workspace_roots,
+                "approvalPolicy": "untrusted" if request_approval else "never",
+            }
+            if model is not None:
+                turn_params["model"] = model
+            if reasoning_effort is not None:
+                turn_params["effort"] = reasoning_effort
             turn_result = await request(
                 "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
-                    "cwd": str(workspace_path),
-                    "runtimeWorkspaceRoots": runtime_workspace_roots,
-                    "approvalPolicy": "untrusted" if request_approval else "never",
-                },
+                turn_params,
                 timeout=self._startup_timeout_seconds,
             )
             turn_id = turn_result["turn"]["id"]

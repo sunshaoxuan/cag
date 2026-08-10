@@ -62,6 +62,8 @@ class TaskExecutor:
             harness_profile = task.harness_profile
             learning_mode = task.learning_mode
             request_metadata = task.request_metadata or {}
+            model = request_metadata.get("model")
+            reasoning_effort = request_metadata.get("effort")
             conversation_id = task.conversation_id
             conversation_thread_id = (
                 task.conversation.codex_thread_id
@@ -228,6 +230,10 @@ class TaskExecutor:
                 developer_instructions=developer_instructions,
                 emit=emit,
             )
+            if model:
+                runtime_arguments["model"] = str(model)
+            if reasoning_effort:
+                runtime_arguments["reasoning_effort"] = str(reasoning_effort)
             if harness_profile == "single":
                 result = await self._runtime.execute(**runtime_arguments)
             else:

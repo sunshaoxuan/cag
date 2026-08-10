@@ -22,6 +22,8 @@ def execute_runtime(
     conversation_thread_id: str | None = None,
     developer_instructions: str | None = None,
     require_chatgpt_auth: bool = False,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[object, list[tuple[str, dict[str, object]]]]:
     command = [sys.executable, str(FIXTURE_SERVER), account_type]
     command.append(mode)
@@ -48,6 +50,8 @@ def execute_runtime(
             additional_workspace_roots=(),
             developer_instructions=developer_instructions,
             emit=emit,
+            model=model,
+            reasoning_effort=reasoning_effort,
         )
     )
     return result, events
@@ -143,6 +147,22 @@ def test_codex_app_server_resumes_persisted_thread(tmp_path: Path) -> None:
         "thread_id": "thread-existing",
         "action": "resumed",
     }
+
+
+def test_codex_app_server_routes_model_and_effort_per_task(
+    tmp_path: Path,
+) -> None:
+    result, events = execute_runtime(
+        tmp_path,
+        mode="expect-model-routing",
+        conversation_thread_id="thread-existing",
+        model="gpt-5.6-luna",
+        reasoning_effort="low",
+    )
+
+    assert result.summary == "LOCAL_CODEX_FIXTURE_OK"
+    assert events[0][1]["model"] == "gpt-5.6-luna"
+    assert events[0][1]["reasoning_effort"] == "low"
 
 
 def test_codex_app_server_receives_resource_linked_knowledge(

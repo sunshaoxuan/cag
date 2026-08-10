@@ -15,7 +15,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -40,6 +40,61 @@ from app.services.task_service import (
 
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+
+
+class TaskRoutingContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    route_policy_version: str = Field(
+        alias="routePolicyVersion",
+        min_length=1,
+        max_length=128,
+    )
+    task_class: str = Field(alias="taskClass", min_length=1, max_length=64)
+    objective_summary: str = Field(
+        alias="objectiveSummary",
+        min_length=1,
+        max_length=500,
+    )
+    target_language: str | None = Field(
+        alias="targetLanguage",
+        default=None,
+        max_length=16,
+    )
+    constraints: list[str] = Field(default_factory=list, max_length=20)
+    continuation_mode: str = Field(
+        alias="continuationMode",
+        pattern=r"^(INHERITED|NEW_OR_UPDATED)$",
+    )
+    task_fingerprint: str = Field(
+        alias="taskFingerprint",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    attempt_number: int = Field(alias="attemptNumber", ge=1)
+    tier: str = Field(pattern=r"^(SIMPLE|GENERAL)$")
+    model_setting_id: str = Field(
+        alias="modelSettingId",
+        pattern=r"^[0-9a-fA-F-]{36}$",
+    )
+    gateway_setting_id: str = Field(
+        alias="gatewaySettingId",
+        pattern=r"^[0-9a-fA-F-]{36}$",
+    )
+    model: str = Field(min_length=1, max_length=128)
+    reasoning_effort: str = Field(
+        alias="reasoningEffort",
+        pattern=r"^(none|minimal|low|medium|high|xhigh)$",
+    )
+    selection_reason: str = Field(
+        alias="selectionReason",
+        min_length=1,
+        max_length=128,
+    )
+    escalation_reason: str | None = Field(
+        alias="escalationReason",
+        default=None,
+        max_length=128,
+    )
 
 
 class TaskCreate(BaseModel):
@@ -71,6 +126,12 @@ class TaskCreate(BaseModel):
         default="capture",
         pattern=r"^(off|capture|evaluate)$",
     )
+    model: str | None = Field(default=None, min_length=1, max_length=128)
+    effort: str | None = Field(
+        default=None,
+        pattern=r"^(none|minimal|low|medium|high|xhigh)$",
+    )
+    routing_context: TaskRoutingContext | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -79,6 +140,19 @@ class TaskCreate(BaseModel):
         if not stripped:
             raise ValueError("prompt must contain non-whitespace text")
         return stripped
+
+    @model_validator(mode="after")
+    def routing_must_match_runtime_selection(self) -> "TaskCreate":
+        if self.routing_context is None:
+            return self
+        if (
+            self.model != self.routing_context.model
+            or self.effort != self.routing_context.reasoning_effort
+        ):
+            raise ValueError(
+                "routing_context must match model and effort"
+            )
+        return self
 
 
 class TaskResponse(BaseModel):
@@ -100,6 +174,9 @@ class TaskResponse(BaseModel):
     knowledge_mode: str
     harness_profile: str
     learning_mode: str
+    model: str | None
+    effort: str | None
+    routing_context: dict[str, Any] | None
     knowledge_usage: dict[str, Any] | None
     status: str
     final_report: dict[str, Any] | None
@@ -129,6 +206,9 @@ def to_response(task: Task) -> TaskResponse:
         knowledge_mode=task.knowledge_mode,
         harness_profile=task.harness_profile,
         learning_mode=task.learning_mode,
+        model=task.request_metadata.get("model"),
+        effort=task.request_metadata.get("effort"),
+        routing_context=task.request_metadata.get("routing_context"),
         knowledge_usage=task.knowledge_usage,
         status=task.status,
         final_report=task.final_report,
@@ -240,6 +320,18 @@ async def create_task(
                     "user-agent",
                     "",
                 )[:512],
+                **({"model": request.model} if request.model else {}),
+                **({"effort": request.effort} if request.effort else {}),
+                **(
+                    {
+                        "routing_context": request.routing_context.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        )
+                    }
+                    if request.routing_context
+                    else {}
+                ),
             },
             knowledge_mode=request.knowledge_mode,
             harness_profile=request.harness_profile,

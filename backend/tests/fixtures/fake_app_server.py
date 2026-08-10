@@ -35,6 +35,9 @@ for raw_line in sys.stdin:
             }
         )
     elif method in {"thread/start", "thread/resume"}:
+        if mode == "expect-model-routing":
+            if message.get("params", {}).get("model") != "gpt-5.6-luna":
+                raise RuntimeError("thread model was not routed")
         if (
             mode == "expect-ephemeral"
             and message.get("params", {}).get("ephemeral") is not True
@@ -58,6 +61,12 @@ for raw_line in sys.stdin:
             }
         )
     elif method == "turn/start":
+        if mode == "expect-model-routing":
+            params = message.get("params", {})
+            if params.get("model") != "gpt-5.6-luna":
+                raise RuntimeError("turn model was not routed")
+            if params.get("effort") != "low":
+                raise RuntimeError("turn effort was not routed")
         send(
             {
                 "id": request_id,

@@ -171,6 +171,11 @@ class TaskService:
                 "knowledge_mode": knowledge_mode,
                 "harness_profile": harness_profile,
                 "learning_mode": learning_mode,
+                "model": (request_metadata or {}).get("model"),
+                "effort": (request_metadata or {}).get("effort"),
+                "routing_context": (request_metadata or {}).get(
+                    "routing_context"
+                ),
             },
         )
         session.add(

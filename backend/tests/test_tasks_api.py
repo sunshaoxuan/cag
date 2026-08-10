@@ -49,6 +49,85 @@ def test_create_and_get_completed_task(client: TestClient) -> None:
     assert completed["final_report"]["validation"][0]["status"] == "passed"
 
 
+def test_task_persists_model_routing_context(client: TestClient) -> None:
+    routing_context = {
+        "routePolicyVersion": "oneops-ai-task-routing-v1",
+        "taskClass": "TRANSLATION",
+        "objectiveSummary": "後続の入力を日本語へ翻訳する",
+        "targetLanguage": "ja",
+        "constraints": ["原文の構造と書式を維持する"],
+        "continuationMode": "INHERITED",
+        "taskFingerprint": "a" * 64,
+        "attemptNumber": 1,
+        "tier": "SIMPLE",
+        "modelSettingId": "11111111-1111-4111-8111-111111111111",
+        "gatewaySettingId": "22222222-2222-4222-8222-222222222222",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low",
+        "selectionReason": "SESSION_TASK_CONTINUATION",
+        "escalationReason": None,
+    }
+    response = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": "test-project",
+            "prompt": "Translate this text.",
+            "model": "gpt-5.6-luna",
+            "effort": "low",
+            "routing_context": routing_context,
+        },
+    )
+
+    assert response.status_code == 202
+    created = response.json()
+    assert created["model"] == "gpt-5.6-luna"
+    assert created["effort"] == "low"
+    assert created["routing_context"] == routing_context
+    audit = client.get(f"/api/v1/audit/tasks/{created['id']}")
+    assert audit.status_code == 200
+    assert audit.json()["request_metadata"]["routing_context"] == routing_context
+    wait_for_task(client, str(created["id"]))
+    events = parse_sse(
+        client.get(f"/api/v1/tasks/{created['id']}/events").text
+    )
+    plan = next(event for event in events if event["type"] == "agent.plan")
+    assert plan["data"]["model"] == "gpt-5.6-luna"
+    assert plan["data"]["reasoning_effort"] == "low"
+
+
+def test_task_rejects_inconsistent_model_routing_context(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": "test-project",
+            "prompt": "Translate this text.",
+            "model": "gpt-5.6-terra",
+            "effort": "low",
+            "routing_context": {
+                "routePolicyVersion": "oneops-ai-task-routing-v1",
+                "taskClass": "TRANSLATION",
+                "objectiveSummary": "後続の入力を日本語へ翻訳する",
+                "targetLanguage": "ja",
+                "constraints": [],
+                "continuationMode": "NEW_OR_UPDATED",
+                "taskFingerprint": "b" * 64,
+                "attemptNumber": 1,
+                "tier": "SIMPLE",
+                "modelSettingId": "11111111-1111-4111-8111-111111111111",
+                "gatewaySettingId": "22222222-2222-4222-8222-222222222222",
+                "model": "gpt-5.6-luna",
+                "reasoningEffort": "low",
+                "selectionReason": "LIGHT_TASK_INITIAL_ROUTE",
+                "escalationReason": None,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_project_code_resolves_to_stable_physical_id(client: TestClient) -> None:
     first = create_task(client)
     second = create_task(client)
