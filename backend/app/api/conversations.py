@@ -200,15 +200,18 @@ def get_conversation_events(
     after_sequence: Annotated[int, Query(ge=0)] = 0,
     follow: bool = True,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
-    session: Session = Depends(get_session),
     task_service: TaskService = Depends(get_task_service),
     database: Database = Depends(get_database),
     settings: Settings = Depends(get_app_settings),
 ) -> StreamingResponse:
-    try:
-        task_service.get_conversation(session, conversation_id)
-    except ConversationNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Conversation not found") from exc
+    with database.session_factory() as session:
+        try:
+            task_service.get_conversation(session, conversation_id)
+        except ConversationNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found",
+            ) from exc
 
     resume_sequence = after_sequence
     if last_event_id is not None and last_event_id.isdigit():

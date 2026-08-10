@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for version 0.17.1 and amended by ADR 0025 for version 0.23.0.
+Accepted for version 0.17.1, amended by ADR 0025 for version 0.23.0 and updated
+for dependency readiness in version 0.28.2.
 
 ## Context
 
@@ -20,21 +21,29 @@ Task Scheduler starts a PowerShell supervisor at system startup and at current
 user sign-in. The task has no execution time limit and retries a failed
 supervisor every minute up to 999 times.
 
-The supervisor checks port 8000 and `/health/live` every 15 seconds. A missing
-listener starts the normal managed launcher. Four consecutive failed liveness
-checks restart only a process whose command line matches the expected Uvicorn
-Gateway and port. Readiness remains observable without triggering a process
-restart. An unexpected listener is logged and left untouched.
+The supervisor checks port 8000, `/health/live` and `/health/ready` every 15
+seconds. Four consecutive failed liveness checks restart only a process whose
+command line matches the expected Uvicorn Gateway and port. Readiness requires
+PostgreSQL storage, native pgvector search and Redis connectivity. Sustained
+dependency failures are recorded without restarting a live API process. A
+missing listener starts the normal managed launcher. An unexpected listener is
+logged and left untouched.
+
+PostgreSQL and Redis Compose services use `unless-stopped` restart policies so
+Docker daemon recovery restores both stateful dependencies with their named
+volumes.
 
 The supervisor writes a 10 MiB rotating log and retains five historical files
 under the ignored persistent Gateway workspace.
 
 ## Consequences
 
-Process exits and sustained health failures recover automatically. PostgreSQL
-queue leases preserve admitted 0.17 work across recovery. Startup continues to
-perform the guarded legacy migration, Redis readiness check and frontend
-refresh.
+Gateway process exits recover automatically. Docker daemon recovery and stateful
+dependency process exits are covered by the Compose restart policies. A
+dependency that remains running while unready is recorded for operator action.
+PostgreSQL queue leases preserve admitted work across recovery. Startup
+continues to perform the guarded legacy migration, Redis readiness check and
+frontend refresh.
 
 Automatic startup that requires local Codex credentials becomes fully
 operational when the configured Windows user has an interactive session.
@@ -44,7 +53,8 @@ operational when the configured Windows user has an interactive session.
 PowerShell parser and Pester checks cover triggers, retry settings, listener
 identity checks, health thresholds and log rotation configuration. Runtime
 acceptance checks the scheduled task state, trigger count, retry count,
-supervisor process, all-interface listener, health version and browser console.
+supervisor process, all-interface listener, dependency container restart
+policies, readiness recovery, health version and browser console.
 
 ## Rollback
 

@@ -80,7 +80,7 @@ class KnowledgeScheduler:
                 source_id,
                 self._worker_id,
             )
-        return True
+        return created
 
     async def _run(self) -> None:
         self._service.set_scheduler_running(True)

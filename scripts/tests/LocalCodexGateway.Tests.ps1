@@ -3,6 +3,7 @@ $runScript = Join-Path $repositoryRoot "scripts\run-local-codex-gateway.ps1"
 $manageScript = Join-Path $repositoryRoot "scripts\manage-local-codex-gateway-task.ps1"
 $supervisorScript = Join-Path $repositoryRoot "scripts\supervise-local-codex-gateway.ps1"
 $migrationScript = Join-Path $repositoryRoot "scripts\migrate-sqlite-to-pgvector.ps1"
+$composePath = Join-Path $repositoryRoot "docker-compose.yml"
 
 Describe "Local Codex Gateway PowerShell scripts" {
     It "parses both entrypoint scripts without errors" {
@@ -79,16 +80,30 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content | Should Match 'supervise-local-codex-gateway\.ps1'
     }
 
-    It "supervises health and rotates persistent logs" {
+    It "separates process liveness from dependency readiness" {
         $content = Get-Content -Raw -LiteralPath $supervisorScript
+        $content | Should Match '/health/ready'
         $content | Should Match '/health/live'
         $content | Should Match 'UnhealthyThreshold'
+        $content | Should Match 'UnreadyThreshold'
+        $content | Should Match 'redis_connected -eq \$true'
+        $content | Should Match 'backend -eq "postgresql"'
+        $content | Should Match 'native_vector_search -eq \$true'
+        $content | Should Match 'GatewayDependencyFailure'
+        $content | Should Match 'liveness remains healthy'
+        $content | Should Not Match 'reason=readiness_threshold'
         $content | Should Match 'gateway\.restarting'
         $content | Should Match 'gateway-supervisor\.log'
         $content | Should Match 'retainedLogFiles = 5'
         $content | Should Match 'operational-issue-spool\.jsonl'
         $content | Should Match '/api/v1/operations/issues/intake'
         $content | Should Match 'Flush-OperationalIssueSpool'
+    }
+
+    It "keeps PostgreSQL and Redis recoverable after Docker restarts" {
+        $content = Get-Content -Raw -LiteralPath $composePath
+        $content | Should Match '(?ms)^  postgres:\r?\n(?:(?!^  \w).)*^    restart: unless-stopped\s*$'
+        $content | Should Match '(?ms)^  redis:\r?\n(?:(?!^  \w).)*^    restart: unless-stopped\s*$'
     }
 
     It "reports the persistent Gateway as running" {

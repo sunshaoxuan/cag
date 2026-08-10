@@ -1,5 +1,4 @@
 import asyncio
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 import gzip
@@ -3012,6 +3011,154 @@ def test_scheduler_lease_prevents_duplicate_claim_and_failure_is_retried(
         ).json()
         assert history[0]["status"] == "failed"
         assert history[0]["trigger"] == "scheduled"
+
+
+def test_scheduler_skips_sources_with_active_ingestions(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(
+        app,
+        active_settings,
+        FakeCredentialStore(),
+    )
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Single flight scheduled source",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+                "sync_mode": "scheduled",
+                "sync_interval_minutes": 60,
+            },
+        ).json()
+
+        with app.state.database.session_factory() as session:
+            ingestion = KnowledgeIngestion(
+                source_id=source["id"],
+                trigger="scheduled",
+                status="queued",
+            )
+            session.add(ingestion)
+            session.commit()
+
+        assert service.claim_due_source(
+            worker_id="scheduler-with-queued-ingestion",
+            lease_seconds=60,
+        ) is None
+
+        with app.state.database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion.id)
+            ingestion.status = "running"
+            session.commit()
+
+        assert service.claim_due_source(
+            worker_id="scheduler-with-running-ingestion",
+            lease_seconds=60,
+        ) is None
+
+        with app.state.database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion.id)
+            ingestion.status = "completed"
+            session.commit()
+
+        assert service.claim_due_source(
+            worker_id="scheduler-after-completion",
+            lease_seconds=60,
+        ) == source["id"]
+        service.release_sync_lease(
+            source["id"],
+            "scheduler-after-completion",
+        )
+
+
+def test_scheduler_treats_reused_active_ingestion_as_idle() -> None:
+    class ActiveIngestionService:
+        def __init__(self) -> None:
+            self.release_calls: list[tuple[str, str]] = []
+
+        def claim_due_source(
+            self,
+            *,
+            worker_id: str,
+            lease_seconds: int,
+        ) -> str:
+            del worker_id, lease_seconds
+            return "source-with-active-ingestion"
+
+        def create_ingestion(
+            self,
+            source_id: str,
+            *,
+            trigger: str,
+        ) -> tuple[object, bool]:
+            assert source_id == "source-with-active-ingestion"
+            assert trigger == "scheduled"
+            return object(), False
+
+        def release_sync_lease(self, source_id: str, worker_id: str) -> None:
+            self.release_calls.append((source_id, worker_id))
+
+    service = ActiveIngestionService()
+    scheduler = KnowledgeScheduler(
+        service=service,  # type: ignore[arg-type]
+        poll_seconds=1,
+        lease_seconds=60,
+    )
+
+    assert asyncio.run(scheduler.run_once()) is False
+    assert len(service.release_calls) == 1
+    released_source_id, released_worker_id = service.release_calls[0]
+    assert released_source_id == "source-with-active-ingestion"
+    assert released_worker_id.startswith("knowledge-scheduler:")
+
+
+def test_scheduled_ingestion_reuses_any_active_source_ingestion(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(
+        app,
+        active_settings,
+        FakeCredentialStore(),
+    )
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Scheduled atomic source",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+                "sync_mode": "scheduled",
+                "sync_interval_minutes": 60,
+            },
+        ).json()
+        scoped, scoped_created = service.create_ingestion(
+            source["id"],
+            trigger="scope_repair",
+            analysis_scope_id="scope-1",
+            scope_prefix="customer-a",
+            enqueue=False,
+        )
+
+        scheduled, scheduled_created = service.create_ingestion(
+            source["id"],
+            trigger="scheduled",
+            enqueue=False,
+        )
+
+        assert scoped_created is True
+        assert scheduled_created is False
+        assert scheduled.id == scoped.id
 
 
 def test_ingestion_waits_for_active_extraction_source_lease(

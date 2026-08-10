@@ -1,5 +1,9 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +19,7 @@ from app.models import (
     Base,
     KnowledgeChunk,
     KnowledgeDocument,
+    KnowledgeIngestion,
     KnowledgeSource,
     KnowledgeSourceEntry,
     Product,
@@ -32,6 +37,136 @@ POSTGRES_URL = os.environ.get("AGENT_GATEWAY_TEST_POSTGRES_URL")
 MIGRATION_POSTGRES_URL = os.environ.get(
     "AGENT_GATEWAY_TEST_MIGRATION_POSTGRES_URL"
 )
+
+
+@pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="AGENT_GATEWAY_TEST_POSTGRES_URL is not configured",
+)
+def test_postgresql_closes_claim_to_create_race(
+    tmp_path: Path,
+    projects_dir: Path,
+    project_repository: Path,
+) -> None:
+    settings = Settings(
+        environment="test",
+        process_role="api",
+        database_url=POSTGRES_URL,
+        auto_create_schema=True,
+        projects_dir=projects_dir,
+        workspace_root=tmp_path / "workspaces",
+        fake_runtime_delay_ms=0,
+        knowledge_enabled=True,
+        knowledge_encryption_key=KnowledgeCipher.generate_key(),
+        knowledge_allowed_roots=str(project_repository.parent),
+        knowledge_sources_dir=tmp_path / "knowledge-sources",
+        knowledge_rejection_archive_dir=tmp_path / "rejections",
+        knowledge_scheduler_enabled=False,
+        queue_redis_enabled=False,
+    )
+    app = create_app(settings=settings)
+    service = KnowledgeService(
+        database=app.state.database,
+        settings=settings,
+        provider=FakeOllamaClient(),
+        cipher=load_knowledge_cipher(settings),
+    )
+    app.state.knowledge_service = service
+
+    with TestClient(app) as client:
+        source_response = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": f"PostgreSQL scheduler lock {tmp_path.name}",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+                "sync_mode": "scheduled",
+                "sync_interval_minutes": 60,
+            },
+        )
+        assert source_response.status_code == 201
+        source_id = source_response.json()["id"]
+        scheduler_worker = "postgresql-race-scheduler"
+        with app.state.database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            source.next_sync_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            session.commit()
+        assert service.claim_due_source(
+            worker_id=scheduler_worker,
+            lease_seconds=60,
+        ) == source_id
+
+        create_started = Event()
+
+        def create_scheduled_ingestion() -> tuple[str, bool]:
+            create_started.set()
+            ingestion, created = service.create_ingestion(
+                source_id,
+                trigger="scheduled",
+                enqueue=False,
+            )
+            return ingestion.id, created
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with app.state.database.session_factory() as blocking_session:
+                blocking_session.scalar(
+                    select(KnowledgeSource)
+                    .where(KnowledgeSource.id == source_id)
+                    .with_for_update()
+                )
+                future = executor.submit(create_scheduled_ingestion)
+                assert create_started.wait(timeout=5)
+                deadline = time.monotonic() + 5
+                blocked = False
+                while time.monotonic() < deadline:
+                    with app.state.database.engine.connect() as connection:
+                        blocked = bool(
+                            connection.scalar(
+                                text(
+                                    "SELECT EXISTS ("
+                                    "SELECT 1 FROM pg_stat_activity "
+                                    "WHERE datname = current_database() "
+                                    "AND pid <> pg_backend_pid() "
+                                    "AND wait_event_type = 'Lock' "
+                                    "AND query LIKE '%knowledge_sources%'"
+                                    ")"
+                                )
+                            )
+                        )
+                    if blocked:
+                        break
+                    time.sleep(0.02)
+                assert blocked is True
+                scoped = KnowledgeIngestion(
+                    source_id=source_id,
+                    trigger="scope_repair",
+                    status="queued",
+                    analysis_scope_id="scope-race",
+                    scope_prefix="customer-a",
+                )
+                blocking_session.add(scoped)
+                blocking_session.commit()
+
+            scheduled_id, scheduled_created = future.result(timeout=5)
+
+        assert scheduled_created is False
+        assert scheduled_id == scoped.id
+        with app.state.database.session_factory() as session:
+            active = list(
+                session.scalars(
+                    select(KnowledgeIngestion).where(
+                        KnowledgeIngestion.source_id == source_id,
+                        KnowledgeIngestion.status.in_(("queued", "running")),
+                    )
+                )
+            )
+        assert [ingestion.id for ingestion in active] == [scoped.id]
+        service.release_sync_lease(source_id, scheduler_worker)
+        assert client.delete(
+            f"/api/v1/knowledge/sources/{source_id}"
+        ).status_code == 204
 
 
 @pytest.mark.skipif(

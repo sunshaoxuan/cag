@@ -5,7 +5,9 @@ param(
     [ValidateRange(5, 600)]
     [int]$RestartDelaySeconds = 30,
     [ValidateRange(2, 20)]
-    [int]$UnhealthyThreshold = 4
+    [int]$UnhealthyThreshold = 4,
+    [ValidateRange(2, 20)]
+    [int]$UnreadyThreshold = 4
 )
 
 $ErrorActionPreference = "Stop"
@@ -158,7 +160,26 @@ function Test-GatewayLive {
     }
 }
 
+function Test-GatewayReady {
+    try {
+        $health = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:$Port/health/ready" `
+            -TimeoutSec 5
+        (
+            $health.status -eq "ready" -and
+            $health.redis_connected -eq $true -and
+            $health.backend -eq "postgresql" -and
+            $health.native_vector_search -eq $true
+        )
+    }
+    catch {
+        $false
+    }
+}
+
 $consecutiveUnhealthyChecks = 0
+$consecutiveUnreadyChecks = 0
+$dependencyFailureReported = $false
 $lastReportedState = ""
 $launcherProcess = $null
 Write-SupervisorLog (
@@ -170,6 +191,8 @@ while ($true) {
     $listener = Get-GatewayListener
     if ($null -eq $listener) {
         $consecutiveUnhealthyChecks = 0
+        $consecutiveUnreadyChecks = 0
+        $dependencyFailureReported = $false
         if (
             $null -ne $launcherProcess -and
             -not $launcherProcess.HasExited
@@ -240,6 +263,8 @@ while ($true) {
     $expectedProcess = Test-GatewayProcess -Process $listenerProcess
     if (-not $expectedAddress -or -not $expectedProcess) {
         $consecutiveUnhealthyChecks = 0
+        $consecutiveUnreadyChecks = 0
+        $dependencyFailureReported = $false
         if ($lastReportedState -ne "unexpected_listener") {
             Write-SupervisorLog (
                 "gateway.unexpected_listener address=$($listener.LocalAddress) " +
@@ -251,8 +276,59 @@ while ($true) {
         continue
     }
 
-    if (Test-GatewayLive) {
-        $consecutiveUnhealthyChecks = 0
+    if (-not (Test-GatewayLive)) {
+        $consecutiveUnhealthyChecks++
+        $consecutiveUnreadyChecks = 0
+        $dependencyFailureReported = $false
+        if ($lastReportedState -ne "unhealthy") {
+            Write-SupervisorLog (
+                "gateway.unhealthy pid=$($listener.OwningProcess) " +
+                "threshold=$UnhealthyThreshold"
+            )
+            $lastReportedState = "unhealthy"
+        }
+        if ($consecutiveUnhealthyChecks -ge $UnhealthyThreshold) {
+            Write-SupervisorLog (
+                "gateway.restarting pid=$($listener.OwningProcess) " +
+                "reason=liveness_threshold"
+            )
+            Add-OperationalIssueSpool `
+                -Title "Gateway liveness threshold exceeded" `
+                -ErrorType "GatewayHealthFailure" `
+                -ErrorMessage (
+                    "Gateway liveness failed $consecutiveUnhealthyChecks " +
+                    "consecutive checks and requires restart"
+                ) `
+                -Evidence @{
+                    process_id = $listener.OwningProcess
+                    unhealthy_checks = $consecutiveUnhealthyChecks
+                    threshold = $UnhealthyThreshold
+                }
+            Stop-Process -Id $listener.OwningProcess -Force
+            if (
+                $null -ne $launcherProcess -and
+                -not $launcherProcess.HasExited
+            ) {
+                Stop-Process -Id $launcherProcess.Id -Force
+                $launcherProcess.WaitForExit()
+            }
+            if ($null -ne $launcherProcess) {
+                $launcherProcess.Dispose()
+                $launcherProcess = $null
+            }
+            $consecutiveUnhealthyChecks = 0
+            $lastReportedState = "restarting"
+            Start-Sleep -Seconds $RestartDelaySeconds
+            continue
+        }
+        Start-Sleep -Seconds $CheckIntervalSeconds
+        continue
+    }
+
+    $consecutiveUnhealthyChecks = 0
+    if (Test-GatewayReady) {
+        $consecutiveUnreadyChecks = 0
+        $dependencyFailureReported = $false
         if ($lastReportedState -ne "ready") {
             Write-SupervisorLog (
                 "gateway.ready address=$($listener.LocalAddress) " +
@@ -265,47 +341,36 @@ while ($true) {
         continue
     }
 
-    $consecutiveUnhealthyChecks++
-    if ($lastReportedState -ne "unhealthy") {
+    $consecutiveUnreadyChecks++
+    if ($lastReportedState -notin @("unready", "dependency_failure")) {
         Write-SupervisorLog (
-            "gateway.unhealthy pid=$($listener.OwningProcess) " +
-            "threshold=$UnhealthyThreshold"
+            "gateway.unready pid=$($listener.OwningProcess) " +
+            "threshold=$UnreadyThreshold"
         )
-        $lastReportedState = "unhealthy"
+        $lastReportedState = "unready"
     }
-    if ($consecutiveUnhealthyChecks -ge $UnhealthyThreshold) {
+    if (
+        $consecutiveUnreadyChecks -ge $UnreadyThreshold -and
+        -not $dependencyFailureReported
+    ) {
         Write-SupervisorLog (
-            "gateway.restarting pid=$($listener.OwningProcess) " +
-            "reason=health_threshold"
+            "gateway.dependencies_unavailable pid=$($listener.OwningProcess) " +
+            "checks=$consecutiveUnreadyChecks"
         )
         Add-OperationalIssueSpool `
-            -Title "Gateway health threshold exceeded" `
-            -ErrorType "GatewayHealthFailure" `
+            -Title "Gateway readiness threshold exceeded" `
+            -ErrorType "GatewayDependencyFailure" `
             -ErrorMessage (
-                "Gateway liveness failed $consecutiveUnhealthyChecks " +
-                "consecutive checks and requires restart"
+                "Gateway readiness failed $consecutiveUnreadyChecks " +
+                "consecutive checks while liveness remains healthy"
             ) `
             -Evidence @{
                 process_id = $listener.OwningProcess
-                unhealthy_checks = $consecutiveUnhealthyChecks
-                threshold = $UnhealthyThreshold
+                unready_checks = $consecutiveUnreadyChecks
+                threshold = $UnreadyThreshold
             }
-        Stop-Process -Id $listener.OwningProcess -Force
-        if (
-            $null -ne $launcherProcess -and
-            -not $launcherProcess.HasExited
-        ) {
-            Stop-Process -Id $launcherProcess.Id -Force
-            $launcherProcess.WaitForExit()
-        }
-        if ($null -ne $launcherProcess) {
-            $launcherProcess.Dispose()
-            $launcherProcess = $null
-        }
-        $consecutiveUnhealthyChecks = 0
-        $lastReportedState = "restarting"
-        Start-Sleep -Seconds $RestartDelaySeconds
-        continue
+        $dependencyFailureReported = $true
+        $lastReportedState = "dependency_failure"
     }
     Start-Sleep -Seconds $CheckIntervalSeconds
 }

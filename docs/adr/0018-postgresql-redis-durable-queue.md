@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for version 0.17.0 and amended by ADR 0025 for version 0.23.0.
+Accepted for version 0.17.0, amended by ADR 0025 for version 0.23.0 and updated
+for stateful container recovery in version 0.28.2.
 
 ## Context
 
@@ -21,6 +22,10 @@ separate worker pools in a process isolated from the API. Workers claim eligible
 Redis Pub/Sub sends wake notifications. It contains no authoritative payload.
 Workers continue polling PostgreSQL when Redis is unavailable.
 
+The PostgreSQL and Redis Compose services use `unless-stopped` restart
+policies. Docker daemon recovery therefore restores both stateful dependencies
+with their named volumes. An intentional operator stop remains stopped.
+
 Tasks sharing a Conversation are serial. The claim query excludes a task while
 an earlier queue item in that Conversation remains queued or leased. Tasks in
 different Conversations can run concurrently.
@@ -36,7 +41,8 @@ database receipt. The legacy source remains available as offline evidence.
 
 ## Consequences
 
-Accepted work survives Gateway restart and Redis failure. Queue capacity and
+Accepted work survives Gateway restart, Docker daemon recovery and Redis
+failure. Queue capacity and
 ownership are observable through the API and online documentation page.
 PostgreSQL availability remains a startup requirement.
 
@@ -52,6 +58,9 @@ production frontend build and browser evidence.
 
 ## Rollback
 
-Stop 0.17.0 workers, retain PostgreSQL and migration receipts, then deploy the
-previous release against a compatible database snapshot. Keep the legacy
+Stop the active workers before an application rollback. To remove the 0.28.2
+stateful restart amendment, restore the 0.28.1 Compose definitions and run
+`docker compose up -d --force-recreate postgres redis`. Keep the named
+PostgreSQL and Redis volumes, then verify both containers use the intended
+RestartPolicy. Retain PostgreSQL and migration receipts, and keep the legacy
 SQLite source unchanged for forensic comparison.

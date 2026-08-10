@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.24.0 development deployment
+## 0.28.2 development deployment
 
 Install the pinned Windows OCR runtime before starting the supervised API and
 worker processes:
@@ -44,7 +44,9 @@ The Compose deployment contains:
 
 PostgreSQL and Redis are published at `127.0.0.1:5432` and
 `127.0.0.1:6379` for the trusted Windows host Gateway. Neither service is
-published to the LAN.
+published to the LAN. Both stateful containers use `unless-stopped` restart
+policies, so Docker daemon recovery restores them while preserving their named
+volumes.
 
 The unified management console is available locally at `http://127.0.0.1:5173`
 and on the network at `http://<CAG-host-IP>:5173`. It includes the API test
@@ -157,10 +159,12 @@ Use the same script with `status`, `stop` or `uninstall` to inspect, stop or
 remove the background task. The task starts at Windows startup and at sign-in
 under the current interactive user identity so the local Codex
 authentication remains available. Task Scheduler retries the supervisor up to
-999 times at one-minute intervals. The supervisor checks `/health/live` every
-15 seconds, restarts a recognized Gateway after four consecutive liveness failures, and
-starts it again when the listener exits. It never terminates an unexpected
-port owner.
+999 times at one-minute intervals. The supervisor checks `/health/live` and
+`/health/ready` every 15 seconds. Four consecutive liveness failures restart a
+recognized Gateway process. Readiness also requires PostgreSQL, native pgvector
+search and Redis connectivity. Sustained dependency failures are recorded
+without restarting a live API process. A missing listener starts the Gateway
+again. An unexpected port owner is never terminated.
 
 Supervisor logs are stored under
 `workspaces\.gateway\logs\gateway-supervisor.log`. Each file is limited to
@@ -240,7 +244,7 @@ The legacy SQLite source remains active until its current learning run reaches a
 terminal state. The migration command refuses active knowledge ingestions and
 active Agent tasks.
 
-The normal Windows launcher applies Alembic revision `20260806_0024` and then
+The normal Windows launcher applies Alembic revision `20260810_0026` and then
 runs the guarded automatic cutover. When the legacy source has no active work,
 the launcher creates a consistent snapshot, replaces application tables inside
 one PostgreSQL transaction, validates row counts, UUID digests, vectors and the

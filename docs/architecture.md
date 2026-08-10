@@ -201,6 +201,11 @@ The Task SSE endpoint reads committed TaskEvent rows in Task sequence order and 
 
 The Conversation SSE endpoint remains open across multiple Tasks. `Conversation.next_event_sequence` assigns a continuous sequence, heartbeat comments keep idle connections alive, and `Last-Event-ID` supports standard EventSource reconnection. The frontend never connects to Codex app-server.
 
+Task and Conversation SSE perform their initial resource existence check in an
+explicit short-lived database Session that closes before `StreamingResponse` is
+returned. Every subsequent polling iteration owns a separate bounded Session,
+so a long-lived client connection does not retain an idle database transaction.
+
 Every TaskEvent receives a Gateway-wide sequence from the locked
 `AuditCursor`. `/api/v1/audit/events` projects these committed events as one
 resumable `audit.event` SSE. Source, client and task filters operate on the same
@@ -213,7 +218,7 @@ The local runtime maps every permitted user-visible app-server delta into a dura
 ### Persistence
 
 SQLAlchemy 2 models use PostgreSQL 16 with pgvector and pg_trgm in every managed runtime.
-Alembic owns schema versioning through revision `20260806_0024`. SQLite is
+Alembic owns schema versioning through revision `20260810_0026`. SQLite is
 restricted to isolated automated tests and the one-time migration reader.
 
 The Windows host launcher validates PostgreSQL and the pgvector extension
@@ -241,10 +246,14 @@ PostgreSQL, so Redis connection loss affects pickup latency without changing
 the durable job record.
 
 The Windows host uses a long-running Task Scheduler supervisor under the
-interactive user who owns the local Codex ChatGPT or API Key session. It starts at system startup and
-sign-in, checks the all-interface listener and `/health/live`, starts a missing
-Gateway, and restarts a recognized non-live Gateway after a bounded failure
-threshold. Unexpected port owners are logged and left untouched.
+interactive user who owns the local Codex ChatGPT or API Key session. It starts
+at system startup and sign-in, checks the all-interface listener, process
+liveness and dependency readiness, starts a missing Gateway, and restarts a
+recognized non-live Gateway after a bounded failure threshold. PostgreSQL,
+native pgvector search and Redis readiness failures are recorded independently
+without restarting a live API process. PostgreSQL and Redis containers use
+`unless-stopped` restart policies. Unexpected port owners are logged and left
+untouched.
 The managed launcher recursively terminates only the worker and API process
 trees it created. This includes the base Python child behind a Windows virtual
 environment launcher, preventing an old worker from renewing leases after a
@@ -433,7 +442,9 @@ per-document analysis and aggregation. Its Scope Repair is admitted within the
 same lease. Manual and scheduled full ingestions for that Source may enter the
 queue, but wait before collection until the Extraction releases ownership.
 This prevents an active generation from replacing frozen Manifest Document
-Versions. Scheduler ownership transfers atomically to its physical Ingestion.
+Versions. Ingestion creation locks the Source row. Scheduled creation then
+rechecks every active Ingestion for that Source before it queues work, so the
+Scheduler lease transfers atomically to one physical Ingestion.
 
 Directory taxonomy compares NFKC-normalized segments. Governed aliases include
 the observed `2.カスタイズ情報` spelling as well as the formal
@@ -460,7 +471,10 @@ creates a normal ingestion record with trigger `scheduled`, and runs the same
 collection and indexing path used by the manual API. Successful runs compute
 the next interval. Failed runs retain the error and schedule bounded
 exponential retry. Startup recovery closes queued or running ingestions left by
-an interrupted process.
+an interrupted process. A source with an existing queued or running ingestion
+is excluded before claim. If a concurrent creator still wins after claim, the
+scheduler releases the lease and treats the iteration as idle so the normal poll
+interval applies.
 
 ## 5. Data identity
 

@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.28.1`
+Current version: `0.28.2`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.28.1"
+  "version": "0.28.2"
 }
 ```
 
@@ -506,6 +506,9 @@ Query parameters:
 
 CAG emits a heartbeat comment every 15 seconds while the Conversation is idle. The SSE `id` is the Conversation event sequence. Reconnecting clients may send `Last-Event-ID`; CAG resumes after the greater value from that header and `after_sequence`.
 
+The resource existence check closes its database Session before the stream is
+returned. Idle heartbeat time never retains the request validation transaction.
+
 Payload:
 
 ```json
@@ -634,6 +637,9 @@ data: {"event_id":"...","task_id":"...","sequence":1,"global_sequence":42,"type"
 ```
 
 Reconnecting clients pass the last received sequence through `after_sequence`.
+
+The resource existence check closes its database Session before the stream is
+returned. Each event polling iteration uses its own bounded Session.
 
 ## API audit
 

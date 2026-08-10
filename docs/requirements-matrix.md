@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.28.1 | Evidence |
+| Requirement | Status for 0.28.2 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -20,10 +20,10 @@ Legend:
 | Fake Agent Runtime | Implemented | `backend/app/runtimes/fake.py` |
 | Create task API | Implemented | `POST /api/v1/tasks` |
 | Query task API | Implemented | `GET /api/v1/tasks/{task_id}` |
-| Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events` |
-| Docker Compose | Implemented | `docker-compose.yml` |
+| Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events`, validation Session closes before streaming |
+| Docker Compose | Implemented | `docker-compose.yml`, PostgreSQL and Redis `unless-stopped` recovery |
 | Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
-| Continuous Windows supervision | Implemented | Startup and sign-in triggers, health monitor, failure retry and rotating supervisor log |
+| Continuous Windows supervision | Implemented | Startup and sign-in triggers, full readiness monitor, failure retry and rotating supervisor log |
 | Unit and API tests | Implemented | `backend/tests` |
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
@@ -55,7 +55,7 @@ Legend:
 | Conversation create and query API | Implemented | `POST` and `GET /api/v1/conversations`, client-scoped idempotent replay and request-hash conflict tests |
 | OneOps resilient Task routing contract | Implemented | `SIMPLE` and `GENERAL` tier validation, model and effort consistency, OneOps v3 routing payload persistence tests |
 | Persistent Codex conversation history | Implemented | `thread/start`, stored thread ID and `thread/resume` live smoke |
-| CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat and resume tests |
+| CAG-owned multi-turn SSE | Implemented | Conversation event sequence, heartbeat, resume and bounded validation Session tests |
 | Knowledge-first Conversation execution | Implemented | pre-runtime retrieval, bounded fragments, resource URI injection and Conversation SSE tests |
 | Traceable knowledge learning loop | Implemented | citations shared by context injection, final report and MemoryCandidate evidence |
 | Continuous conversation frontend | Implemented | Component, build and browser evidence |
@@ -78,7 +78,7 @@ Legend:
 | Post-start lease expiry recovery | Implemented | each queue claim transaction requeues expired leases for its queue and resumes durable checkpoints |
 | Per-file parallel knowledge work items | Planned | ADR 0015; file-level claim, pause and checkpoint tests required |
 | Path-complete semantic indexing | Implemented | Every readable physical file retains raw SHA 256 and path evidence before processing policy; supported files up to 100 MB are cleaned; canonical path and redacted content share one multilingual embedding representation; duplicate content does not remove paths |
-| Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, guarded automatic cutover, database receipt and live 170807-vector verification |
+| Managed PostgreSQL and pgvector host runtime | Implemented | Runtime gate, native vector query, Docker restart recovery, guarded automatic cutover, database receipt and live 170807-vector verification |
 | Local Ollama embedding and memory models | Implemented | Ollama adapter tests and local benchmark evidence |
 | Tenant and stable Product knowledge isolation | Implemented | Product-scoped retrieval follows the stable Product physical ID across ProductVersion changes |
 | Atomic active knowledge generations | Implemented | New vectors and code facts commit in one transaction; failed refreshes preserve the last completed generation |
@@ -109,7 +109,7 @@ Legend:
 | Resumable vector generation | Implemented | redacted-input embeddings use proven 8 Chunk batches, duplicate cache keys are inserted once, checkpoints commit per batch, retries calculate only missing vectors and final knowledge replacement remains atomic |
 | End-to-end file provenance | Implemented | raw file SHA 256, resumable bounded-concurrency legacy backfill, cleaned document and chunk hashes, SourceEntry physical foreign key, chunk to file citation reverse lookup and closure audit |
 | Shortcut flattening and cycle safety | Implemented | LnkParse3 UNC reconstruction, same-share or allowed-root boundary, logical-path flattening, physical-directory visited gate and target-status tests |
-| Durable knowledge source registry and scheduled rescan | Implemented | persisted sync policy, database lease, retry state, restart recovery, run history and scheduler tests |
+| Durable knowledge source registry and scheduled rescan | Implemented | persisted sync policy, database lease, active-ingestion claim exclusion, Source-row-locked Scheduled Ingestion creation, PostgreSQL concurrency test, retry state, restart recovery and run history |
 | Git diff and artifacts | Partial | structured Agent artifacts implemented, normalized Git diff artifact remains planned |
 | MCP client | Planned for Phase 6 | Fake MCP and authorized live smoke tests required |
 | Skill proposals and evaluation | Implemented | CapabilityAsset, CapabilityEvaluation and promotion API tests |

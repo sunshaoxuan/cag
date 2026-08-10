@@ -2,6 +2,22 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.28.2
+
+发布日期：2026-08-10
+
+### Changed
+
+* Windows 监督任务分别检查 `/health/live` 与 `/health/ready`，并把 PostgreSQL、pgvector 和 Redis 故障与 Gateway 进程故障分类处理。
+* PostgreSQL 与 Redis 容器使用 `unless-stopped` 重启策略。
+
+### Fixed
+
+* Docker 重启后状态容器未恢复，Gateway liveness 仍正常，会话请求长时间等待并返回 500 或 503 的问题。
+* 定时知识学习在同一来源已有 queued 或 running ingestion 时反复 claim 并空转，持续占用数据库连接与事件循环的问题。
+* Scheduler claim 与 Scheduled Ingestion 创建之间缺少 Source 行锁，人工或 Scope Repair Ingestion 可在两个事务之间进入并造成重复排队的问题。
+* Task 与 Conversation SSE 的初始存在性校验 Session 在长连接期间保持事务，形成 PostgreSQL `idle in transaction` 并挤压连接池的问题。
+
 ## 0.28.1
 
 发布日期：2026-08-10

@@ -372,15 +372,15 @@ def get_task_events(
     task_id: str,
     after_sequence: Annotated[int, Query(ge=0)] = 0,
     follow: bool = True,
-    session: Session = Depends(get_session),
     task_service: TaskService = Depends(get_task_service),
     database: Database = Depends(get_database),
     settings: Settings = Depends(get_app_settings),
 ) -> StreamingResponse:
-    try:
-        task_service.get_task(session, task_id)
-    except TaskNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Task not found") from exc
+    with database.session_factory() as session:
+        try:
+            task_service.get_task(session, task_id)
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Task not found") from exc
 
     return StreamingResponse(
         stream_task_events(

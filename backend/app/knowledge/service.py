@@ -632,20 +632,30 @@ class KnowledgeService:
         if trigger not in {"manual", "scheduled", "scope_repair"}:
             raise ValueError("Unsupported knowledge ingestion trigger")
         with self._database.session_factory() as session:
-            source = session.get(KnowledgeSource, source_id)
+            source = session.scalar(
+                select(KnowledgeSource)
+                .where(KnowledgeSource.id == source_id)
+                .with_for_update()
+            )
             if source is None:
                 raise KeyError(source_id)
             if not source.enabled:
                 raise ValueError("Knowledge source is disabled")
+            active_conditions = [
+                KnowledgeIngestion.source_id == source_id,
+                KnowledgeIngestion.status.in_(("queued", "running")),
+            ]
+            if trigger != "scheduled":
+                active_conditions.extend(
+                    (
+                        KnowledgeIngestion.analysis_scope_id
+                        == analysis_scope_id,
+                        KnowledgeIngestion.scope_prefix == scope_prefix,
+                    )
+                )
             active = session.scalar(
                 select(KnowledgeIngestion)
-                .where(
-                    KnowledgeIngestion.source_id == source_id,
-                    KnowledgeIngestion.status.in_(("queued", "running")),
-                    KnowledgeIngestion.analysis_scope_id
-                    == analysis_scope_id,
-                    KnowledgeIngestion.scope_prefix == scope_prefix,
-                )
+                .where(*active_conditions)
                 .order_by(KnowledgeIngestion.created_at.desc())
             )
             if active is not None:
@@ -3242,6 +3252,14 @@ class KnowledgeService:
     ) -> str | None:
         now = utc_now()
         with self._database.session_factory() as session:
+            active_ingestion_exists = (
+                select(KnowledgeIngestion.id)
+                .where(
+                    KnowledgeIngestion.source_id == KnowledgeSource.id,
+                    KnowledgeIngestion.status.in_(("queued", "running")),
+                )
+                .exists()
+            )
             source = session.scalar(
                 select(KnowledgeSource)
                 .where(
@@ -3250,6 +3268,7 @@ class KnowledgeService:
                     KnowledgeSource.next_sync_at.is_not(None),
                     KnowledgeSource.next_sync_at <= now,
                     KnowledgeSource.status != KnowledgeStatus.INDEXING,
+                    ~active_ingestion_exists,
                     or_(
                         KnowledgeSource.sync_lease_owner.is_(None),
                         KnowledgeSource.sync_lease_expires_at.is_(None),
