@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
@@ -6,6 +7,9 @@ import httpx
 
 class OllamaError(RuntimeError):
     pass
+
+
+StructuredGenerationActivity = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class OllamaProvider(Protocol):
@@ -18,6 +22,7 @@ class OllamaProvider(Protocol):
         prompt: str,
         schema: dict[str, Any],
         timeout_seconds: int | None = None,
+        activity: StructuredGenerationActivity | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -86,15 +91,17 @@ class OllamaClient:
         prompt: str,
         schema: dict[str, Any],
         timeout_seconds: int | None = None,
+        activity: StructuredGenerationActivity | None = None,
     ) -> dict[str, Any]:
         request_timeout = timeout_seconds or self._timeout
         async with httpx.AsyncClient(timeout=request_timeout) as client:
-            response = await client.post(
+            async with client.stream(
+                "POST",
                 f"{self._base_url}/api/generate",
                 json={
                     "model": self._memory_model,
                     "prompt": prompt,
-                    "stream": False,
+                    "stream": True,
                     "think": False,
                     "format": schema,
                     "options": {
@@ -103,11 +110,49 @@ class OllamaClient:
                     },
                     "keep_alive": "5m",
                 },
-            )
-        if not response.is_success:
-            raise OllamaError(f"Ollama generation failed: HTTP {response.status_code}")
-        raw = response.json().get("response")
-        if not isinstance(raw, str):
+            ) as response:
+                if not response.is_success:
+                    raise OllamaError(
+                        f"Ollama generation failed: HTTP {response.status_code}"
+                    )
+                fragments: list[str] = []
+                response_chars = 0
+                chunk_index = 0
+                done = False
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise OllamaError(
+                            "Ollama returned malformed stream data"
+                        ) from exc
+                    if payload.get("error"):
+                        raise OllamaError("Ollama generation stream failed")
+                    fragment = payload.get("response", "")
+                    if not isinstance(fragment, str):
+                        raise OllamaError(
+                            "Ollama returned an invalid structured response"
+                        )
+                    fragments.append(fragment)
+                    response_chars += len(fragment)
+                    chunk_index += 1
+                    done = payload.get("done") is True
+                    if activity is not None:
+                        await activity(
+                            {
+                                "chunk_index": chunk_index,
+                                "response_chars": response_chars,
+                                "done": done,
+                            }
+                        )
+                if not done:
+                    raise OllamaError(
+                        "Ollama generation stream ended before completion"
+                    )
+        raw = "".join(fragments)
+        if not raw:
             raise OllamaError("Ollama returned an invalid structured response")
         try:
             parsed = json.loads(raw)
@@ -151,9 +196,14 @@ class FakeOllamaClient:
         prompt: str,
         schema: dict[str, Any],
         timeout_seconds: int | None = None,
+        activity: StructuredGenerationActivity | None = None,
     ) -> dict[str, Any]:
         del timeout_seconds
         self.generated.append(prompt)
+        if activity is not None:
+            await activity(
+                {"chunk_index": 1, "response_chars": 0, "done": True}
+            )
         if "memories" in schema.get("properties", {}):
             return {
                 "memories": [

@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 import gzip
@@ -29,9 +30,13 @@ from app.knowledge.resources import build_resource_uri
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
 from app.knowledge.connectors import (
+    CollectionObservation,
     CollectionRejection,
+    ReusableFile,
     SourceConfig,
     SourceConnectorManager,
+    _contains_path,
+    _path_for_io,
 )
 from app.knowledge.customer_ledger_contracts import (
     customer_ledger_schema_registry,
@@ -40,7 +45,14 @@ from app.knowledge.customer_ledger_contracts import (
 from app.knowledge.extraction import (
     CustomerKnowledgeExtractionService,
     _parse_datetime,
+    is_historical_path,
     requested_fields_for_document,
+)
+from app.knowledge.shortcuts import (
+    ParsedShortcut,
+    ShortcutParseError,
+    parse_shortcut,
+    shortcut_semantic_text,
 )
 from app.policies.command_policy import CommandPolicyService
 from app.knowledge.security import (
@@ -64,6 +76,7 @@ from app.models import (
     KnowledgeDocumentVersion,
     KnowledgeExtractionTask,
     KnowledgeExtractionTaskDocument,
+    KnowledgeExtractionTaskEvent,
     KnowledgeFieldConflict,
     KnowledgeIngestion,
     KnowledgeProcessingVersion,
@@ -120,8 +133,9 @@ class CompleteRerankFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "候補JSON: " not in prompt:
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
@@ -170,10 +184,18 @@ class CustomerExtractionFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
         del timeout_seconds
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
+        if activity is not None:
+            await activity(
+                {"chunk_index": 1, "response_chars": 12, "done": False}
+            )
+            await activity(
+                {"chunk_index": 2, "response_chars": 24, "done": True}
+            )
         self.generated.append(prompt)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
         chunk_id = (
@@ -202,8 +224,9 @@ class RemoteInformationExtractionFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         self.generated.append(prompt)
@@ -256,8 +279,9 @@ class MultipleVpnExtractionFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -284,8 +308,9 @@ class ConflictingFieldFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -312,8 +337,9 @@ class TemporalFieldFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -348,8 +374,9 @@ class PartiallyFailingExtractionFakeOllama(FakeOllamaClient):
         prompt: str,
         schema: dict,
         timeout_seconds: int | None = None,
+        activity=None,
     ) -> dict:
-        del timeout_seconds
+        del timeout_seconds, activity
         if "fields" not in schema.get("properties", {}):
             return await super().structured_generate(prompt, schema)
         evidence = json.loads(prompt.split("Evidence: ", 1)[1])
@@ -371,6 +398,26 @@ class PartiallyFailingExtractionFakeOllama(FakeOllamaClient):
                 }
             ]
         }
+
+
+class BlockingCustomerExtractionFakeOllama(FakeOllamaClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+
+    async def structured_generate(
+        self,
+        prompt: str,
+        schema: dict,
+        timeout_seconds: int | None = None,
+        activity=None,
+    ) -> dict:
+        del prompt, timeout_seconds, activity
+        if "fields" not in schema.get("properties", {}):
+            return await super().structured_generate("", schema)
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("cancelled generation resumed")
 
 
 def scoped_extraction_request(
@@ -598,6 +645,7 @@ async def test_customer_document_prompt_is_schema_and_evidence_bounded(
 
 def test_scoped_manifest_uses_ingestion_support_for_sql() -> None:
     entry = SimpleNamespace(
+        relative_path="customer/custom.sql",
         extension=".sql",
         present=True,
         processing_status="completed",
@@ -639,6 +687,316 @@ def test_scoped_manifest_uses_ingestion_support_for_sql() -> None:
     assert CustomerKnowledgeExtractionService._manifest_status(
         entry, None, "observed.sql"
     ) == ("observed_only", None)
+    entry.relative_path = "customer/old/active-looking.sql"
+    assert CustomerKnowledgeExtractionService._manifest_status(
+        entry, document, "active-looking.sql"
+    ) == ("excluded", "historical_path")
+    assert is_historical_path("customer/旧_接続情報/access.txt") is True
+    assert is_historical_path("customer/back/access.txt") is True
+    assert is_historical_path("customer/backup/access.txt") is True
+    assert requested_fields_for_document(
+        "customer/old/access.txt",
+        [{"code": "vpns"}],
+    ) == []
+
+
+def test_shortcut_targets_are_hashed_flattened_and_cycle_safe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = tmp_path / "source"
+    related_root = tmp_path / "related"
+    source_root.mkdir()
+    related_root.mkdir()
+    (source_root / "related.lnk").write_bytes(b"root-link")
+    (source_root / "missing.lnk").write_bytes(b"missing-link")
+    (source_root / "denied.lnk").write_bytes(b"denied-link")
+    (related_root / "back.lnk").write_bytes(b"back-link")
+    (related_root / "connection.txt").write_text(
+        "remote connection instructions",
+        encoding="utf-8",
+    )
+
+    def fake_parse(path: Path) -> ParsedShortcut:
+        target = {
+            "related.lnk": related_root,
+            "missing.lnk": tmp_path / "missing",
+            "denied.lnk": tmp_path / "denied",
+            "back.lnk": source_root,
+        }[path.name]
+        return ParsedShortcut(
+            target_path=str(target),
+            network_root=None,
+            mapped_device=None,
+        )
+
+    monkeypatch.setattr(
+        "app.knowledge.connectors.parse_shortcut",
+        fake_parse,
+    )
+    original_stat = Path.stat
+
+    def guarded_stat(path: Path, *args, **kwargs):
+        if path == tmp_path / "denied":
+            raise PermissionError("denied")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+    observations = []
+    result = manager.collect(
+        SourceConfig(
+            id="shortcut-source",
+            source_type="local_directory",
+            location=str(source_root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        observation=observations.append,
+    )
+
+    documents = {item.path: item for item in result.documents}
+    assert set(documents) == {
+        "related.lnk",
+        "missing.lnk",
+        "denied.lnk",
+        "related/back.lnk",
+        "related/connection.txt",
+    }
+    assert "shortcut_target_status: shortcut_target_enqueued" in (
+        documents["related.lnk"].text
+    )
+    assert "shortcut_target_status: shortcut_target_already_covered" in (
+        documents["related/back.lnk"].text
+    )
+    assert "shortcut_target_status: shortcut_target_missing" in (
+        documents["missing.lnk"].text
+    )
+    assert "shortcut_target_status: shortcut_auth_denied" in (
+        documents["denied.lnk"].text
+    )
+    shortcut_observations = [
+        item for item in observations if item.extension == ".lnk"
+    ]
+    assert len(shortcut_observations) == 4
+    assert all(item.raw_content_hash for item in shortcut_observations)
+    assert result.files_seen == 5
+
+    flattened = related_root / "connection.txt"
+    flattened_stat = flattened.stat()
+    repeated_observations: list[CollectionObservation] = []
+    manager.collect(
+        SourceConfig(
+            id="shortcut-source",
+            source_type="local_directory",
+            location=str(source_root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        observation=repeated_observations.append,
+        reusable_files={
+            "related/connection.txt": ReusableFile(
+                file_size=flattened_stat.st_size,
+                modified_at=datetime.fromtimestamp(
+                    flattened_stat.st_mtime,
+                    tz=timezone.utc,
+                ),
+                processing_status="indexed",
+                reason_code=None,
+                raw_content_hash=hashlib.sha256(
+                    flattened.read_bytes()
+                ).hexdigest(),
+                has_document=True,
+            )
+        },
+    )
+    repeated_flattened = [
+        item
+        for item in repeated_observations
+        if item.relative_path == "related/connection.txt"
+    ]
+    assert repeated_flattened[-1].reason_code == "shortcut_target_flattened"
+
+
+def test_shortcut_parser_reconstructs_unc_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    shortcut = tmp_path / "network.lnk"
+    shortcut.write_bytes(b"lnk")
+
+    def fake_lnk_file(stream, *, cp: str):
+        assert stream.read() == b"lnk"
+        assert cp == "cp932"
+        return SimpleNamespace(
+            get_json=lambda: {
+                "link_info": {
+                    "common_path_suffix": "folder\\document.txt",
+                    "location_info": {
+                        "net_name": "\\\\server\\share",
+                        "device_name": "U:",
+                    },
+                },
+                "data": {},
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.knowledge.shortcuts.LnkParse3.lnk_file",
+        fake_lnk_file,
+    )
+    parsed = parse_shortcut(shortcut)
+
+    assert parsed.target_path == "\\\\server\\share\\folder\\document.txt"
+    assert parsed.network_root == "\\\\server\\share"
+    assert parsed.mapped_device == "U:"
+
+
+def test_unc_share_root_contains_targets_without_losing_anchor() -> None:
+    share_root = Path("\\\\192.168.10.111\\usr2$\\")
+    target = Path(
+        "\\\\192.168.10.111\\USR2$\\UPDS\\customer\\connection.txt"
+    )
+    other_share = Path(
+        "\\\\192.168.10.111\\other$\\UPDS\\customer\\connection.txt"
+    )
+
+    assert _contains_path(share_root, target) is True
+    assert _contains_path(share_root, other_share) is False
+
+
+def test_shortcut_parser_handles_local_relative_and_invalid_targets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    shortcut = tmp_path / "local.lnk"
+    shortcut.write_bytes(b"lnk")
+    payloads = iter(
+        [
+            {
+                "link_info": {
+                    "local_base_path_unicode": "C:\\customer",
+                    "common_path_suffix_unicode": "remote\\access.txt",
+                },
+                "data": {},
+            },
+            {
+                "link_info": {},
+                "data": {"relative_path": "..\\shared\\repository.txt"},
+            },
+            {"link_info": {}, "data": {}},
+        ]
+    )
+
+    monkeypatch.setattr(
+        "app.knowledge.shortcuts.LnkParse3.lnk_file",
+        lambda stream, *, cp: SimpleNamespace(get_json=lambda: next(payloads)),
+    )
+
+    assert parse_shortcut(shortcut).target_path == (
+        "C:\\customer\\remote\\access.txt"
+    )
+    assert parse_shortcut(shortcut).target_path.endswith(
+        "shared\\repository.txt"
+    )
+    with pytest.raises(ShortcutParseError, match="target_missing"):
+        parse_shortcut(shortcut)
+
+    monkeypatch.setattr(
+        "app.knowledge.shortcuts.LnkParse3.lnk_file",
+        lambda stream, *, cp: (_ for _ in ()).throw(OSError("unreadable")),
+    )
+    with pytest.raises(ShortcutParseError, match="OSError"):
+        parse_shortcut(shortcut)
+
+    assert shortcut_semantic_text(
+        "customer/local.lnk",
+        target_path=None,
+        target_status="shortcut_parse_failed",
+        target_kind=None,
+    ).splitlines() == [
+        "relative_path: customer/local.lnk",
+        "entry_type: windows_shortcut",
+        "shortcut_target_status: shortcut_parse_failed",
+    ]
+
+
+def test_shortcut_file_target_is_flattened_and_parse_failure_is_visible(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    target = tmp_path / "connection.txt"
+    target.write_text("SVN remote connection", encoding="utf-8")
+    (source_root / "connection.lnk").write_bytes(b"target-link")
+    (source_root / "broken.lnk").write_bytes(b"broken-link")
+
+    def fake_parse(path: Path) -> ParsedShortcut:
+        if path.name == "broken.lnk":
+            raise ShortcutParseError("invalid")
+        return ParsedShortcut(
+            target_path=str(target),
+            network_root=None,
+            mapped_device=None,
+        )
+
+    monkeypatch.setattr("app.knowledge.connectors.parse_shortcut", fake_parse)
+    manager = SourceConnectorManager(
+        cache_root=tmp_path / "cache",
+        allowed_roots=[tmp_path],
+        credential_store=FakeCredentialStore(),
+        command_policy=CommandPolicyService(),
+        git_executable="git",
+        svn_executable="svn",
+        max_file_bytes=10_000,
+    )
+    observations = []
+    result = manager.collect(
+        SourceConfig(
+            id="shortcut-file-source",
+            source_type="local_directory",
+            location=str(source_root),
+            reference=None,
+            subpath=None,
+            credential_ref=None,
+        ),
+        observation=observations.append,
+    )
+
+    documents = {item.path: item for item in result.documents}
+    assert set(documents) == {
+        "broken.lnk",
+        "connection.lnk",
+        "connection/connection.txt",
+    }
+    assert documents["connection/connection.txt"].text == (
+        "SVN remote connection"
+    )
+    assert "shortcut_target_status: shortcut_target_enqueued" in (
+        documents["connection.lnk"].text
+    )
+    assert "shortcut_target_status: shortcut_parse_failed" in (
+        documents["broken.lnk"].text
+    )
+    flattened = next(
+        item
+        for item in observations
+        if item.relative_path == "connection/connection.txt"
+    )
+    assert flattened.raw_content_hash == hashlib.sha256(
+        target.read_bytes()
+    ).hexdigest()
 
 
 def test_customer_extraction_datetime_parser_normalizes_utc() -> None:
@@ -1217,6 +1575,44 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
         ).json()
         assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
 
+        with app.state.database.session_factory() as session:
+            active_document = session.scalar(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.source_id == source["id"],
+                    KnowledgeDocument.canonical_path
+                    == "お_9330_岡山市立総合医療センター/contract.md",
+                )
+            )
+            assert active_document is not None
+            source_entry = session.get(
+                KnowledgeSourceEntry,
+                active_document.source_entry_id,
+            )
+            assert source_entry is not None
+            session.add(
+                KnowledgeDocument(
+                    source_id=active_document.source_id,
+                    source_entry_id=active_document.source_entry_id,
+                    canonical_path=(
+                        f"{active_document.canonical_path}#history/regression"
+                    ),
+                    content_hash="0" * 64,
+                    language=active_document.language,
+                    processing_mode="document",
+                    processor_fingerprint=active_document.processor_fingerprint,
+                    generation_ingestion_id=active_document.generation_ingestion_id,
+                )
+            )
+            session.flush()
+            current_document = (
+                CustomerKnowledgeExtractionService._current_document(
+                    session,
+                    source_entry,
+                )
+            )
+            assert current_document is not None
+            assert current_document.id == active_document.id
+
         provider.embedded_texts.clear()
         fast = client.post(
             "/api/v1/knowledge/search",
@@ -1303,6 +1699,16 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
                 task_document.processing_version_id,
             )
             assert processing.status == "active"
+            activity_events = session.scalars(
+                select(KnowledgeExtractionTaskEvent).where(
+                    KnowledgeExtractionTaskEvent.extraction_task_id
+                    == created.json()["id"],
+                    KnowledgeExtractionTaskEvent.event_type
+                    == "document.model.activity",
+                )
+            ).all()
+            assert len(activity_events) == 2
+            assert activity_events[-1].data["model_done"] is True
         forbidden_ingestion = client.post(
             f"/api/v1/knowledge/scopes/{report['scope']['id']}/ingestions",
             headers={
@@ -1834,6 +2240,13 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
             ]
             assert [event.type for event in public_events].count("task.started") == 1
             assert [event.type for event in public_events].count("task.completed") == 1
+            assert {
+                event.data.get("extraction_event_type")
+                for event in public_events
+            } >= {
+                "scope.ingestion.started",
+                "scope.ingestion.completed",
+            }
             assert len(document_reports) == 5
             assert {
                 event.data["extraction_event_type"] for event in document_reports
@@ -1852,8 +2265,8 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
             progress = _task_response(session, extraction)["progress"]
             assert progress["total_documents"] == 5
             assert progress["terminal_documents"] == 5
-            assert progress["analyzed_documents"] == 1
-            assert progress["failed_documents"] == 3
+            assert progress["analyzed_documents"] == 2
+            assert progress["failed_documents"] == 2
             assert progress["excluded_documents"] == 1
             assert progress["progress_rate"] == 1.0
             assert progress["last_progress_at"] is not None
@@ -1896,18 +2309,84 @@ def test_scoped_extraction_reports_document_timeout_as_partial_result(
     assert report["error_code"] == "EXTRACTION_PARTIAL"
     assert report["coverage"] == {
         "total_documents": 5,
-        "ready_documents": 3,
-        "analyzed_documents": 1,
-        "failed_documents": 3,
+        "ready_documents": 4,
+        "analyzed_documents": 2,
+        "failed_documents": 2,
         "excluded_documents": 1,
-        "coverage_rate": 0.25,
+        "coverage_rate": 0.5,
     }
     assert report["field_candidates"][0]["value"] == "筑波大学"
     assert {item["reason_code"] for item in report["document_failures"]} == {
         "EXTRACTION_FAILED",
-        "METADATA_ONLY",
         "MODEL_TIMEOUT",
     }
+    assert all(
+        item["reason_code"] != "NOT_INGESTED"
+        for item in report["document_failures"]
+    )
+
+
+def test_customer_extraction_cancellation_updates_extraction_status(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    customer = project_repository / "つ_0408_筑波大学"
+    customer.mkdir(parents=True)
+    (customer / "active.txt").write_text("筑波大学", encoding="utf-8")
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    provider = BlockingCustomerExtractionFakeOllama()
+    service._provider = provider
+
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Cancellation extraction source",
+                "root_path": str(project_repository),
+                "scope": "tenant",
+                "approved_for_codex": True,
+            },
+        ).json()
+        ingestion = client.post(
+            f"/api/v1/knowledge/sources/{source['id']}/ingest"
+        ).json()
+        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        created = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger",
+            headers=extraction_headers("cancel-active-0408"),
+            json=scoped_extraction_request(
+                source,
+                code="0408",
+                name="筑波大学",
+                fields=[
+                    {
+                        "code": "organization_name",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            ),
+        )
+        assert created.status_code == 202
+        assert provider.started.wait(timeout=5)
+        cancelled = client.post(
+            "/api/v1/knowledge/extractions/customer-ledger/"
+            f"{created.json()['id']}/cancel"
+        )
+        assert cancelled.status_code == 202
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            result = client.get(
+                "/api/v1/knowledge/extractions/customer-ledger/"
+                f"{created.json()['id']}"
+            ).json()
+            if result["status"] == "cancelled":
+                break
+            time.sleep(0.05)
+        assert result["status"] == "cancelled"
 
 
 def test_code_knowledge_graph_is_idempotent_and_searchable(
@@ -2382,6 +2861,7 @@ def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
         first = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/ingestions"
         ).json()[0]
+        first = wait_for_ingestion(client, first["id"])
         assert first["trigger"] == "scheduled"
         assert first["changed_files"] == 1
         assert first["removed_files"] == 0
@@ -2392,12 +2872,15 @@ def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
         )
         with app.state.database.session_factory() as session:
             stored = session.get(KnowledgeSource, source["id"])
+            assert stored.sync_lease_owner is None
+            assert stored.sync_lease_expires_at is None
             stored.next_sync_at = utc_now() - timedelta(seconds=1)
             session.commit()
         assert asyncio.run(scheduler.run_once()) is True
         second = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/ingestions"
         ).json()[0]
+        second = wait_for_ingestion(client, second["id"])
         assert second["changed_files"] == 1
         assert second["unchanged_files"] == 1
         assert second["vectors_reused"] == 1
@@ -2408,6 +2891,10 @@ def test_scheduler_reindexes_changes_removes_deleted_files_and_keeps_history(
             stored.next_sync_at = utc_now() - timedelta(seconds=1)
             session.commit()
         assert asyncio.run(scheduler.run_once()) is True
+        history = client.get(
+            f"/api/v1/knowledge/sources/{source['id']}/ingestions"
+        ).json()
+        wait_for_ingestion(client, history[0]["id"])
         history = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/ingestions"
         ).json()
@@ -2479,6 +2966,20 @@ def test_scheduler_lease_prevents_duplicate_claim_and_failure_is_retried(
                 "sync_interval_minutes": 60,
             },
         ).json()
+        extraction_owner = f"extraction:scope:test-{uuid.uuid4()}"
+        assert service.acquire_source_lease(
+            source["id"],
+            extraction_owner,
+        ) is True
+        assert service.renew_source_lease(
+            source["id"],
+            extraction_owner,
+        ) is True
+        assert service.claim_due_source(
+            worker_id="worker-blocked-by-extraction",
+            lease_seconds=60,
+        ) is None
+        service.release_source_lease(source["id"], extraction_owner)
         assert service.claim_due_source(
             worker_id="worker-a",
             lease_seconds=60,
@@ -2511,6 +3012,54 @@ def test_scheduler_lease_prevents_duplicate_claim_and_failure_is_retried(
         ).json()
         assert history[0]["status"] == "failed"
         assert history[0]["trigger"] == "scheduled"
+
+
+def test_ingestion_waits_for_active_extraction_source_lease(
+    settings: Settings,
+    project_repository: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, project_repository.parent)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(
+        app,
+        active_settings,
+        FakeCredentialStore(),
+    )
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Extraction isolated source",
+                "source_type": "local_directory",
+                "location": str(project_repository),
+                "scope": "product",
+            },
+        ).json()
+        owner = f"extraction:scope:{uuid.uuid4()}"
+        assert service.acquire_source_lease(source["id"], owner) is True
+        ingestion, created = service.create_ingestion(
+            source["id"],
+            trigger="scheduled",
+            enqueue=False,
+        )
+        assert created is True
+
+        async def run_waiting_ingestion() -> None:
+            running = asyncio.create_task(service.ingest(ingestion.id))
+            await asyncio.sleep(0.05)
+            with app.state.database.session_factory() as session:
+                waiting = session.get(KnowledgeIngestion, ingestion.id)
+                locked_source = session.get(KnowledgeSource, source["id"])
+                assert waiting.status == "running"
+                assert locked_source.sync_lease_owner == owner
+            service.release_source_lease(source["id"], owner)
+            await asyncio.wait_for(running, timeout=5)
+
+        asyncio.run(run_waiting_ingestion())
+        with app.state.database.session_factory() as session:
+            completed = session.get(KnowledgeIngestion, ingestion.id)
+            assert completed.status == "completed"
 
 
 def test_scheduler_loop_survives_one_iteration_failure() -> None:
@@ -2844,10 +3393,7 @@ def test_temporary_office_file_is_skipped_before_extraction(
     assert rejections[0].extractor == "filesystem"
 
 
-def test_metadata_only_large_file_is_not_read_for_raw_hash(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+def test_metadata_only_large_file_keeps_raw_hash(tmp_path: Path) -> None:
     root = tmp_path / "large-file-source"
     root.mkdir()
     large_archive = root / "customer-installer.zip"
@@ -2862,10 +3408,6 @@ def test_metadata_only_large_file_is_not_read_for_raw_hash(
         max_file_bytes=10,
     )
 
-    def fail_if_hashed(path: Path) -> str:
-        raise AssertionError(f"metadata-only file was read: {path}")
-
-    monkeypatch.setattr(manager, "_sha256_file", fail_if_hashed)
     observations: list[CollectionObservation] = []
     result = manager.collect(
         SourceConfig(
@@ -2882,7 +3424,22 @@ def test_metadata_only_large_file_is_not_read_for_raw_hash(
     assert result.files_seen == 1
     assert result.skipped_files == 1
     assert observations[0].processing_status == "metadata_only"
-    assert observations[0].raw_content_hash is None
+    assert observations[0].raw_content_hash == hashlib.sha256(
+        b"x" * 11
+    ).hexdigest()
+
+
+def test_windows_long_unc_path_uses_extended_io_prefix() -> None:
+    long_unc = Path(
+        "\\\\server\\share\\"
+        + "\\".join(["customer"] * 40)
+        + "\\knowledge.sql"
+    )
+
+    io_path = _path_for_io(long_unc, platform_name="nt")
+
+    assert str(io_path).startswith("\\\\?\\UNC\\server\\share\\")
+    assert io_path.suffix == ".sql"
 
 
 def test_rejection_persistence_is_idempotent_across_flushes(
@@ -3233,6 +3790,17 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
         assert by_path["legacy.doc"]["disposition"] == "skipped"
         assert by_path["oversized.txt"]["reason_code"] == "file_too_large"
         assert by_path["oversized.txt"]["file_size"] == 2_048
+        with app.state.database.session_factory() as session:
+            oversized_entry = session.scalar(
+                select(KnowledgeSourceEntry).where(
+                    KnowledgeSourceEntry.source_id == source_id,
+                    KnowledgeSourceEntry.relative_path == "oversized.txt",
+                )
+            )
+            assert oversized_entry is not None
+            assert oversized_entry.raw_content_hash == hashlib.sha256(
+                ("x" * 2_048).encode("utf-8")
+            ).hexdigest()
 
         filtered = client.get(
             f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections",
@@ -3385,14 +3953,8 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         assert entries["guide.md"]["extractor"] == "text"
         assert entries["warning.txt"]["processing_mode"] == "path_only"
         assert all(
-            item["raw_content_hash"] is None
-            for item in entries.values()
-            if item["processing_mode"] == "metadata_only"
-        )
-        assert all(
             item["raw_content_hash"] == "a" * 64
             for item in entries.values()
-            if item["processing_mode"] != "metadata_only"
         )
         filtered_inventory = client.get(
             f"/api/v1/knowledge/sources/{source['id']}/entries",
@@ -3645,6 +4207,7 @@ def test_scoped_ingestion_starts_at_prefix_and_preserves_other_scope_entries(
             trigger="scope_repair",
             scope_prefix="つ_0408_筑波大学",
             retry_statuses=["observed", "failed"],
+            enqueue=False,
         )
         assert created is True
         asyncio.run(service.ingest(scoped.id))
@@ -3673,6 +4236,89 @@ def test_scoped_ingestion_starts_at_prefix_and_preserves_other_scope_entries(
             "つ_0408_筑波大学/つ_0408_筑波大学/" not in text
             for text in service._provider.embedded_texts
         )
+
+
+def test_older_ingestion_finalization_preserves_newer_scope_observation(
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    active_settings = knowledge_settings(settings, tmp_path)
+    app = create_app(settings=active_settings)
+    service = install_fake_knowledge(app, active_settings)
+    with TestClient(app) as client:
+        source = client.post(
+            "/api/v1/knowledge/sources",
+            json={
+                "project_id": "test-project",
+                "name": "Concurrent observation source",
+                "source_type": "local_directory",
+                "location": str(tmp_path),
+                "scope": "tenant",
+            },
+        ).json()
+        older, _ = service.create_ingestion(
+            source["id"],
+            enqueue=False,
+        )
+        newer, _ = service.create_ingestion(
+            source["id"],
+            trigger="scope_repair",
+            scope_prefix="customer",
+            enqueue=False,
+        )
+        older_started = utc_now() - timedelta(minutes=1)
+        with app.state.database.session_factory() as session:
+            stored_older = session.get(KnowledgeIngestion, older.id)
+            stored_older.status = "running"
+            stored_older.started_at = older_started
+            session.add(
+                KnowledgeSourceEntry(
+                    source_id=source["id"],
+                    relative_path="obsolete.txt",
+                    entry_kind="file",
+                    extension=".txt",
+                    processing_mode="document",
+                    processing_status="indexed",
+                    present=True,
+                    last_seen_at=older_started - timedelta(minutes=1),
+                )
+            )
+            session.commit()
+        service._persist_source_observations(
+            newer.id,
+            (
+                CollectionObservation(
+                    relative_path="customer/current.txt",
+                    entry_kind="file",
+                    extension=".txt",
+                    file_size=7,
+                    modified_at=utc_now(),
+                    processing_mode="document",
+                    processing_status="observed",
+                    reason_code=None,
+                    raw_content_hash="a" * 64,
+                ),
+            ),
+        )
+
+        service._finalize_source_observations(older.id)
+
+        with app.state.database.session_factory() as session:
+            current = session.scalar(
+                select(KnowledgeSourceEntry).where(
+                    KnowledgeSourceEntry.relative_path
+                    == "customer/current.txt"
+                )
+            )
+            obsolete = session.scalar(
+                select(KnowledgeSourceEntry).where(
+                    KnowledgeSourceEntry.relative_path == "obsolete.txt"
+                )
+            )
+            assert current.present is True
+            assert current.processing_status == "observed"
+            assert obsolete.present is False
+            assert obsolete.processing_status == "removed"
 
 
 def test_connector_credentials_avoid_command_arguments(
@@ -3755,13 +4401,30 @@ def test_knowledge_api_rejects_invalid_inputs(
 
 
 class _Response:
-    def __init__(self, status_code: int, payload: dict) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict,
+        *,
+        stream_lines: list[dict] | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
+        self._stream_lines = stream_lines or []
         self.is_success = status_code < 400
 
     def json(self) -> dict:
         return self._payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def aiter_lines(self):
+        for line in self._stream_lines:
+            yield json.dumps(line)
 
 
 class _AsyncClient:
@@ -3785,6 +4448,11 @@ class _AsyncClient:
         self.requests.append(json)
         return self.responses.pop(0)
 
+    def stream(self, method: str, _: str, json: dict) -> _Response:
+        assert method == "POST"
+        self.requests.append(json)
+        return self.responses.pop(0)
+
 
 @pytest.mark.anyio
 async def test_real_ollama_adapter_contract(monkeypatch) -> None:
@@ -3805,14 +4473,40 @@ async def test_real_ollama_adapter_contract(monkeypatch) -> None:
     _AsyncClient.responses = [_Response(200, {"embeddings": [[0.1, 0.2]]})]
     assert await client.embed(["hello"]) == [[0.1, 0.2]]
 
-    _AsyncClient.responses = [_Response(200, {"response": '{"value": 1}'})]
+    _AsyncClient.responses = [
+        _Response(
+            200,
+            {},
+            stream_lines=[
+                {"response": '{"value":', "done": False},
+                {"response": " 1}", "done": True},
+            ],
+        )
+    ]
+    activity = []
+
+    async def capture_activity(value: dict) -> None:
+        activity.append(value)
+
     assert await client.structured_generate(
         "prompt",
         {"type": "object"},
         timeout_seconds=3,
+        activity=capture_activity,
     ) == {"value": 1}
     assert _AsyncClient.timeouts[-1] == 3
     assert _AsyncClient.requests[-1]["options"]["num_ctx"] == 8_192
+    assert _AsyncClient.requests[-1]["stream"] is True
+    assert activity == [
+        {"chunk_index": 1, "response_chars": 9, "done": False},
+        {"chunk_index": 2, "response_chars": 12, "done": True},
+    ]
+
+    _AsyncClient.responses = [
+        _Response(200, {}, stream_lines=[{"error": "model failed"}])
+    ]
+    with pytest.raises(OllamaError, match="stream failed"):
+        await client.structured_generate("prompt", {"type": "object"})
 
     _AsyncClient.responses = [_Response(500, {})]
     with pytest.raises(OllamaError):

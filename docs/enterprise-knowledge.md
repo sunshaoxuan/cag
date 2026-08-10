@@ -67,6 +67,19 @@ path-only knowledge from the file name and relative path. Source code enters
 the structural code analyzer. Supported non-code files enter the document
 extractor.
 
+Version 0.28.0 treats `.lnk` as a first-class path document. Link bytes receive
+raw SHA 256 before parsing. LinkInfo network roots and suffixes reconstruct UNC
+targets without depending on a mapped drive in the worker session. The source
+records `shortcut_target_enqueued`, `shortcut_target_already_covered`,
+`shortcut_target_missing`, `shortcut_auth_denied`,
+`shortcut_target_unreachable`, `shortcut_outside_allowed_root` or a parser
+failure. Allowed targets are flattened under the shortcut logical path. The
+collector stops a repeated physical directory before scanning its children.
+
+Normalized path segments `old`, `旧` and `旧_*` remain in source provenance and
+historical knowledge storage while Customer Ledger Extraction excludes them
+from current candidates with `historical_path`.
+
 Each successful document stores a processor fingerprint. The fingerprint
 includes the routing policy, processing mode, processor version, embedding
 model and vector dimensions. A changed fingerprint gives an unchanged file a
@@ -186,13 +199,29 @@ Scoped customer extraction treats each
 `analyzed`, `failed` or `excluded` together with its checkpoint and publishes a
 Generic Task `task.progress` event containing its physical ID and manifest
 ordinal. The parent waits while the extraction worker renews its QueueItem
-lease. A model call is bounded independently at the document HTTP boundary.
+lease. A model call is bounded independently by stream inactivity at the
+document HTTP boundary. Received model chunks refresh a throttled child
+activity checkpoint, so a responding document has no fixed total deadline.
 The parent aggregates only after all children have a terminal state, so source
 size does not turn healthy progress into an overall timeout.
 
+`prepare_required_versions` is an executable contract. After Scope resolution,
+the extraction worker creates an inline Scope Repair Ingestion, waits for its
+terminal result while retaining the parent lease, and freezes the manifest
+only after cleaned Document and Chunk versions are ready. The public event
+stream exposes `scope.ingestion.started` and `scope.ingestion.completed`.
+Prerequisite preparation no longer appears as `NOT_INGESTED` document failure.
+The Extraction owns a renewable Source update lease from Scope resolution to
+aggregation. Its Scope Repair refreshes that lease through ingestion events.
+Other ingestions for the same Source wait before collection, so a frozen
+Manifest cannot become `SOURCE_CHANGED` through concurrent replacement.
+Manifest construction resolves each SourceEntry through its exact current
+relative path. Historical Documents linked to the same SourceEntry remain
+available as provenance and cannot be selected as the current input.
+
 ## Idempotent vector index
 
-Every physical file has a streamed raw byte SHA 256 on its SourceEntry. Cleaned documents and knowledge chunks have separate content hashes because each proves a different transformation boundary. KnowledgeDocument stores a required physical foreign key to SourceEntry, and KnowledgeChunk stores a required foreign key to KnowledgeDocument. A source fingerprint is derived from the sorted path and cleaned hash set. Repeating ingestion with unchanged size, modification time, raw hash and processor fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files create a new Document and Document Version, activate a new Processing Version after quality completion, mark the prior Processing Version superseded and archive prior chunks. Removed files follow the same historical retention rule. Knowledge Block Versions keep immutable values and evidence. Applicability Revisions keep business effective periods independently from Processing Versions. Embeddings of redacted path and content input are checkpointed by model, dimensions and input hash after every successful batch. A failed refresh resumes from these checkpoints and retains the previous Active Processing Version until the replacement transaction completes.
+Every readable physical file has a streamed raw byte SHA 256 on its SourceEntry before file processing policy is applied. Metadata-only files therefore retain raw provenance together with path and reason. Supported files up to 100 MB enter Cleaning. Cleaned documents and knowledge chunks have separate content hashes because each proves a different transformation boundary. KnowledgeDocument stores a required physical foreign key to SourceEntry, and KnowledgeChunk stores a required foreign key to KnowledgeDocument. A source fingerprint is derived from the sorted path and cleaned hash set. Repeating ingestion with unchanged size, modification time, raw hash and processor fingerprint writes no document, chunk or vector. Unchanged files keep their physical document and chunk IDs and reuse their stored vectors. Changed files create a new Document and Document Version, activate a new Processing Version after quality completion, mark the prior Processing Version superseded and archive prior chunks. Removed files follow the same historical retention rule. Knowledge Block Versions keep immutable values and evidence. Applicability Revisions keep business effective periods independently from Processing Versions. Embeddings of redacted path and content input are checkpointed by model, dimensions and input hash after every successful batch. A failed refresh resumes from these checkpoints and retains the previous Active Processing Version until the replacement transaction completes.
 
 Legacy sources backfill original-byte provenance with:
 

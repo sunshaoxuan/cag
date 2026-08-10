@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for version 0.27.0.
+Accepted for version 0.27.0 and amended for version 0.28.0.
 
 ## Context
 
@@ -28,9 +28,13 @@ timeouts. CAG already has the equivalent durable QueueItem lease and heartbeat.
 1. Remove the fixed aggregate customer extraction deadline and its environment
    setting.
 2. Use the QueueItem heartbeat and expiring lease as worker-liveness evidence.
-3. Keep the bounded per-document Ollama HTTP deadline.
+3. Stream every per-document Ollama response. Treat the configured 300 second
+   value as stream inactivity timeout. Every received NDJSON chunk refreshes
+   document activity, so continuing generation has no fixed total deadline.
 4. Treat every `KnowledgeExtractionTaskDocument` as a durable child work item.
-5. Commit one terminal checkpoint for every analyzed, failed or excluded child.
+5. Commit a throttled `document.model.activity` checkpoint while a model is
+   responding, followed by one terminal checkpoint for every analyzed, failed
+   or excluded child.
 6. Publish every child terminal transition to the Generic Task as
    `task.progress`, including the child physical ID, ordinal, total and result.
 7. Publish scope, manifest and aggregation transitions through the same Generic
@@ -45,8 +49,8 @@ timeouts. CAG already has the equivalent durable QueueItem lease and heartbeat.
 ## Consequences
 
 Large customer scopes can run for the time required by their document count
-while active progress remains visible. A stalled model request is bounded at
-the document boundary. A dead worker stops renewing its lease and another
+while active progress remains visible. A model stream that produces no data for
+the configured inactivity interval is bounded at the document boundary. A dead worker stops renewing its lease and another
 worker can continue the same physical parent task. The audit stream receives
 one event per document outcome, so event volume scales with manifest size and
 remains governed by existing sequence pagination and frontend display limits.
@@ -55,7 +59,8 @@ remains governed by existing sequence pagination and frontend display limits.
 
 1. A test extraction completes after a legacy aggregate deadline value has
    already elapsed.
-2. Every manifest document produces one public terminal progress event.
+2. Every manifest document produces one public terminal progress event, and
+   active model streams produce throttled per-document activity events.
 3. Successful, model-failed, metadata-only and excluded documents all report
    their physical child ID and ordinal.
 4. Running extraction responses expose persisted counters and last progress.
@@ -67,6 +72,8 @@ remains governed by existing sequence pagination and frontend display limits.
    reporting every document and reaches aggregation while its worker is live.
 8. Historical audit replay shares an in-flight Task-list refresh instead of
    issuing one request for every event whose Task is not loaded yet.
+9. Cancelling an active extraction sets both its QueueItem and extraction
+   record to `cancelled`.
 
 ## Rollback
 
@@ -80,3 +87,7 @@ remain valid audit records and must not be deleted.
   https://docs.aws.amazon.com/step-functions/latest/dg/state-task.html
 * AWS Step Functions `SendTaskHeartbeat` API:
   https://docs.aws.amazon.com/step-functions/latest/apireference/API_SendTaskHeartbeat.html
+* Ollama streaming API:
+  https://docs.ollama.com/api/streaming
+* Ollama generate API:
+  https://docs.ollama.com/api/generate

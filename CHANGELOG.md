@@ -2,6 +2,34 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.28.0
+
+发布日期：2026-08-10
+
+### Changed
+
+* Customer Extraction は要求された `prepare_required_versions` を実行し、解決済み Scope の Repair Ingestion が完了してから Manifest を確定する。
+* Windows Shell Link は raw SHA 256、UNC Target、Target 種別及び到達状態を持つ path-only Document として処理する。
+* 同一 UNC Share 又は許可済み Local Root 内の Shortcut Target を論理 Link Path 配下へ平坦化し、物理 Directory の visited 集合で循環及び重複走査を停止する。
+* Extraction Result に `document_exclusions` と `document_observations` を追加し、Historical Path と Shortcut Target 状態を外部利用者へ公開する。
+* Customer Document の構造化生成を Ollama NDJSON Stream へ変更し、各 Model Chunk で Document Activity を更新する。300 秒の Timeout は固定総時間ではなく無応答時間へ適用する。
+* Extraction、Scope Repair 及び Full Ingestion は Source 単位の更新 Lease を共有する。Extraction の Manifest と分析が完了するまで、同一 Source の Scheduled Ingestion は待機する。
+
+### Fixed
+
+* `old` 又は `旧_*` Directory の資料が現在有効な VPN 及び Environment Candidate を生成する問題を解消する。
+* Catalog へ観測済みで Cleaning 未完了の読取可能な TXT を `NOT_INGESTED` の Extraction Failure として確定する問題を解消する。
+* `.lnk` を raw hash なしの `unsupported_extension` として一律除外し、到達可能、認証拒否、Target 不在又は許可 Root 外を識別できない問題を解消する。
+* 旧 Full Ingestion の完了処理が、同時実行された新しい Scope Repair の SourceEntry を removed に戻す競合を解消する。
+* Model が応答を継続している Document を固定 15 秒で `MODEL_TIMEOUT` とする問題と、取消済み Extraction が `extracting` に残る問題を解消する。
+* UNC Share Root の末尾 Separator を Directory Identity から削除して Shortcut Target を許可 Root 外と誤判定する問題を解消する。
+* Scope Repair 後に同一 Source の Full Ingestion が Document Version を置換し、凍結済み Manifest を `SOURCE_CHANGED` にする競合を解消する。
+* 同一 SourceEntry に現在 Document と履歴 Document が存在する場合、Manifest が履歴 Document を選択して `SOURCE_CHANGED` と誤判定する問題を解消する。
+* Metadata-only File が raw SHA 256 を持たない問題を解消し、100 MB 以下の PDF を Cleaning 対象にする。
+* `back`、`backup`、`bak` 及び `バックアップ` Directory を履歴資料として現在 Candidate から除外する。
+* 248 文字以上の Windows UNC File を拡張長 Path で Hashing と Cleaning し、存在する資料を `raw_hash_read_error` と誤判定する問題を解消する。
+* Shortcut Target の再学習時に `shortcut_target_flattened` Provenance が空の再利用判定で失われる問題を解消する。
+
 ## 0.27.0
 
 发布日期：2026-08-10

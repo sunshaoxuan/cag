@@ -29,6 +29,12 @@ from app.knowledge.processing_policy import (
     classify_file,
     path_semantic_text,
 )
+from app.knowledge.shortcuts import (
+    SHORTCUT_PARSER_VERSION,
+    ShortcutParseError,
+    parse_shortcut,
+    shortcut_semantic_text,
+)
 from app.policies.command_policy import CommandPolicyService
 
 
@@ -52,6 +58,21 @@ EXCLUDED_PARTS = {
     "target",
     "vendor",
 }
+
+
+def _path_for_io(
+    path: Path,
+    *,
+    platform_name: str | None = None,
+) -> Path:
+    if (platform_name or os.name) != "nt":
+        return path
+    raw = str(path)
+    if raw.startswith("\\\\?\\") or len(raw) < 248:
+        return path
+    if raw.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + raw.lstrip("\\"))
+    return Path("\\\\?\\" + raw)
 
 
 @dataclass(frozen=True)
@@ -135,6 +156,26 @@ class ValidationResult:
 CollectionProgress = Callable[[dict[str, int | str]], None]
 CollectionRejectionSink = Callable[[CollectionRejection], None]
 CollectionObservationSink = Callable[[CollectionObservation], None]
+
+
+def _path_identity(path: Path) -> str:
+    absolute = os.path.normcase(os.path.abspath(os.fspath(path)))
+    anchor = os.path.normcase(Path(absolute).anchor)
+    if anchor and absolute.rstrip("\\/") == anchor.rstrip("\\/"):
+        return anchor
+    return absolute.rstrip("\\/")
+
+
+def _contains_path(parent: Path, child: Path) -> bool:
+    parent_identity = _path_identity(parent)
+    child_identity = _path_identity(child)
+    try:
+        return (
+            os.path.commonpath([parent_identity, child_identity])
+            == parent_identity
+        )
+    except ValueError:
+        return False
 
 
 class SourceConnectorManager:
@@ -327,16 +368,29 @@ class SourceConnectorManager:
         files_discovered = 0
         files_processed = 0
         directories_scanned = 0
-        pending_directories = deque([root])
+        pending_directories: deque[tuple[Path, PurePosixPath]] = deque(
+            [(root, PurePosixPath())]
+        )
+        visited_directories: set[str] = set()
+        coverage_roots = [root]
+        allowed_shortcut_root = root
         reusable_files = reusable_files or {}
         reused_paths: list[str] = []
 
-        def append_path_document(path: Path, reason_code: str) -> None:
-            relative_path = path.relative_to(root).as_posix()
+        def append_path_document(
+            path: Path,
+            reason_code: str,
+            *,
+            relative_path: str | None = None,
+            text: str | None = None,
+            extractor: str = "path-semantic",
+            extractor_version: str | None = None,
+        ) -> None:
+            relative_path = relative_path or path.relative_to(root).as_posix()
             path_text = path_semantic_text(
                 relative_path,
                 reason_code=reason_code,
-            )
+            ) if text is None else text
             documents.append(
                 CollectedDocument(
                     path=relative_path,
@@ -347,23 +401,48 @@ class SourceConnectorManager:
                     language="path",
                     encoding="path-metadata",
                     processing_mode="path_only",
-                    extractor="path-semantic",
+                    extractor=extractor,
+                    extractor_version=extractor_version,
                 )
             )
+
+        if root.anchor.startswith("\\\\"):
+            allowed_shortcut_root = Path(root.anchor)
+        else:
+            for candidate in self._allowed_roots:
+                resolved = candidate.resolve()
+                if _contains_path(resolved, root):
+                    allowed_shortcut_root = resolved
+                    break
+
+        def schedule_shortcut_directory(
+            target: Path,
+            logical_path: PurePosixPath,
+        ) -> bool:
+            nonlocal coverage_roots
+            if any(
+                _contains_path(value, target) or _contains_path(target, value)
+                for value in coverage_roots
+            ):
+                return False
+            coverage_roots.append(target)
+            pending_directories.append((target, logical_path))
+            return True
 
         def report(
             phase: str,
             directory: Path,
             *,
+            logical_path: PurePosixPath | None = None,
             current_directory_files: int = 0,
             error: str = "",
         ) -> None:
             if progress is None:
                 return
             relative = (
-                "."
-                if directory == root
-                else directory.relative_to(root).as_posix()
+                logical_path.as_posix()
+                if logical_path and logical_path.parts
+                else "."
             )
             data: dict[str, int | str] = {
                 "phase": phase,
@@ -381,8 +460,17 @@ class SourceConnectorManager:
             progress(data)
 
         while pending_directories:
-            directory = pending_directories.popleft()
-            report("started", directory)
+            directory, logical_directory = pending_directories.popleft()
+            identity = _path_identity(directory)
+            if identity in visited_directories:
+                report(
+                    "duplicate_directory_skipped",
+                    directory,
+                    logical_path=logical_directory,
+                )
+                continue
+            visited_directories.add(identity)
+            report("started", directory, logical_path=logical_directory)
             try:
                 with os.scandir(directory) as iterator:
                     entries = sorted(
@@ -395,6 +483,11 @@ class SourceConnectorManager:
                     rejection,
                     root=root,
                     path=directory,
+                    relative_path=(
+                        logical_directory.as_posix()
+                        if logical_directory.parts
+                        else "."
+                    ),
                     entry_kind="directory",
                     disposition="rejected",
                     file_size=None,
@@ -402,12 +495,20 @@ class SourceConnectorManager:
                     error=exc,
                 )
                 directories_scanned += 1
-                report("failed", directory, error=str(exc))
+                report(
+                    "failed",
+                    directory,
+                    logical_path=logical_directory,
+                    error=str(exc),
+                )
                 continue
 
-            directory_files: list[tuple[Path, str]] = []
+            directory_files: list[tuple[Path, str, str]] = []
             for entry in entries:
                 path = Path(entry.path)
+                relative_path = (
+                    logical_directory / entry.name
+                ).as_posix()
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         directory_stat = entry.stat(follow_symlinks=False)
@@ -415,6 +516,7 @@ class SourceConnectorManager:
                             observation,
                             root=root,
                             path=path,
+                            relative_path=relative_path,
                             entry_kind="directory",
                             file_size=None,
                             modified_at=datetime.fromtimestamp(
@@ -426,7 +528,12 @@ class SourceConnectorManager:
                             reason_code="directory_entry",
                         )
                         if entry.name not in EXCLUDED_PARTS:
-                            pending_directories.append(Path(entry.path))
+                            pending_directories.append(
+                                (
+                                    Path(entry.path),
+                                    logical_directory / entry.name,
+                                )
+                            )
                         continue
                     if not entry.is_file(follow_symlinks=False):
                         continue
@@ -442,6 +549,7 @@ class SourceConnectorManager:
                         observation,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         file_size=None,
                         modified_at=None,
@@ -453,6 +561,7 @@ class SourceConnectorManager:
                         rejection,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         disposition="rejected",
                         file_size=None,
@@ -460,13 +569,201 @@ class SourceConnectorManager:
                         error=exc,
                     )
                     continue
-                relative_path = path.relative_to(root).as_posix()
                 files_discovered += 1
                 decision = classify_file(
                     relative_path,
                     file_size=file_size,
                     max_file_bytes=self._max_file_bytes,
                 )
+                if path.suffix.casefold() == ".lnk":
+                    target_path: str | None = None
+                    target_kind: str | None = None
+                    target_status = "shortcut_parse_failed"
+                    try:
+                        raw_content_hash = self._sha256_file(path)
+                    except OSError as exc:
+                        rejected += 1
+                        files_processed += 1
+                        self._report_observation(
+                            observation,
+                            root=root,
+                            path=path,
+                            relative_path=relative_path,
+                            entry_kind="file",
+                            file_size=file_size,
+                            modified_at=modified_at,
+                            processing_mode="path_only",
+                            processing_status="rejected",
+                            reason_code="raw_hash_read_error",
+                        )
+                        self._report_rejection(
+                            rejection,
+                            root=root,
+                            path=path,
+                            relative_path=relative_path,
+                            entry_kind="file",
+                            disposition="rejected",
+                            file_size=file_size,
+                            reason_code="raw_hash_read_error",
+                            error=exc,
+                        )
+                        append_path_document(
+                            path,
+                            "raw_hash_read_error",
+                            relative_path=relative_path,
+                        )
+                        continue
+                    try:
+                        parsed = parse_shortcut(path)
+                        target_path = parsed.target_path
+                        target = Path(target_path)
+                        if not _contains_path(allowed_shortcut_root, target):
+                            target_status = "shortcut_outside_allowed_root"
+                        else:
+                            try:
+                                target_stat = target.stat()
+                            except PermissionError:
+                                target_status = "shortcut_auth_denied"
+                            except FileNotFoundError:
+                                target_status = "shortcut_target_missing"
+                            except OSError:
+                                target_status = "shortcut_target_unreachable"
+                            else:
+                                if stat.S_ISDIR(target_stat.st_mode):
+                                    target_kind = "directory"
+                                    logical_target = (
+                                        logical_directory / path.stem
+                                    )
+                                    target_status = (
+                                        "shortcut_target_already_covered"
+                                        if any(
+                                            _contains_path(value, target)
+                                            for value in coverage_roots
+                                        )
+                                        else (
+                                            "shortcut_target_enqueued"
+                                            if schedule_shortcut_directory(
+                                                target,
+                                                logical_target,
+                                            )
+                                            else "shortcut_target_already_covered"
+                                        )
+                                    )
+                                elif stat.S_ISREG(target_stat.st_mode):
+                                    target_kind = "file"
+                                    if any(
+                                        _contains_path(value, target)
+                                        for value in coverage_roots
+                                    ):
+                                        target_status = (
+                                            "shortcut_target_already_covered"
+                                        )
+                                        semantic_text = shortcut_semantic_text(
+                                            relative_path,
+                                            target_path=target_path,
+                                            target_status=target_status,
+                                            target_kind=target_kind,
+                                        )
+                                        self._report_observation(
+                                            observation,
+                                            root=root,
+                                            path=path,
+                                            relative_path=relative_path,
+                                            entry_kind="file",
+                                            file_size=file_size,
+                                            modified_at=modified_at,
+                                            processing_mode="path_only",
+                                            processing_status="observed",
+                                            reason_code=target_status,
+                                            raw_content_hash=raw_content_hash,
+                                        )
+                                        append_path_document(
+                                            path,
+                                            target_status,
+                                            relative_path=relative_path,
+                                            text=semantic_text,
+                                            extractor="shell-link",
+                                            extractor_version=(
+                                                SHORTCUT_PARSER_VERSION
+                                            ),
+                                        )
+                                        files_processed += 1
+                                        continue
+                                    logical_target = (
+                                        logical_directory
+                                        / path.stem
+                                        / target.name
+                                    ).as_posix()
+                                    target_decision = classify_file(
+                                        logical_target,
+                                        file_size=target_stat.st_size,
+                                        max_file_bytes=self._max_file_bytes,
+                                    )
+                                    try:
+                                        target_raw_hash = self._sha256_file(target)
+                                    except PermissionError:
+                                        target_status = "shortcut_auth_denied"
+                                    except OSError:
+                                        target_status = "shortcut_target_unreachable"
+                                    else:
+                                        files_discovered += 1
+                                        self._report_observation(
+                                            observation,
+                                            root=root,
+                                            path=target,
+                                            relative_path=logical_target,
+                                            entry_kind="file",
+                                            file_size=target_stat.st_size,
+                                            modified_at=datetime.fromtimestamp(
+                                                target_stat.st_mtime,
+                                                tz=timezone.utc,
+                                            ),
+                                            processing_mode=target_decision.mode,
+                                            processing_status="observed",
+                                            reason_code="shortcut_target_flattened",
+                                            raw_content_hash=target_raw_hash,
+                                        )
+                                        directory_files.append(
+                                            (
+                                                target,
+                                                target_decision.mode,
+                                                logical_target,
+                                            )
+                                        )
+                                        target_status = "shortcut_target_enqueued"
+                                else:
+                                    target_status = "shortcut_target_unsupported"
+                    except ShortcutParseError:
+                        pass
+                    semantic_text = shortcut_semantic_text(
+                        relative_path,
+                        target_path=target_path,
+                        target_status=target_status,
+                        target_kind=target_kind,
+                    )
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        relative_path=relative_path,
+                        entry_kind="file",
+                        file_size=file_size,
+                        modified_at=modified_at,
+                        processing_mode="path_only",
+                        processing_status="observed",
+                        reason_code=target_status,
+                        raw_content_hash=raw_content_hash,
+                    )
+                    append_path_document(
+                        path,
+                        target_status,
+                        relative_path=relative_path,
+                        text=semantic_text,
+                        extractor="shell-link",
+                        extractor_version=SHORTCUT_PARSER_VERSION,
+                    )
+                    files_processed += 1
+                    continue
                 reusable = reusable_files.get(relative_path)
                 reusable_metadata_matches = (
                     reusable is not None
@@ -478,16 +775,22 @@ class SourceConnectorManager:
                     reusable.has_document
                     or reusable.processing_status == "rejected"
                 ):
+                    provenance_reason = (
+                        "shortcut_target_flattened"
+                        if not _contains_path(root, path)
+                        else reusable.reason_code
+                    )
                     self._report_observation(
                         observation,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         file_size=file_size,
                         modified_at=modified_at,
                         processing_mode=decision.mode,
                         processing_status=reusable.processing_status,
-                        reason_code=reusable.reason_code,
+                        reason_code=provenance_reason,
                         raw_content_hash=reusable.raw_content_hash,
                     )
                     reused_paths.append(relative_path)
@@ -509,6 +812,7 @@ class SourceConnectorManager:
                             rejection,
                             root=root,
                             path=path,
+                            relative_path=relative_path,
                             entry_kind="file",
                             disposition=disposition,
                             file_size=file_size,
@@ -516,36 +820,6 @@ class SourceConnectorManager:
                                 reusable.reason_code or "reused_path_evidence"
                             ),
                         )
-                    continue
-                if decision.mode == "metadata_only":
-                    self._report_observation(
-                        observation,
-                        root=root,
-                        path=path,
-                        entry_kind="file",
-                        file_size=file_size,
-                        modified_at=modified_at,
-                        processing_mode=decision.mode,
-                        processing_status="metadata_only",
-                        reason_code=decision.reason_code,
-                    )
-                    skipped += 1
-                    files_processed += 1
-                    self._report_rejection(
-                        rejection,
-                        root=root,
-                        path=path,
-                        entry_kind="file",
-                        disposition="skipped",
-                        file_size=file_size,
-                        reason_code=(
-                            decision.reason_code or "metadata_only_policy"
-                        ),
-                    )
-                    append_path_document(
-                        path,
-                        decision.reason_code or "metadata_only_policy",
-                    )
                     continue
                 try:
                     raw_content_hash = (
@@ -560,6 +834,7 @@ class SourceConnectorManager:
                         observation,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         file_size=file_size,
                         modified_at=modified_at,
@@ -571,18 +846,58 @@ class SourceConnectorManager:
                         rejection,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         disposition="rejected",
                         file_size=file_size,
                         reason_code="raw_hash_read_error",
                         error=exc,
                     )
-                    append_path_document(path, "raw_hash_read_error")
+                    append_path_document(
+                        path,
+                        "raw_hash_read_error",
+                        relative_path=relative_path,
+                    )
+                    continue
+                if decision.mode == "metadata_only":
+                    self._report_observation(
+                        observation,
+                        root=root,
+                        path=path,
+                        relative_path=relative_path,
+                        entry_kind="file",
+                        file_size=file_size,
+                        modified_at=modified_at,
+                        processing_mode=decision.mode,
+                        processing_status="metadata_only",
+                        reason_code=decision.reason_code,
+                        raw_content_hash=raw_content_hash,
+                    )
+                    skipped += 1
+                    files_processed += 1
+                    self._report_rejection(
+                        rejection,
+                        root=root,
+                        path=path,
+                        relative_path=relative_path,
+                        entry_kind="file",
+                        disposition="skipped",
+                        file_size=file_size,
+                        reason_code=(
+                            decision.reason_code or "metadata_only_policy"
+                        ),
+                    )
+                    append_path_document(
+                        path,
+                        decision.reason_code or "metadata_only_policy",
+                        relative_path=relative_path,
+                    )
                     continue
                 self._report_observation(
                     observation,
                     root=root,
                     path=path,
+                    relative_path=relative_path,
                     entry_kind="file",
                     file_size=file_size,
                     modified_at=modified_at,
@@ -618,14 +933,15 @@ class SourceConnectorManager:
                         )
                     )
                     continue
-                directory_files.append((path, decision.mode))
+                directory_files.append((path, decision.mode, relative_path))
 
-            for path, processing_mode in directory_files:
+            for path, processing_mode, relative_path in directory_files:
                 file_size: int | None = None
                 try:
-                    file_size = path.stat().st_size
+                    io_path = _path_for_io(path)
+                    file_size = io_path.stat().st_size
                     extracted = extract_text_with_metadata(
-                        path,
+                        io_path,
                         max_spreadsheet_cells=(
                             self._max_spreadsheet_cells
                         ),
@@ -654,6 +970,7 @@ class SourceConnectorManager:
                     append_path_document(
                         path,
                         self._rejection_reason(path, exc),
+                        relative_path=relative_path,
                     )
                     files_processed += 1
                     continue
@@ -664,19 +981,24 @@ class SourceConnectorManager:
                         rejection,
                         root=root,
                         path=path,
+                        relative_path=relative_path,
                         entry_kind="file",
                         disposition="rejected",
                         file_size=file_size,
                         reason_code="empty_text",
                     )
-                    append_path_document(path, "empty_text")
+                    append_path_document(
+                        path,
+                        "empty_text",
+                        relative_path=relative_path,
+                    )
                     continue
                 content_hash = hashlib.sha256(
                     text.encode("utf-8")
                 ).hexdigest()
                 documents.append(
                     CollectedDocument(
-                        path=path.relative_to(root).as_posix(),
+                        path=relative_path,
                         text=text,
                         content_hash=content_hash,
                         language=path.suffix.lstrip(".").lower() or "text",
@@ -691,6 +1013,7 @@ class SourceConnectorManager:
             report(
                 "completed",
                 directory,
+                logical_path=logical_directory,
                 current_directory_files=len(directory_files),
             )
 
@@ -707,7 +1030,7 @@ class SourceConnectorManager:
     @staticmethod
     def _sha256_file(path: Path) -> str:
         digest = hashlib.sha256()
-        with path.open("rb") as stream:
+        with _path_for_io(path).open("rb") as stream:
             while block := stream.read(1024 * 1024):
                 digest.update(block)
         return digest.hexdigest()
@@ -751,6 +1074,7 @@ class SourceConnectorManager:
         *,
         root: Path,
         path: Path,
+        relative_path: str | None = None,
         entry_kind: str,
         disposition: str,
         file_size: int | None,
@@ -759,10 +1083,8 @@ class SourceConnectorManager:
     ) -> None:
         if sink is None:
             return
-        relative_path = (
-            "."
-            if path == root
-            else path.relative_to(root).as_posix()
+        relative_path = relative_path or (
+            "." if path == root else path.relative_to(root).as_posix()
         )
         error_message = None
         if error is not None:
@@ -811,6 +1133,7 @@ class SourceConnectorManager:
         *,
         root: Path,
         path: Path,
+        relative_path: str | None = None,
         entry_kind: str,
         file_size: int | None,
         modified_at: datetime | None,
@@ -821,10 +1144,8 @@ class SourceConnectorManager:
     ) -> None:
         if sink is None:
             return
-        relative_path = (
-            "."
-            if path == root
-            else path.relative_to(root).as_posix()
+        relative_path = relative_path or (
+            "." if path == root else path.relative_to(root).as_posix()
         )
         sink(
             CollectionObservation(

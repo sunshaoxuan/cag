@@ -81,7 +81,8 @@ The archive directory must use persistent host or volume storage in production.
 
 Knowledge source entries and rejection records store file sizes as PostgreSQL
 `BIGINT`. ZIP, DUMP, backup, binary and files above
-`AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` are recorded as metadata-only assets.
+`AGENT_GATEWAY_KNOWLEDGE_MAX_FILE_BYTES` are recorded as metadata-only assets
+after raw SHA 256 is computed. The default and maximum are 100 MB.
 Their content is not opened for extraction. The source entries API and
 Knowledge management page expose the processing decision and reason.
 
@@ -205,7 +206,7 @@ The default Compose Gateway explicitly uses Fake Runtime. A future container dep
 | `AGENT_GATEWAY_KNOWLEDGE_FAST_TIMEOUT_SECONDS` | Overall indexed fast-search deadline |
 | `AGENT_GATEWAY_KNOWLEDGE_BALANCED_TIMEOUT_SECONDS` | Overall balanced-search deadline |
 | `AGENT_GATEWAY_KNOWLEDGE_DEEP_TIMEOUT_SECONDS` | Overall deep-search deadline |
-| `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_DOCUMENT_TIMEOUT_SECONDS` | Per document customer extraction deadline, default 15 seconds |
+| `AGENT_GATEWAY_KNOWLEDGE_CUSTOMER_DOCUMENT_TIMEOUT_SECONDS` | Per document model stream inactivity timeout, default 300 seconds. Each received stream chunk refreshes activity and emits document progress |
 | `AGENT_GATEWAY_KNOWLEDGE_STATEMENT_TIMEOUT_MS` | PostgreSQL timeout for each retrieval transaction |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_ENABLED` | Enable persistent scheduled source synchronization |
 | `AGENT_GATEWAY_KNOWLEDGE_SCHEDULER_POLL_SECONDS` | Poll interval for due sources |

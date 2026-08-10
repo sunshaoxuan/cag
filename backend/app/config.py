@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.27.0"
+APP_VERSION = "0.28.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     knowledge_balanced_timeout_seconds: int = Field(default=15, ge=2, le=120)
     knowledge_deep_timeout_seconds: int = Field(default=30, ge=5, le=300)
     knowledge_customer_document_timeout_seconds: int = Field(
-        default=15, ge=5, le=300
+        default=300, ge=5, le=300
     )
     knowledge_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
     knowledge_sources_dir: Path = (
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
         default=365, ge=30, le=3_650
     )
     knowledge_max_file_bytes: int = Field(
-        default=10_000_000, ge=1_024, le=100_000_000
+        default=100_000_000, ge=1_024, le=100_000_000
     )
     knowledge_max_spreadsheet_cells: int = Field(
         default=250_000, ge=1_000, le=2_000_000

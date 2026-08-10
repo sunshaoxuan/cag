@@ -69,6 +69,8 @@ def classify_file(
             "metadata_only",
             "temporary_office_file",
         )
+    if suffix == ".lnk":
+        return FileProcessingDecision("path_only", "windows_shortcut")
     if suffix in METADATA_ONLY_EXTENSIONS:
         return FileProcessingDecision(
             "metadata_only",

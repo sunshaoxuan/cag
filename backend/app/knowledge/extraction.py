@@ -2,10 +2,11 @@ import asyncio
 import hashlib
 import json
 import re
+import time
 import unicodedata
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
 from typing import Any
 
@@ -30,6 +31,7 @@ from app.models import (
     KnowledgeExtractionTaskEvent,
     KnowledgeFieldCandidate,
     KnowledgeFieldConflict,
+    KnowledgeIngestion,
     KnowledgeProcessingVersion,
     KnowledgeSource,
     KnowledgeSourceEntry,
@@ -40,7 +42,12 @@ from app.models.base import utc_now
 from app.services.task_service import TaskService
 
 
-TERMINAL_EXTRACTION_STATUSES = {"review_required", "completed", "failed"}
+TERMINAL_EXTRACTION_STATUSES = {
+    "review_required",
+    "completed",
+    "failed",
+    "cancelled",
+}
 CUSTOMIZATION_DIRECTORIES = {
     "2.カスタマイズ情報",
     "2.カスタイズ情報",
@@ -49,12 +56,35 @@ REMOTE_INFORMATION_DIRECTORIES = {
     "6.リモート接続情報",
 }
 SPECIAL_LEDGER_FIELDS = {"customizations", "vpns", "environments"}
+HISTORICAL_DIRECTORY_PREFIXES = ("旧_", "旧-")
+HISTORICAL_DIRECTORY_NAMES = {
+    "old",
+    "旧",
+    "back",
+    "backup",
+    "bak",
+    "バックアップ",
+}
+
+
+def is_historical_path(canonical_path: str) -> bool:
+    for value in canonical_path.replace("\\", "/").split("/")[:-1]:
+        segment = re.sub(r"\s+", "", _normalized(value))
+        if segment in HISTORICAL_DIRECTORY_NAMES or segment.startswith(
+            HISTORICAL_DIRECTORY_PREFIXES
+        ):
+            return True
+    return False
 
 
 def requested_fields_for_document(
     canonical_path: str,
     requested_fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    if is_historical_path(canonical_path) or canonical_path.casefold().endswith(
+        ".lnk"
+    ):
+        return []
     segments = {
         re.sub(r"\s+", "", _normalized(segment))
         for segment in canonical_path.replace("\\", "/").split("/")
@@ -178,6 +208,9 @@ class CustomerKnowledgeExtractionService:
 
         try:
             await self._run(extraction.id)
+        except asyncio.CancelledError:
+            self.cancel(extraction.id, generic_task_id)
+            raise
         except ScopedExtractionError as error:
             self._fail(extraction.id, generic_task_id, error)
         except Exception:
@@ -190,19 +223,146 @@ class CustomerKnowledgeExtractionService:
 
     async def _run(self, extraction_id: str) -> None:
         scope_id = self._resolve_scope(extraction_id)
-        document_rows = self._prepare_manifest(extraction_id, scope_id)
-        requested_fields, schema_registry = self._extraction_contract(extraction_id)
-
-        for ordinal, task_document_id in enumerate(document_rows, start=1):
-            await self._extract_document(
-                extraction_id,
-                task_document_id,
-                requested_fields,
-                schema_registry,
-                ordinal,
-                len(document_rows),
+        with self._database.session_factory() as session:
+            scope = session.get(KnowledgeAnalysisScope, scope_id)
+            if scope is None:
+                raise ScopedExtractionError(
+                    "SCOPE_NOT_FOUND",
+                    "resolving_scope",
+                )
+            source_id = scope.source_id
+        lease_owner = f"extraction:{scope_id}:{extraction_id}"
+        while not self._knowledge_service.acquire_source_lease(
+            source_id,
+            lease_owner,
+        ):
+            await asyncio.sleep(1)
+        try:
+            await self._prepare_required_versions(extraction_id, scope_id)
+            document_rows = self._prepare_manifest(extraction_id, scope_id)
+            requested_fields, schema_registry = self._extraction_contract(
+                extraction_id
             )
-        self._aggregate(extraction_id)
+
+            for ordinal, task_document_id in enumerate(document_rows, start=1):
+                self._knowledge_service.renew_source_lease(
+                    source_id,
+                    lease_owner,
+                )
+                await self._extract_document(
+                    extraction_id,
+                    task_document_id,
+                    requested_fields,
+                    schema_registry,
+                    ordinal,
+                    len(document_rows),
+                )
+            self._aggregate(extraction_id)
+        finally:
+            self._knowledge_service.release_source_lease(
+                source_id,
+                lease_owner,
+            )
+
+    async def _prepare_required_versions(
+        self,
+        extraction_id: str,
+        scope_id: str,
+    ) -> None:
+        with self._database.session_factory() as session:
+            task = session.get(KnowledgeExtractionTask, extraction_id)
+            scope = session.get(KnowledgeAnalysisScope, scope_id)
+            if task is None or scope is None:
+                raise ScopedExtractionError(
+                    "EXTRACTION_FAILED",
+                    "preparing_versions",
+                )
+            policy = dict(task.request_json.get("ingestion_policy") or {})
+            if policy.get("mode") != "prepare_required_versions":
+                return
+            source = session.get(KnowledgeSource, scope.source_id)
+            if source is None:
+                raise ScopedExtractionError(
+                    "KNOWLEDGE_SOURCE_NOT_FOUND",
+                    "preparing_versions",
+                )
+            source_subpath = (source.subpath or "").replace("\\", "/").strip("/")
+            scope_prefix = scope.canonical_prefix.strip("/")
+            local_prefix = (
+                ""
+                if scope_prefix == source_subpath
+                else scope_prefix.removeprefix(f"{source_subpath}/")
+                if source_subpath and scope_prefix.startswith(f"{source_subpath}/")
+                else scope_prefix
+            )
+            task.status = "preparing_versions"
+            task.stage = "preparing_versions"
+            session.commit()
+
+        retry_statuses = ["observed", "metadata_only", "empty_text"]
+        if policy.get("retry_failed_documents", True):
+            retry_statuses.append("failed")
+        ingestion, created = self._knowledge_service.create_ingestion(
+            scope.source_id,
+            trigger="scope_repair",
+            analysis_scope_id=scope.id,
+            scope_prefix=local_prefix,
+            retry_statuses=retry_statuses,
+            enqueue=False,
+        )
+        with self._database.session_factory() as session:
+            task = session.get(KnowledgeExtractionTask, extraction_id)
+            if task is not None:
+                self._append_event(
+                    session,
+                    task,
+                    "scope.ingestion.started",
+                    {
+                        "ingestion_id": ingestion.id,
+                        "created": created,
+                        "scope_prefix": local_prefix,
+                    },
+                )
+                session.commit()
+
+        if created:
+            await self._knowledge_service.ingest(ingestion.id)
+        while True:
+            with self._database.session_factory() as session:
+                current = session.get(KnowledgeIngestion, ingestion.id)
+                if current is None:
+                    raise ScopedExtractionError(
+                        "INGESTION_PREPARATION_FAILED",
+                        "preparing_versions",
+                    )
+                current_status = current.status
+                result = {
+                    "ingestion_id": current.id,
+                    "status": current.status,
+                    "files_seen": current.files_seen,
+                    "chunks_written": current.chunks_written,
+                    "rejected_files": current.rejected_files,
+                    "skipped_files": current.skipped_files,
+                }
+            if current_status in {"completed", "failed", "cancelled"}:
+                break
+            await asyncio.sleep(1)
+        if current_status != "completed":
+            raise ScopedExtractionError(
+                "INGESTION_PREPARATION_FAILED",
+                "preparing_versions",
+                details=result,
+            )
+        with self._database.session_factory() as session:
+            task = session.get(KnowledgeExtractionTask, extraction_id)
+            if task is not None:
+                self._append_event(
+                    session,
+                    task,
+                    "scope.ingestion.completed",
+                    result,
+                )
+                session.commit()
 
     def _resolve_scope(self, extraction_id: str) -> str:
         with self._database.session_factory() as session:
@@ -380,11 +540,7 @@ class CustomerKnowledgeExtractionService:
                     if value
                 )
                 filename = path.rsplit("/", 1)[-1]
-                document = session.scalar(
-                    select(KnowledgeDocument).where(
-                        KnowledgeDocument.source_entry_id == entry.id
-                    )
-                )
+                document = self._current_document(session, entry)
                 status, excluded_reason = self._manifest_status(
                     entry, document, filename
                 )
@@ -432,19 +588,35 @@ class CustomerKnowledgeExtractionService:
             return created
 
     @staticmethod
+    def _current_document(
+        session,
+        entry: KnowledgeSourceEntry,
+    ) -> KnowledgeDocument | None:
+        return session.scalar(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.source_entry_id == entry.id,
+                KnowledgeDocument.canonical_path == entry.relative_path,
+            )
+        )
+
+    @staticmethod
     def _manifest_status(
         entry: KnowledgeSourceEntry,
         document: KnowledgeDocument | None,
         filename: str,
     ) -> tuple[str, str | None]:
+        if is_historical_path(entry.relative_path):
+            return "excluded", "historical_path"
         if filename.startswith("~$"):
             return "excluded", "temporary_office_file"
-        if entry.extension.casefold() not in SUPPORTED_EXTENSIONS:
-            return "unsupported_extension", "unsupported_extension"
         if not entry.present:
             return "source_absent", "source_absent"
         if entry.processing_status in {"failed", "extraction_failed"}:
             return "extraction_failed", None
+        if entry.processing_mode == "path_only":
+            return ("ready", None) if document is not None else ("observed_only", None)
+        if entry.extension.casefold() not in SUPPORTED_EXTENSIONS:
+            return "unsupported_extension", "unsupported_extension"
         if entry.processing_mode == "metadata_only" or entry.processing_status == "metadata_only":
             return "metadata_only", None
         if document is None:
@@ -633,22 +805,57 @@ class CustomerKnowledgeExtractionService:
             task_document.canonical_path,
             requested_fields,
         )
+        last_activity_report = 0.0
+
+        async def report_model_activity(activity: dict[str, Any]) -> None:
+            nonlocal last_activity_report
+            now = time.monotonic()
+            if not activity.get("done") and now - last_activity_report < 5:
+                return
+            last_activity_report = now
+            with self._database.session_factory() as session:
+                task = session.get(KnowledgeExtractionTask, extraction_id)
+                row = session.get(
+                    KnowledgeExtractionTaskDocument,
+                    task_document_id,
+                )
+                if task is None or row is None:
+                    return
+                row.checkpoint = {
+                    "batch": 0,
+                    "status": "extracting",
+                    "model_activity_at": utc_now().isoformat(),
+                    "model_chunks_received": activity.get("chunk_index", 0),
+                    "model_response_chars": activity.get("response_chars", 0),
+                    "model_done": bool(activity.get("done")),
+                }
+                self._append_event(
+                    session,
+                    task,
+                    "document.model.activity",
+                    {
+                        "task_document_id": row.id,
+                        "processed": ordinal,
+                        "total": total,
+                        **row.checkpoint,
+                    },
+                )
+                session.commit()
+
         try:
             if document_requested_fields:
-                async with asyncio.timeout(
-                    self._settings.knowledge_customer_document_timeout_seconds
-                ):
-                    fields, validation_errors = (
-                        await self._knowledge_service.extract_customer_fields(
-                            requested_fields=document_requested_fields,
-                            results=results,
-                            schema_registry=schema_registry,
-                            timeout_seconds=(
-                                self._settings
-                                .knowledge_customer_document_timeout_seconds
-                            ),
-                        )
+                fields, validation_errors = (
+                    await self._knowledge_service.extract_customer_fields(
+                        requested_fields=document_requested_fields,
+                        results=results,
+                        schema_registry=schema_registry,
+                        timeout_seconds=(
+                            self._settings
+                            .knowledge_customer_document_timeout_seconds
+                        ),
+                        activity=report_model_activity,
                     )
+                )
             else:
                 fields, validation_errors = [], []
         except Exception as error:
@@ -756,10 +963,15 @@ class CustomerKnowledgeExtractionService:
                 )
             row.extraction_status = "analyzed"
             row.failure_code = None
+            observation = self._document_observation(
+                row.canonical_path,
+                results,
+            )
             row.checkpoint = {
                 "batch": 1,
                 "status": "completed",
                 "validation_errors": validation_errors,
+                **({"observation": observation} if observation else {}),
             }
             self._append_event(
                 session,
@@ -771,9 +983,38 @@ class CustomerKnowledgeExtractionService:
                     "total": total,
                     "candidate_count": len(fields),
                     "validation_error_count": len(validation_errors),
+                    **(
+                        {"observation_status": observation["status"]}
+                        if observation
+                        else {}
+                    ),
                 },
             )
             session.commit()
+
+    @staticmethod
+    def _document_observation(
+        canonical_path: str,
+        results: list[SearchResult],
+    ) -> dict[str, Any] | None:
+        if not canonical_path.casefold().endswith(".lnk"):
+            return None
+        values: dict[str, str] = {}
+        for result in results:
+            for line in result.text.splitlines():
+                key, separator, value = line.partition(":")
+                if separator and key.startswith("shortcut_"):
+                    values[key] = value.strip()
+        status = values.get("shortcut_target_status", "shortcut_parse_failed")
+        target_path = values.get("shortcut_target_path")
+        if target_path:
+            target_path = scan_knowledge_text(target_path).safe_text
+        return {
+            "type": "windows_shortcut",
+            "status": status,
+            "target_path": target_path,
+            "target_kind": values.get("shortcut_target_kind"),
+        }
 
     @staticmethod
     def _failure_for_manifest(status: str) -> str:
@@ -1033,6 +1274,24 @@ class CustomerKnowledgeExtractionService:
                     for item in documents
                     if item.extraction_status == "failed"
                 ],
+                "document_exclusions": [
+                    {
+                        "document_id": item.document_id,
+                        "canonical_path": item.canonical_path,
+                        "reason_code": item.excluded_reason,
+                    }
+                    for item in documents
+                    if item.extraction_status == "excluded"
+                ],
+                "document_observations": [
+                    {
+                        "document_id": item.document_id,
+                        "canonical_path": item.canonical_path,
+                        **item.checkpoint["observation"],
+                    }
+                    for item in documents
+                    if item.checkpoint.get("observation")
+                ],
                 "versions": {
                     "source_generation_id": max(
                         (
@@ -1119,6 +1378,18 @@ class CustomerKnowledgeExtractionService:
         data: dict[str, Any],
     ) -> None:
         task.updated_at = utc_now()
+        if task.scope_id is not None:
+            scope = session.get(KnowledgeAnalysisScope, task.scope_id)
+            source = (
+                session.get(KnowledgeSource, scope.source_id)
+                if scope is not None
+                else None
+            )
+            expected_owner = f"extraction:{task.scope_id}:{task.id}"
+            if source is not None and source.sync_lease_owner == expected_owner:
+                source.sync_lease_expires_at = utc_now() + timedelta(
+                    seconds=self._knowledge_service.SOURCE_LEASE_SECONDS
+                )
         sequence = session.scalar(
             select(func.max(KnowledgeExtractionTaskEvent.sequence)).where(
                 KnowledgeExtractionTaskEvent.extraction_task_id == task.id
@@ -1189,5 +1460,32 @@ class CustomerKnowledgeExtractionService:
             if generic is not None:
                 generic.status = TaskStatus.FAILED
                 generic.error = error.code
+                generic.completed_at = utc_now()
+            session.commit()
+
+    def cancel(self, extraction_id: str, generic_task_id: str) -> None:
+        with self._database.session_factory() as session:
+            task = session.get(KnowledgeExtractionTask, extraction_id)
+            generic = session.get(Task, generic_task_id)
+            if task is not None and task.status not in TERMINAL_EXTRACTION_STATUSES:
+                task.status = "cancelled"
+                task.stage = "cancelled"
+                task.completed_at = utc_now()
+                task.result_json = {
+                    "id": task.id,
+                    "schema_version": 1,
+                    "status": "cancelled",
+                    "subject_external_id": task.subject_external_id,
+                    "created_at": task.created_at.isoformat(),
+                    "completed_at": task.completed_at.isoformat(),
+                }
+                self._append_event(
+                    session,
+                    task,
+                    "extraction.cancelled",
+                    {},
+                )
+            if generic is not None and generic.status not in TaskStatus.TERMINAL:
+                generic.status = TaskStatus.CANCELLED
                 generic.completed_at = utc_now()
             session.commit()

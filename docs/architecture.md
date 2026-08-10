@@ -338,6 +338,20 @@ code processing. Archives, dumps, backups, binaries and files above the size
 limit keep presence and path metadata without content extraction. Empty files
 produce path knowledge. Code always enters structural code analysis.
 
+Windows Shell Links use the maintained LnkParse3 parser against the Microsoft
+Shell Link binary contract. The collector hashes the link bytes, reconstructs
+UNC targets from network LinkInfo and records a typed target status. Targets
+remain inside the registered UNC share or allowed local root. Directory targets
+are flattened under the logical shortcut path. A physical-directory visited
+set stops a repeated directory at its entry, including ancestor, descendant
+and back-link cycles.
+
+Customer extraction executes its requested version-preparation policy before
+freezing the manifest. A Scope Repair Ingestion runs against the resolved
+prefix, commits cleaned Documents and Chunks, and then hands the physical rows
+to extraction. Concurrent older ingestions cannot mark entries observed by a
+newer scoped run as removed.
+
 Successful documents store a processor fingerprint containing policy version,
 processing mode, extractor or parser version, embedding model and vector
 dimensions. Content hash plus this fingerprint controls reuse. A changed
@@ -393,8 +407,10 @@ Manifest outcomes and can be prepared by a separate Scope Ingestion.
 Extraction runs one durable document work item at a time. Each manifest row
 commits its own terminal checkpoint and publishes a `task.progress` event to
 the Generic Task audit stream. The parent Extraction has no fixed wall-clock
-deadline. QueueItem lease renewal proves worker liveness, and the bounded
-per-document HTTP deadline detects a stalled model call. A worker loss leaves
+deadline. QueueItem lease renewal proves worker liveness. Each per-document
+Ollama response is NDJSON streamed, and the configured timeout applies only to
+a period with no stream data. Every received chunk refreshes the child
+activity checkpoint. A worker loss leaves
 completed rows intact and lease recovery continues from the first unfinished
 row. Aggregation starts only after every manifest row reaches a terminal
 state. Every accepted field has a physical
@@ -404,11 +420,20 @@ priority, confidence, conflict and evidence policies. The response reports
 coverage, exclusions, unresolved fields and document failures without updating
 the calling system's ledger.
 
-The per-document deadline is passed into the Ollama HTTP client. The model
-request therefore closes at the same boundary recorded as `MODEL_TIMEOUT`,
-including runner loading and response reads. Structured generation uses an
+The per-document inactivity timeout is passed into the Ollama HTTP client.
+Each stream read resets the timeout and publishes throttled
+`document.model.activity`; a stream with no response data closes at the same
+boundary recorded as `MODEL_TIMEOUT`. Structured generation uses an
 8192-token context so accepted evidence is not silently truncated at Ollama's
 smaller runtime default.
+
+Scope resolution acquires a renewable Source update lease before Scope Repair.
+The lease remains owned by the physical Extraction through Manifest creation,
+per-document analysis and aggregation. Its Scope Repair is admitted within the
+same lease. Manual and scheduled full ingestions for that Source may enter the
+queue, but wait before collection until the Extraction releases ownership.
+This prevents an active generation from replacing frozen Manifest Document
+Versions. Scheduler ownership transfers atomically to its physical Ingestion.
 
 Directory taxonomy compares NFKC-normalized segments. Governed aliases include
 the observed `2.カスタイズ情報` spelling as well as the formal

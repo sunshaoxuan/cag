@@ -8,13 +8,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
+    get_customer_extraction_service,
     get_knowledge_service,
     get_queue_coordinator,
     get_queue_service,
     get_session,
     get_task_service,
 )
-from app.knowledge.extraction import extraction_request_hash, extraction_request_id
+from app.knowledge.extraction import (
+    CustomerKnowledgeExtractionService,
+    extraction_request_hash,
+    extraction_request_id,
+)
 from app.knowledge.customer_ledger_contracts import customer_ledger_schema_registry
 from app.knowledge.service import KnowledgeService
 from app.models import (
@@ -402,6 +407,9 @@ async def cancel_customer_extraction(
     session: Session = Depends(get_session),
     queue_service: QueueService = Depends(get_queue_service),
     coordinator: QueueCoordinator = Depends(get_queue_coordinator),
+    extraction_service: CustomerKnowledgeExtractionService = Depends(
+        get_customer_extraction_service
+    ),
 ) -> dict[str, str]:
     task = session.get(KnowledgeExtractionTask, task_id)
     if task is None:
@@ -412,6 +420,8 @@ async def cancel_customer_extraction(
     if item is None or item.job_type != "customer_knowledge_extraction":
         raise _error(404, "EXTRACTION_NOT_FOUND", "Customer extraction was not found.")
     queue_status = queue_service.request_cancel(item.id)
+    if queue_status == "cancelled":
+        extraction_service.cancel(task.id, task.generic_task_id)
     await coordinator.notify("extraction")
     return {"id": task.id, "status": queue_status}
 

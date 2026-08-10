@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.27.0`
+Current version: `0.28.0`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-    "version": "0.27.0"
+  "version": "0.28.0"
 }
 ```
 
@@ -124,7 +124,9 @@ Scope resolution uses exact boundary matching for organization Code and name
 attributes. Zero matches return `SCOPE_NOT_FOUND`; multiple matches return
 `SCOPE_AMBIGUOUS`. The result contains Scope, exhaustive coverage, field
 candidates, evidence, conflicts, unresolved fields, applicability exclusions,
-document failures and Source, Template, Extractor and Model versions. Evidence
+document failures, document exclusions, document observations and Source,
+Template, Extractor and Model versions. Shortcut observations contain the
+canonical link path, redacted target path, target kind and target status. Evidence
 contains Chunk ID, Document ID, Document Version ID, Resource URI, canonical
 path, Sheet, Cell, Page or Section location and a redacted excerpt.
 
@@ -136,11 +138,27 @@ independent from business applicability. Scope ingestion requires
 repair Ingestion only for the resolved Scope. Reanalysis uses a new Extraction
 Task and reuses ready versions.
 
+The request value `ingestion_policy.mode=prepare_required_versions` causes the
+Extraction worker to create or reuse a Repair Ingestion for the resolved Scope.
+The Extraction status is `preparing_versions` until that ingestion completes.
+The Generic Task stream publishes `scope.ingestion.started` and
+`scope.ingestion.completed` as `task.progress`. A failed or cancelled Repair
+Ingestion ends the parent with `INGESTION_PREPARATION_FAILED`.
+
 An active Extraction has no fixed wall-clock deadline. Its worker keeps the
-QueueItem lease alive, while every document model request retains its own
-bounded deadline. Every document writes one durable terminal checkpoint and a
-public `task.progress` event. Worker loss is recovered by the queue lease, and
-the parent Extraction aggregates only after every manifest row is terminal.
+QueueItem lease alive. Every document model request uses an Ollama NDJSON
+stream and a 300 second inactivity timeout. Received chunks publish throttled
+`document.model.activity` progress and refresh the child checkpoint. Every
+document then writes one durable terminal checkpoint. Worker loss is recovered
+by the queue lease, and the parent Extraction aggregates only after every
+manifest row is terminal. Cancellation sets the QueueItem, Generic Task and
+Extraction record to `cancelled`.
+
+The resolved Extraction holds the Source update lease through aggregation.
+Scope Repair is permitted under that owner. Scheduled and manual full
+ingestions for the same Source remain active but do not begin collection until
+the lease is released. The lease is renewed by ingestion, model activity and
+document terminal events.
 
 The running response contains:
 

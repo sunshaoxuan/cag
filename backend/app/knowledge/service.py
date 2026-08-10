@@ -7,7 +7,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -39,7 +39,7 @@ from app.knowledge.credentials import (
     SourceCredential,
 )
 from app.knowledge.customer_ledger_contracts import value_matches_schema
-from app.knowledge.ollama import OllamaProvider
+from app.knowledge.ollama import OllamaProvider, StructuredGenerationActivity
 from app.knowledge.ocr import TesseractOcrEngine
 from app.knowledge.processing_policy import (
     PROCESSING_POLICY_VERSION,
@@ -207,6 +207,8 @@ def customer_field_output_schema(
 
 
 class KnowledgeService:
+    SOURCE_LEASE_SECONDS = 900
+
     def __init__(
         self,
         *,
@@ -625,6 +627,7 @@ class KnowledgeService:
         analysis_scope_id: str | None = None,
         scope_prefix: str | None = None,
         retry_statuses: list[str] | None = None,
+        enqueue: bool = True,
     ) -> tuple[KnowledgeIngestion, bool]:
         if trigger not in {"manual", "scheduled", "scope_repair"}:
             raise ValueError("Unsupported knowledge ingestion trigger")
@@ -671,27 +674,48 @@ class KnowledgeService:
                 "knowledge.ingestion.queued",
                 {"source_id": source_id, "trigger": trigger},
             )
-            session.add(
-                QueueItem(
-                    queue_name="knowledge",
-                    job_type="knowledge_ingestion",
-                    ingestion_id=ingestion.id,
-                    project_id=source.project_id,
-                    client_id=(
-                        "knowledge-scheduler"
-                        if trigger == "scheduled"
-                        else "knowledge-console"
-                    ),
-                    priority=20 if trigger == "scheduled" else 40,
-                    max_attempts=2,
+            if enqueue:
+                session.add(
+                    QueueItem(
+                        queue_name="knowledge",
+                        job_type="knowledge_ingestion",
+                        ingestion_id=ingestion.id,
+                        project_id=source.project_id,
+                        client_id=(
+                            "knowledge-scheduler"
+                            if trigger == "scheduled"
+                            else "knowledge-console"
+                        ),
+                        priority=20 if trigger == "scheduled" else 40,
+                        max_attempts=2,
+                    )
                 )
-            )
             session.commit()
             return ingestion, True
 
     async def ingest(self, ingestion_id: str) -> None:
         if self._cipher is None:
             self._fail_ingestion(ingestion_id, "Knowledge encryption key is unavailable")
+            return
+        started_at = utc_now()
+        with self._database.session_factory() as session:
+            ingestion = session.get(KnowledgeIngestion, ingestion_id)
+            if ingestion is None:
+                return
+            claimed = session.execute(
+                update(KnowledgeIngestion)
+                .where(
+                    KnowledgeIngestion.id == ingestion_id,
+                    KnowledgeIngestion.status == "queued",
+                )
+                .values(status="running", started_at=started_at)
+            )
+            if claimed.rowcount != 1:
+                session.rollback()
+                return
+            session.commit()
+        lease_owner = await self._wait_for_ingestion_source_access(ingestion_id)
+        if lease_owner is None:
             return
         rejection_buffer: list[CollectionRejection] = []
         observation_buffer: list[CollectionObservation] = []
@@ -712,26 +736,12 @@ class KnowledgeService:
 
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
-            if ingestion is None:
-                return
-            started_at = utc_now()
-            claimed = session.execute(
-                update(KnowledgeIngestion)
-                .where(
-                    KnowledgeIngestion.id == ingestion_id,
-                    KnowledgeIngestion.status == "queued",
-                )
-                .values(status="running", started_at=started_at)
-            )
-            if claimed.rowcount != 1:
-                session.rollback()
+            if ingestion is None or ingestion.status != "running":
                 return
             source = session.get(KnowledgeSource, ingestion.source_id)
             if source is None:
                 session.rollback()
                 return
-            ingestion.status = "running"
-            ingestion.started_at = started_at
             self._append_ingestion_event(
                 session,
                 ingestion,
@@ -1423,8 +1433,12 @@ class KnowledgeService:
                 if changed_paths or removed_paths:
                     source.last_content_change_at = source.last_collected_at
                 source.consecutive_failures = 0
-                source.sync_lease_owner = None
-                source.sync_lease_expires_at = None
+                if source.sync_lease_owner in {
+                    None,
+                    f"ingestion:{ingestion.id}",
+                }:
+                    source.sync_lease_owner = None
+                    source.sync_lease_expires_at = None
                 source.next_sync_at = self._next_sync_at(
                     source,
                     source.last_collected_at,
@@ -1592,6 +1606,7 @@ class KnowledgeService:
             statement = update(KnowledgeSourceEntry).where(
                 KnowledgeSourceEntry.source_id == ingestion.source_id,
                 KnowledgeSourceEntry.present.is_(True),
+                KnowledgeSourceEntry.last_seen_at <= ingestion.started_at,
                 or_(
                     KnowledgeSourceEntry.last_seen_ingestion_id.is_(None),
                     KnowledgeSourceEntry.last_seen_ingestion_id != ingestion_id,
@@ -2890,6 +2905,7 @@ class KnowledgeService:
         results: list[SearchResult],
         schema_registry: dict[str, Any],
         timeout_seconds: int | None = None,
+        activity: StructuredGenerationActivity | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not results:
             return [], []
@@ -2959,6 +2975,7 @@ class KnowledgeService:
             f"Evidence: {json.dumps(evidence, ensure_ascii=False)}",
             schema,
             timeout_seconds=timeout_seconds,
+            activity=activity,
         )
         fields: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
@@ -3153,6 +3170,70 @@ class KnowledgeService:
             session.commit()
         return ids
 
+    async def _wait_for_ingestion_source_access(
+        self,
+        ingestion_id: str,
+    ) -> str | None:
+        while True:
+            now = utc_now()
+            with self._database.session_factory() as session:
+                ingestion = session.get(KnowledgeIngestion, ingestion_id)
+                if ingestion is None or ingestion.status not in {"queued", "running"}:
+                    return None
+                source = session.scalar(
+                    select(KnowledgeSource)
+                    .where(KnowledgeSource.id == ingestion.source_id)
+                    .with_for_update()
+                )
+                if source is None:
+                    return None
+                extraction_scope_prefix = (
+                    f"extraction:{ingestion.analysis_scope_id}:"
+                    if ingestion.analysis_scope_id is not None
+                    else None
+                )
+                extraction_allows_scope_repair = (
+                    ingestion.trigger == "scope_repair"
+                    and extraction_scope_prefix is not None
+                    and source.sync_lease_owner is not None
+                    and source.sync_lease_owner.startswith(
+                        extraction_scope_prefix
+                    )
+                )
+                owner = f"ingestion:{ingestion.id}"
+                scheduler_handoff = (
+                    ingestion.trigger == "scheduled"
+                    and source.sync_lease_owner is not None
+                    and source.sync_lease_owner.startswith(
+                        "knowledge-scheduler:"
+                    )
+                )
+                lease_expires_at = source.sync_lease_expires_at
+                if (
+                    lease_expires_at is not None
+                    and lease_expires_at.tzinfo is None
+                ):
+                    lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+                lease_available = (
+                    source.sync_lease_owner in {None, owner}
+                    or lease_expires_at is None
+                    or lease_expires_at <= now
+                )
+                if extraction_allows_scope_repair:
+                    source.sync_lease_expires_at = now + timedelta(
+                        seconds=self.SOURCE_LEASE_SECONDS
+                    )
+                    session.commit()
+                    return str(source.sync_lease_owner)
+                if scheduler_handoff or lease_available:
+                    source.sync_lease_owner = owner
+                    source.sync_lease_expires_at = now + timedelta(
+                        seconds=self.SOURCE_LEASE_SECONDS
+                    )
+                    session.commit()
+                    return owner
+            await asyncio.sleep(1)
+
     def claim_due_source(
         self,
         *,
@@ -3170,6 +3251,7 @@ class KnowledgeService:
                     KnowledgeSource.next_sync_at <= now,
                     KnowledgeSource.status != KnowledgeStatus.INDEXING,
                     or_(
+                        KnowledgeSource.sync_lease_owner.is_(None),
                         KnowledgeSource.sync_lease_expires_at.is_(None),
                         KnowledgeSource.sync_lease_expires_at <= now,
                     ),
@@ -3191,10 +3273,72 @@ class KnowledgeService:
             session.commit()
             return source.id
 
+    def acquire_source_lease(
+        self,
+        source_id: str,
+        owner: str,
+    ) -> bool:
+        now = utc_now()
+        with self._database.session_factory() as session:
+            source = session.scalar(
+                select(KnowledgeSource)
+                .where(KnowledgeSource.id == source_id)
+                .with_for_update()
+            )
+            if source is None:
+                raise KeyError(source_id)
+            lease_expires_at = source.sync_lease_expires_at
+            if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+                lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+            if (
+                source.sync_lease_owner not in {None, owner}
+                and lease_expires_at is not None
+                and lease_expires_at > now
+            ):
+                return False
+            source.sync_lease_owner = owner
+            source.sync_lease_expires_at = now + timedelta(
+                seconds=self.SOURCE_LEASE_SECONDS
+            )
+            session.commit()
+            return True
+
+    def renew_source_lease(self, source_id: str, owner: str) -> bool:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None or source.sync_lease_owner != owner:
+                return False
+            source.sync_lease_expires_at = utc_now() + timedelta(
+                seconds=self.SOURCE_LEASE_SECONDS
+            )
+            session.commit()
+            return True
+
+    def release_source_lease(self, source_id: str, owner: str) -> None:
+        with self._database.session_factory() as session:
+            source = session.get(KnowledgeSource, source_id)
+            if source is None:
+                return
+            if source.sync_lease_owner is None:
+                source.sync_lease_expires_at = None
+                session.commit()
+                return
+            if source.sync_lease_owner != owner:
+                return
+            source.sync_lease_owner = None
+            source.sync_lease_expires_at = None
+            session.commit()
+
     def release_sync_lease(self, source_id: str, worker_id: str) -> None:
         with self._database.session_factory() as session:
             source = session.get(KnowledgeSource, source_id)
-            if source is None or source.sync_lease_owner != worker_id:
+            if source is None:
+                return
+            if source.sync_lease_owner is None:
+                source.sync_lease_expires_at = None
+                session.commit()
+                return
+            if source.sync_lease_owner != worker_id:
                 return
             source.sync_lease_owner = None
             source.sync_lease_expires_at = None
@@ -3585,8 +3729,12 @@ class KnowledgeService:
                 )
                 source.error = error_summary
                 source.consecutive_failures += 1
-                source.sync_lease_owner = None
-                source.sync_lease_expires_at = None
+                if source.sync_lease_owner in {
+                    None,
+                    f"ingestion:{ingestion.id}",
+                }:
+                    source.sync_lease_owner = None
+                    source.sync_lease_expires_at = None
                 if source.enabled and source.sync_mode == "scheduled":
                     retry_minutes = min(
                         source.sync_interval_minutes,
@@ -3599,13 +3747,29 @@ class KnowledgeService:
                     source.next_sync_at = None
             session.commit()
 
-    @staticmethod
     def _append_ingestion_event(
+        self,
         session,
         ingestion: KnowledgeIngestion,
         event_type: str,
         data: dict[str, Any],
     ) -> None:
+        source = session.get(KnowledgeSource, ingestion.source_id)
+        if source is not None and source.sync_lease_owner is not None:
+            ingestion_owner = f"ingestion:{ingestion.id}"
+            extraction_scope_prefix = (
+                f"extraction:{ingestion.analysis_scope_id}:"
+                if ingestion.analysis_scope_id is not None
+                else None
+            )
+            if source.sync_lease_owner == ingestion_owner or (
+                ingestion.trigger == "scope_repair"
+                and extraction_scope_prefix is not None
+                and source.sync_lease_owner.startswith(extraction_scope_prefix)
+            ):
+                source.sync_lease_expires_at = utc_now() + timedelta(
+                    seconds=self.SOURCE_LEASE_SECONDS
+                )
         session.add(
             KnowledgeIngestionEvent(
                 ingestion_id=ingestion.id,
