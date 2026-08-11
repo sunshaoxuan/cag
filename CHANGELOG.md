@@ -2,6 +2,19 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.28.4
+
+リリース日：2026-08-11
+
+### Added
+
+* QueueItem の物理 ID を公開 Client が保持せずに現在の Task を停止できる `POST /api/v1/tasks/{task_id}/cancel` を追加しました。
+* Queued Task の即時取消、Leased Task の取消要求、終端 Task の冪等再送及び非終端 Task の QueueItem 欠落に対する HTTP 409 の API 試験を追加しました。
+
+### Changed
+
+* 実行中 Task の取消しは HTTP 202 の受付後も既存 SSE を維持し、Worker が `task.cancelled` を確定する契約として正式文書へ記録しました。
+
 ## 0.28.3
 
 リリース日：2026-08-10

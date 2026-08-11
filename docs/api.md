@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.28.3`
+Current version: `0.28.4`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.28.3"
+  "version": "0.28.4"
 }
 ```
 
@@ -189,6 +189,7 @@ poll interval and does not lose accepted jobs.
 * `GET /api/v1/queue/items?queue_name=interactive&status=queued`
 * `GET /api/v1/queue/items?queue_name=extraction&status=queued`
 * `POST /api/v1/queue/items/{item_id}/cancel`
+* `POST /api/v1/tasks/{task_id}/cancel`
 
 Interactive Agent tasks, knowledge ingestions, customer extractions and
 self-operations issues use separate worker pools. A running full-source
@@ -616,6 +617,30 @@ Returns the current task status and final report.
 Unknown task IDs return HTTP 404.
 
 When workspace preparation succeeds, `workspace_id` has the form `{project_physical_id}/{task_id}` and `workspace_commit` contains the cloned `HEAD` SHA. The host filesystem path is not returned.
+
+## Task を取消す
+
+### `POST /api/v1/tasks/{task_id}/cancel`
+
+Task の物理 ID を指定して、その Task に対応する QueueItem の取消しを要求する。
+応答は HTTP 202 であり、返却する `status` は受付時点の永続状態を示す。
+
+```json
+{
+  "id": "UUID",
+  "status": "leased"
+}
+```
+
+`queued` の QueueItem は同じ取消処理で直ちに `cancelled` となり、Task SSE に
+`task.cancelled` を記録する。`leased` の QueueItem は取消要求を永続化して
+Interactive Worker を起床し、Worker が実行を停止した時点で `task.cancelled` に
+到達する。Client は HTTP 202 の後も現在の SSE 接続を維持し、終端 Event を
+受信するまで同じ Conversation に次の Task を作成しない。
+
+`completed`、`failed` 又は `cancelled` の Task に対する再送は冪等であり、新しい
+Event を作成せず現在の Task 状態を返す。存在しない Task は HTTP 404、非終端
+Task に対応する QueueItem が存在しない整合性違反は HTTP 409 を返す。
 
 ## Stream events
 

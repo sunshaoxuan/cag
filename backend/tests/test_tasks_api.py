@@ -1,9 +1,12 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.models import QueueItem, Task
+from app.models.base import utc_now
 from app.runtimes.base import RuntimeEventCallback, RuntimeResult
 from tests.waiters import wait_for_task
 
@@ -217,7 +220,126 @@ def test_missing_task_returns_404(client: TestClient) -> None:
     task_id = str(uuid4())
 
     assert client.get(f"/api/v1/tasks/{task_id}").status_code == 404
+    assert client.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 404
     assert client.get(f"/api/v1/tasks/{task_id}/events").status_code == 404
+
+
+def test_queued_task_cancel_is_immediate_and_idempotent(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        created = create_task(client)
+        app.state.queue_coordinator.notify = AsyncMock()
+
+        first = client.post(f"/api/v1/tasks/{created['id']}/cancel")
+        cancelled = client.get(f"/api/v1/tasks/{created['id']}").json()
+        events = parse_sse(
+            client.get(f"/api/v1/tasks/{created['id']}/events").text
+        )
+        second = client.post(f"/api/v1/tasks/{created['id']}/cancel")
+
+    assert first.status_code == 202
+    assert first.json() == {"id": created["id"], "status": "cancelled"}
+    assert cancelled["status"] == "cancelled"
+    assert [event["type"] for event in events] == [
+        "task.created",
+        "task.cancelled",
+    ]
+    assert second.status_code == 202
+    assert second.json() == first.json()
+    app.state.queue_coordinator.notify.assert_awaited_once_with("interactive")
+
+
+def test_running_task_cancel_waits_for_worker_confirmation(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        created = create_task(client)
+        claimed = app.state.queue_service.claim_next(
+            queue_name="interactive",
+            worker_key="task-cancel-worker",
+        )
+        assert claimed is not None
+        with app.state.database.session_factory() as session:
+            stored = session.get(Task, str(created["id"]))
+            assert stored is not None
+            stored.status = "running"
+            stored.started_at = utc_now()
+            session.commit()
+
+        response = client.post(f"/api/v1/tasks/{created['id']}/cancel")
+        pending = client.get(f"/api/v1/tasks/{created['id']}").json()
+        queue_item = app.state.queue_service.get_item_for_task(
+            str(created["id"])
+        )
+        assert queue_item is not None
+        confirmed = app.state.queue_service.abandon(
+            item_id=claimed.id,
+            worker_key="task-cancel-worker",
+            reason="cancel_requested",
+        )
+        cancelled = client.get(f"/api/v1/tasks/{created['id']}").json()
+        events = parse_sse(
+            client.get(f"/api/v1/tasks/{created['id']}/events").text
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {"id": created["id"], "status": "leased"}
+    assert pending["status"] == "running"
+    assert queue_item.status == "leased"
+    assert queue_item.cancel_requested_at is not None
+    assert confirmed == "cancelled"
+    assert cancelled["status"] == "cancelled"
+    assert events[-1]["type"] == "task.cancelled"
+
+
+def test_completed_task_cancel_is_idempotent(client: TestClient) -> None:
+    created = create_task(client)
+    completed = wait_for_task(client, str(created["id"]))
+
+    response = client.post(f"/api/v1/tasks/{created['id']}/cancel")
+    unchanged = client.get(f"/api/v1/tasks/{created['id']}").json()
+    events = parse_sse(
+        client.get(f"/api/v1/tasks/{created['id']}/events").text
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"id": created["id"], "status": "completed"}
+    assert unchanged["status"] == "completed"
+    assert unchanged["final_report"] == completed["final_report"]
+    assert events[-1]["type"] == "task.completed"
+
+
+def test_active_task_without_queue_item_returns_409(
+    app_factory,
+    settings,
+) -> None:
+    settings.queue_enabled = False
+    app = app_factory()
+    with TestClient(app) as client:
+        created = create_task(client)
+        queue_item = app.state.queue_service.get_item_for_task(
+            str(created["id"])
+        )
+        assert queue_item is not None
+        with app.state.database.session_factory() as session:
+            stored = session.get(QueueItem, queue_item.id)
+            assert stored is not None
+            session.delete(stored)
+            session.commit()
+
+        response = client.post(f"/api/v1/tasks/{created['id']}/cancel")
+        unchanged = client.get(f"/api/v1/tasks/{created['id']}").json()
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Active task has no queue item"
+    assert unchanged["status"] == "queued"
 
 
 class FailingRuntime:

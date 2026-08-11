@@ -22,14 +22,16 @@ from app.api.dependencies import (
     get_app_settings,
     get_database,
     get_queue_coordinator,
+    get_queue_service,
     get_session,
     get_task_service,
 )
 from app.config import Settings
 from app.database import Database
 from app.events.sse import stream_task_events
-from app.models import Task
+from app.models import Task, TaskStatus
 from app.queue.coordinator import QueueCoordinator
+from app.queue.service import QueueService
 from app.services.task_service import (
     ConversationNotFoundError,
     ProjectNotFoundError,
@@ -186,6 +188,11 @@ class TaskResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class TaskCancellationResponse(BaseModel):
+    id: str
+    status: str
 
 
 def to_response(task: Task) -> TaskResponse:
@@ -365,6 +372,42 @@ def get_task(
     except TaskNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Task not found") from exc
     return to_response(task)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=TaskCancellationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_task(
+    task_id: str,
+    session: Session = Depends(get_session),
+    task_service: TaskService = Depends(get_task_service),
+    queue_service: QueueService = Depends(get_queue_service),
+    queue_coordinator: QueueCoordinator = Depends(get_queue_coordinator),
+) -> TaskCancellationResponse:
+    try:
+        task = task_service.get_task(session, task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Task not found") from exc
+    if task.status in TaskStatus.TERMINAL:
+        return TaskCancellationResponse(id=task.id, status=task.status)
+
+    item = queue_service.get_item_for_task(task.id)
+    if item is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Active task has no queue item",
+        )
+    try:
+        queue_status = queue_service.request_cancel(item.id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Active task has no queue item",
+        ) from exc
+    await queue_coordinator.notify("interactive")
+    return TaskCancellationResponse(id=task.id, status=queue_status)
 
 
 @router.get("/{task_id}/events")

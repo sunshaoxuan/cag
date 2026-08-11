@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.28.3 | Evidence |
+| Requirement | Status for 0.28.4 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -20,6 +20,7 @@ Legend:
 | Fake Agent Runtime | Implemented | `backend/app/runtimes/fake.py` |
 | Create task API | Implemented | `POST /api/v1/tasks` |
 | Query task API | Implemented | `GET /api/v1/tasks/{task_id}` |
+| Task 取消 API | Implemented | `POST /api/v1/tasks/{task_id}/cancel`、Queued 即時取消、Leased 取消要求、終端冪等及び QueueItem 欠落 409 の API 試験 |
 | Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events`, validation Session closes before streaming |
 | Docker Compose | Implemented | `docker-compose.yml`, PostgreSQL and Redis `unless-stopped` recovery |
 | Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
