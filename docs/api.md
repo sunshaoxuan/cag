@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.28.4`
+Current version: `0.28.5`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.28.4"
+  "version": "0.28.5"
 }
 ```
 

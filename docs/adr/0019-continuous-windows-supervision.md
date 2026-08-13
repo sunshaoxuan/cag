@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted for version 0.17.1, amended by ADR 0025 for version 0.23.0 and updated
-for dependency readiness in version 0.28.2.
+Accepted for version 0.17.1, amended by ADR 0025 for version 0.23.0, updated
+for dependency readiness in version 0.28.2 and periodic recovery in version
+0.28.5.
 
 ## Context
 
@@ -18,8 +19,10 @@ same interactive user identity.
 ## Decision
 
 Task Scheduler starts a PowerShell supervisor at system startup and at current
-user sign-in. The task has no execution time limit and retries a failed
-supervisor every minute up to 999 times.
+user sign-in. A one-minute repeating watchdog trigger covers session lifecycle
+interruptions that do not produce another startup or sign-in event. The task
+has no execution time limit, ignores duplicate starts while the supervisor is
+running and retries a failed supervisor every minute up to 999 times.
 
 The supervisor checks port 8000, `/health/live` and `/health/ready` every 15
 seconds. Four consecutive failed liveness checks restart only a process whose
@@ -50,11 +53,12 @@ operational when the configured Windows user has an interactive session.
 
 ## Validation
 
-PowerShell parser and Pester checks cover triggers, retry settings, listener
-identity checks, health thresholds and log rotation configuration. Runtime
+PowerShell parser and Pester checks cover all three triggers, retry settings,
+listener identity checks, health thresholds and log rotation configuration. Runtime
 acceptance checks the scheduled task state, trigger count, retry count,
 supervisor process, all-interface listener, dependency container restart
-policies, readiness recovery, health version and browser console.
+policies, forced API-process recovery, readiness, health version and browser
+console.
 
 ## Rollback
 

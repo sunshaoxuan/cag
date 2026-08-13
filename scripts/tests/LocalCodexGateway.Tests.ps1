@@ -74,6 +74,9 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $content = Get-Content -Raw -LiteralPath $manageScript
         $content | Should Match 'New-ScheduledTaskTrigger -AtStartup'
         $content | Should Match 'New-ScheduledTaskTrigger -AtLogOn'
+        $content | Should Match 'New-ScheduledTaskTrigger.*(?s).*?-Once'
+        $content | Should Match '-RepetitionInterval \(New-TimeSpan -Minutes 1\)'
+        $content | Should Match '-RepetitionDuration \(New-TimeSpan -Days 3650\)'
         $content | Should Match '-RestartCount 999'
         $content | Should Match '-RestartInterval \(New-TimeSpan -Minutes 1\)'
         $content | Should Match '-MultipleInstances IgnoreNew'
@@ -119,5 +122,6 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $result.Health | Should Be "ready"
         $result.AutoStart | Should Be $true
         $result.RestartCount | Should Be 999
+        @(Get-ScheduledTask -TaskName $result.TaskName).Triggers.Count | Should Be 3
     }
 }

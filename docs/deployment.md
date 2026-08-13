@@ -1,6 +1,6 @@
 # Deployment
 
-## 0.28.4 development deployment
+## 0.28.5 development deployment
 
 Install the pinned Windows OCR runtime before starting the supervised API and
 worker processes:

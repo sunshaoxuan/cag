@@ -156,6 +156,11 @@ $taskAction = New-ScheduledTaskAction `
     -WorkingDirectory $repositoryRoot
 $startupTrigger = New-ScheduledTaskTrigger -AtStartup
 $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentIdentity
+$watchdogTrigger = New-ScheduledTaskTrigger `
+    -Once `
+    -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 $taskPrincipal = New-ScheduledTaskPrincipal `
     -UserId $currentIdentity `
     -LogonType Interactive `
@@ -173,12 +178,12 @@ $taskSettings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $taskAction `
-    -Trigger @($startupTrigger, $logonTrigger) `
+    -Trigger @($startupTrigger, $logonTrigger, $watchdogTrigger) `
     -Principal $taskPrincipal `
     -Settings $taskSettings `
     -Description (
         "Keeps One Agent Gateway running with automatic startup, health " +
-        "supervision and delayed recovery."
+        "supervision, periodic watchdog and delayed recovery."
     ) `
     -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName

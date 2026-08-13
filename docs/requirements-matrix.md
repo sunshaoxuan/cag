@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.28.4 | Evidence |
+| Requirement | Status for 0.28.5 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -24,7 +24,7 @@ Legend:
 | Read task events through SSE | Implemented | `GET /api/v1/tasks/{task_id}/events`, validation Session closes before streaming |
 | Docker Compose | Implemented | `docker-compose.yml`, PostgreSQL and Redis `unless-stopped` recovery |
 | Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
-| Continuous Windows supervision | Implemented | Startup and sign-in triggers, full readiness monitor, failure retry and rotating supervisor log |
+| Continuous Windows supervision | Implemented | Startup, sign-in and one-minute watchdog triggers, full readiness monitor, failure retry and rotating supervisor log |
 | Unit and API tests | Implemented | `backend/tests` |
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
