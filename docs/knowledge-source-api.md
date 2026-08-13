@@ -213,6 +213,35 @@ Repeated rejection callbacks for one ingestion and path update one audit row.
 Rejected outcomes take precedence over skipped outcomes and counters describe
 unique final paths.
 
+## Conversion baseline dry run
+
+```text
+GET  /api/v1/knowledge/conversion/format-capabilities
+POST /api/v1/knowledge/sources/{source_id}/conversion-baselines
+GET  /api/v1/knowledge/conversion-baselines/{run_id}
+GET  /api/v1/knowledge/conversion-baselines/{run_id}/items
+```
+
+The POST action freezes a planning snapshot from persisted Source Entries,
+current-path Documents and the newest queued or running Ingestion. It writes a
+separate Conversion Manifest and never changes the source inventory, Documents,
+Chunks, embeddings or active knowledge generation.
+
+The baseline maps legacy inventory observations to `discovered`, `processing`,
+`indexed`, `metadata_only`, `rejected` or `removed`. Every item proposes one
+conversion action and retains the complete input snapshot. The item endpoint
+supports pagination and filters by lifecycle status or conversion action.
+Stable ordering and canonical JSON hashing make an unchanged dry run produce
+the same `manifest_sha256`.
+PostgreSQL reads and writes a successful Manifest in one `REPEATABLE READ`
+transaction. Any failure rolls back all item batches and closes the independent
+run record with a sanitized terminal error.
+
+The format capability endpoint is an explicit Phase 0 planning matrix. It
+separates current text support, planned text, planned OCR, safe-unpack
+candidates, executable binary metadata and sensitive metadata. It does not
+claim that file bytes have passed MIME, magic or text-likelihood detection.
+
 The source list response includes:
 
 * `active_generation_id`, the most recent completed ingestion.

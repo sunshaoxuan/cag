@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.28.5`
+Current version: `0.29.0`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.28.5"
+  "version": "0.29.0"
 }
 ```
 
@@ -96,6 +96,10 @@ knowledge plaintext.
 * `POST /api/v1/knowledge/sources/{source_id}/ingest`
 * `GET /api/v1/knowledge/sources/{source_id}/ingestions`
 * `GET /api/v1/knowledge/sources/{source_id}/entries`
+* `GET /api/v1/knowledge/conversion/format-capabilities`
+* `POST /api/v1/knowledge/sources/{source_id}/conversion-baselines`
+* `GET /api/v1/knowledge/conversion-baselines/{run_id}`
+* `GET /api/v1/knowledge/conversion-baselines/{run_id}/items`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/export`
 * `GET /api/v1/knowledge/ingestions/{ingestion_id}/rejections/archive`
@@ -105,6 +109,25 @@ Search profiles have distinct execution contracts. `fast` uses indexed exact
 and text candidates without Ollama. `balanced` adds bounded pgvector candidates.
 `deep` adds schema-checked local reranking. PostgreSQL statement timeout and an
 overall profile deadline bound each request.
+
+Conversion baseline creation is a synchronous read-only knowledge dry run. It
+writes only `KnowledgeBaselineRun` and `KnowledgeConversionManifestItem`
+planning records. It does not change Source Entries, Documents, Chunks,
+embeddings or the Active Generation. Each item records the Source Entry
+physical ID, current Document physical ID when available, canonical lifecycle
+status, proposed conversion action, capability and the complete source-state
+snapshot used for the decision. Repeating an unchanged source snapshot returns
+the same `manifest_sha256`.
+
+Canonical lifecycle states are `discovered`, `processing`, `indexed`,
+`metadata_only`, `rejected` and `removed`. Conversion actions are
+`backfill_object`, `reclean`, `reindex`, `path_only`, `safe_unpack`,
+`metadata_only`, `reuse` and `blocked`. Phase 0 uses existing extension and
+metadata observations for capability planning. MIME, magic and text-likelihood
+content detection remain Planned for Phase 2.
+PostgreSQL builds every successful Manifest inside one `REPEATABLE READ`
+transaction. A failed batch rolls back all Manifest items and closes the run as
+`failed` with a sanitized error class.
 
 ### Customer ledger extraction
 

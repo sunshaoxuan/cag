@@ -345,6 +345,79 @@ class KnowledgeSourceEntry(PhysicalIdMixin, Base):
     )
 
 
+class KnowledgeBaselineRun(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_baseline_runs"
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
+    )
+    active_ingestion_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_ingestions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    schema_version: Mapped[str] = mapped_column(String(32))
+    policy_version: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    item_count: Mapped[int] = mapped_column(Integer, default=0)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    lifecycle_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    action_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    format_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source = relationship("KnowledgeSource")
+    active_ingestion = relationship("KnowledgeIngestion")
+    items = relationship(
+        "KnowledgeConversionManifestItem",
+        back_populates="baseline_run",
+        cascade="all, delete-orphan",
+    )
+
+
+class KnowledgeConversionManifestItem(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_conversion_manifest_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "baseline_run_id",
+            "source_entry_id",
+            name="uq_conversion_manifest_run_entry",
+        ),
+    )
+
+    baseline_run_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_baseline_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    source_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_source_entries.id", ondelete="CASCADE"),
+        index=True,
+    )
+    document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    relative_path: Mapped[str] = mapped_column(Text)
+    extension: Mapped[str] = mapped_column(String(64), default="", index=True)
+    lifecycle_status: Mapped[str] = mapped_column(String(32), index=True)
+    conversion_action: Mapped[str] = mapped_column(String(32), index=True)
+    decision_reason: Mapped[str] = mapped_column(String(64), index=True)
+    capability: Mapped[str] = mapped_column(String(32), index=True)
+    source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    baseline_run = relationship("KnowledgeBaselineRun", back_populates="items")
+    source_entry = relationship("KnowledgeSourceEntry")
+    document = relationship("KnowledgeDocument")
+
+
 class KnowledgeDocument(PhysicalIdMixin, Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (

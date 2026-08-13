@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.28.5 | Evidence |
+| Requirement | Status for 0.29.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -100,7 +100,8 @@ Legend:
 | Permanent learned knowledge history | Implemented | changed and absent source files retain historical Document Versions, Processing Versions, Blocks and archive Chunks |
 | Content-addressed durable evidence objects | Planned | ADR 0032 and `docs/cag-evidence-experience-evolution-roadmap.md`; S3-compatible raw or cleaned Artifact persistence, replicas, integrity and recovery tests required |
 | Universal safe text extraction | Planned | MIME, magic and text-likelihood routing plus sandboxed legacy Office, mail, RTF, image OCR, configuration and archive-member extractors required |
-| Existing knowledge conversion and atomic rebuild | Planned | Conversion Manifest, reuse, object backfill, reclean, reindex, shadow comparison, atomic Generation activation and rollback evidence required |
+| Existing knowledge conversion baseline | Implemented | Canonical lifecycle states, format capability matrix, persisted Conversion Manifest dry run, repeatable SHA 256, pagination, filters and read-only inventory regression test |
+| Existing knowledge atomic rebuild | Planned | Object backfill, reclean, reindex, shadow comparison, atomic Generation activation and rollback evidence required |
 | Evidence, experience and Task relation network | Planned | typed contextual relations, applicability, contradiction, supersession, Outbox projection and reverse impact analysis required |
 | Approved Experience retrieval and Task feedback | Planned | approved MemoryCandidate indexing, Experience Packet injection, actual-use receipt, outcome revalidation and correction flow required |
 | Production graph engine selection | Planned | PostgreSQL adjacency, Apache AGE and independent graph database must use the same million-edge and ten-million-edge benchmark and recovery contract |

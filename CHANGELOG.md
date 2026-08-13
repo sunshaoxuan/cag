@@ -2,6 +2,34 @@
 
 本文档记录 One Agent Gateway 的可发布版本。版本遵循 Semantic Versioning。
 
+## 0.29.0
+
+发布日期：2026-08-13
+
+### Added
+
+* 新增 `KnowledgeBaselineRun` 和 `KnowledgeConversionManifestItem`，使用独立物理 UUID、Source Entry 和 Document 外键保存只读知识转换规划。
+* 新增格式能力矩阵 API，明确区分当前支持文本、计划文本、计划 OCR、安全解包候选、二进制元数据和敏感元数据。
+* 新增 Source 级 Conversion Manifest dry run、运行详情和分页条目 API。条目支持按规范生命周期与转换动作过滤。
+* 新增稳定 Manifest SHA 256。相同 Source Entry、当前 Document 和活动 Ingestion 快照生成相同 Hash。
+* PostgreSQL 使用单一 `REPEATABLE READ` 事务冻结 Source Entry 与当前 Document 快照。任一批次失败会回滚全部 Manifest Item，并将运行关闭为 failed。
+
+### Changed
+
+* 将历史 `observed`、`indexed`、`metadata_only` 和失败状态投影为 `discovered`、`processing`、`indexed`、`metadata_only`、`rejected` 或 `removed`，不改写现有 Source Entry。
+* ADR 0032 的 Phase 0 标记为已接受。对象存储、通用文本抽取、关系网格、经验注入和图引擎最终选型继续保持 Planned。
+
+### Safety
+
+* Conversion dry run 只写独立规划表，不修改 Source Entry、Document、Chunk、embedding 或 Active Generation。
+* 失败回执只保存异常类型和脱敏后的固定摘要，不保存来源路径或数据库异常正文。
+* Phase 0 格式能力矩阵只根据已持久化扩展名和处理元数据规划。MIME、魔数和文本概率探测仍属于 Phase 2。
+
+### Validated
+
+* Conversion Manifest 的状态优先级、格式分类、动作决策、活动 Ingestion 快照、重复 Hash、分页过滤、404 和只读边界通过自动化测试。
+* Alembic 升降级和版本一致性测试覆盖新增表及版本。
+
 ## 0.28.5
 
 发布日期：2026-08-13

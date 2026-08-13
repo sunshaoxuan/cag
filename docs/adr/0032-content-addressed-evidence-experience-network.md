@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implementation is planned after the version 0.28.5 baseline.
+Phase 0 accepted in version 0.29.0. Object storage, universal extraction,
+relationship projection, Experience retrieval and graph selection remain
+Proposed.
 
 ## Context
 
@@ -63,6 +65,12 @@ copies and graph projections. Extraction has a larger attack surface and needs
 process isolation, resource limits and a maintained format corpus. Graph and
 object technologies cannot be declared production-ready without the acceptance
 defined in the roadmap.
+
+Phase 0 persists a read-only Conversion Manifest from Source Entry, current
+Document and active Ingestion observations. It establishes canonical lifecycle
+states, a format capability planning matrix and a repeatable manifest Hash. It
+does not copy objects, inspect MIME or magic, rebuild knowledge, write graph
+relations or inject Experience.
 
 ## Acceptance
 

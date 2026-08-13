@@ -34,12 +34,18 @@ from app.knowledge.service import (
     KnowledgeUnavailableError,
     summarize_knowledge_error,
 )
+from app.knowledge.conversion_baseline import (
+    KnowledgeConversionBaselineService,
+    format_capability_matrix,
+)
 from app.queue.coordinator import QueueCoordinator
 from app.models import (
     KnowledgeIngestion,
     KnowledgeIngestionEvent,
     KnowledgeIngestionRejection,
     KnowledgeChunk,
+    KnowledgeBaselineRun,
+    KnowledgeConversionManifestItem,
     KnowledgeDocument,
     KnowledgeSource,
     KnowledgeSourceEntry,
@@ -113,6 +119,111 @@ class SearchRequest(BaseModel):
         default="balanced",
         pattern=r"^(fast|balanced|deep)$",
     )
+
+
+def baseline_run_response(item: KnowledgeBaselineRun) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "source_id": item.source_id,
+        "active_ingestion_id": item.active_ingestion_id,
+        "schema_version": item.schema_version,
+        "policy_version": item.policy_version,
+        "status": item.status,
+        "error": item.error,
+        "item_count": item.item_count,
+        "manifest_sha256": item.manifest_sha256,
+        "lifecycle_counts": item.lifecycle_counts,
+        "action_counts": item.action_counts,
+        "format_counts": item.format_counts,
+        "created_at": item.created_at,
+        "completed_at": item.completed_at,
+    }
+
+
+def conversion_manifest_item_response(
+    item: KnowledgeConversionManifestItem,
+) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "baseline_run_id": item.baseline_run_id,
+        "source_entry_id": item.source_entry_id,
+        "document_id": item.document_id,
+        "relative_path": item.relative_path,
+        "extension": item.extension,
+        "lifecycle_status": item.lifecycle_status,
+        "conversion_action": item.conversion_action,
+        "decision_reason": item.decision_reason,
+        "capability": item.capability,
+        "source_snapshot": item.source_snapshot,
+        "created_at": item.created_at,
+    }
+
+
+@router.get("/knowledge/conversion/format-capabilities")
+def get_format_capabilities() -> dict[str, Any]:
+    return format_capability_matrix()
+
+
+@router.post("/knowledge/sources/{source_id}/conversion-baselines")
+def create_conversion_baseline(
+    source_id: str,
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
+    service = KnowledgeConversionBaselineService(database)
+    try:
+        return baseline_run_response(service.create_dry_run(source_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+
+
+@router.get("/knowledge/conversion-baselines/{run_id}")
+def get_conversion_baseline(
+    run_id: str,
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
+    service = KnowledgeConversionBaselineService(database)
+    try:
+        return baseline_run_response(service.get_run(run_id))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Conversion baseline not found"
+        ) from exc
+
+
+@router.get("/knowledge/conversion-baselines/{run_id}/items")
+def list_conversion_manifest_items(
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    lifecycle_status: str | None = Query(
+        default=None,
+        pattern=r"^(discovered|processing|indexed|metadata_only|rejected|removed)$",
+    ),
+    conversion_action: str | None = Query(
+        default=None,
+        pattern=r"^(reuse|backfill_object|reclean|reindex|path_only|safe_unpack|metadata_only|blocked)$",
+    ),
+    database: Database = Depends(get_database),
+) -> dict[str, Any]:
+    service = KnowledgeConversionBaselineService(database)
+    try:
+        items, total = service.list_items(
+            run_id,
+            limit=limit,
+            offset=offset,
+            lifecycle_status=lifecycle_status,
+            conversion_action=conversion_action,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Conversion baseline not found"
+        ) from exc
+    return {
+        "items": [conversion_manifest_item_response(item) for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def source_response(
