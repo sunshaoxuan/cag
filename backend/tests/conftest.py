@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.runtimes.base import AgentRuntime
+from app.knowledge.security import KnowledgeCipher
 
 
 def sqlite_url(path: Path) -> str:
@@ -115,6 +116,10 @@ def settings(tmp_path: Path, projects_dir: Path) -> Settings:
         auto_create_schema=True,
         self_improvement_root=tmp_path / "self-improvement",
         operations_admin_token="test-operations-admin-token",
+        knowledge_encryption_key=KnowledgeCipher.generate_key(),
+        artifact_encryption_key=KnowledgeCipher.generate_key(),
+        artifact_primary_root=tmp_path / "artifacts-primary",
+        artifact_replica_root=tmp_path / "artifacts-replica",
         projects_dir=projects_dir,
         workspace_root=tmp_path / "workspaces",
     )

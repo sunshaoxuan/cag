@@ -20,9 +20,11 @@ from app.tasks.executor import TaskExecutor
 from app.workspaces.manager import WorkspaceManager
 from app.knowledge.ollama import OllamaClient
 from app.knowledge.scheduler import KnowledgeScheduler
-from app.knowledge.security import load_knowledge_cipher
+from app.knowledge.security import load_artifact_cipher, load_knowledge_cipher
 from app.knowledge.service import KnowledgeService
 from app.knowledge.extraction import CustomerKnowledgeExtractionService
+from app.knowledge.artifact_store import build_artifact_stores
+from app.knowledge.artifacts import ArtifactEvidenceService
 from app.approvals.service import ApprovalService
 from app.harness.service import AgentHarness
 from app.policies.command_policy import CommandPolicyService
@@ -50,6 +52,7 @@ def create_app(
     )
     project_registry = ProjectRegistry(active_settings.projects_dir)
     task_service = TaskService(project_registry)
+    knowledge_cipher = load_knowledge_cipher(active_settings)
     knowledge_service = KnowledgeService(
         database=database,
         settings=active_settings,
@@ -60,7 +63,14 @@ def create_app(
             dimensions=active_settings.ollama_embedding_dimensions,
             timeout_seconds=active_settings.ollama_timeout_seconds,
         ),
-        cipher=load_knowledge_cipher(active_settings),
+        cipher=knowledge_cipher,
+    )
+    artifact_evidence_service = ArtifactEvidenceService(
+        database=database,
+        stores=build_artifact_stores(
+            active_settings,
+            load_artifact_cipher(active_settings),
+        ),
     )
     workspace_manager = WorkspaceManager(
         root=active_settings.workspace_root,
@@ -215,6 +225,7 @@ def create_app(
     application.state.project_registry = project_registry
     application.state.task_service = task_service
     application.state.knowledge_service = knowledge_service
+    application.state.artifact_evidence_service = artifact_evidence_service
     application.state.knowledge_scheduler = knowledge_scheduler
     application.state.approval_service = approval_service
     application.state.harness = harness

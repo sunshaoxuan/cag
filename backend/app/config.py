@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.29.0"
+APP_VERSION = "0.30.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     knowledge_encryption_key: str | None = None
     knowledge_keyring_service: str = "agent-gateway"
     knowledge_keyring_username: str = "enterprise-knowledge"
+    artifact_encryption_key: str | None = None
+    artifact_keyring_service: str = "agent-gateway"
+    artifact_keyring_username: str = "artifact-evidence"
     knowledge_max_context_chars: int = Field(default=12_000, ge=1_000, le=100_000)
     knowledge_max_chunks: int = Field(default=8, ge=1, le=50)
     knowledge_candidate_limit: int = Field(default=40, ge=10, le=200)
@@ -88,6 +91,22 @@ class Settings(BaseSettings):
     knowledge_rejection_archive_dir: Path = (
         DEFAULT_REPOSITORY_ROOT / ".gateway" / "knowledge-rejection-archives"
     )
+    artifact_store_backend: str = Field(
+        default="replicated-filesystem",
+        pattern=r"^(replicated-filesystem|s3)$",
+    )
+    artifact_primary_root: Path = (
+        DEFAULT_REPOSITORY_ROOT / ".gateway" / "artifacts-primary"
+    )
+    artifact_replica_root: Path = (
+        DEFAULT_REPOSITORY_ROOT / ".gateway" / "artifacts-replica"
+    )
+    artifact_s3_endpoint_url: str | None = None
+    artifact_s3_region: str = "us-east-1"
+    artifact_s3_bucket: str = "cag-artifacts"
+    artifact_s3_access_key: SecretStr | None = None
+    artifact_s3_secret_key: SecretStr | None = None
+    artifact_s3_verify_tls: bool = True
     knowledge_rejection_db_retention_days: int = Field(
         default=90, ge=1, le=3_650
     )

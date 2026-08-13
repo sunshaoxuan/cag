@@ -18,6 +18,7 @@ import {
   createKnowledgeSource,
   createConversation,
   createTask,
+  getArtifactSummary,
   getKnowledgeStatus,
   getCodeKnowledgeSummary,
   getCodeSymbol,
@@ -32,6 +33,7 @@ import {
   KnowledgeSource,
   KnowledgeSourceEntryPage,
   KnowledgeStatus,
+  ArtifactSummary,
   CodeKnowledgeSummary,
   CodeSymbol,
   CapabilityAsset,
@@ -494,6 +496,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] =
     useState<KnowledgeStatus | null>(null);
+  const [artifactSummary, setArtifactSummary] =
+    useState<ArtifactSummary | null>(null);
   const [codeKnowledgeSummary, setCodeKnowledgeSummary] =
     useState<CodeKnowledgeSummary | null>(null);
   const [codeSymbols, setCodeSymbols] = useState<CodeSymbol[]>([]);
@@ -657,11 +661,13 @@ export default function App() {
     const request = Promise.all([
       getKnowledgeStatus(),
       listKnowledgeSources(),
+      getArtifactSummary(),
     ])
-      .then(([statusValue, sourcesValue]) => {
+      .then(([statusValue, sourcesValue, artifactValue]) => {
         if (!isCurrentKnowledgePage(generation)) return;
         setKnowledgeStatus(statusValue);
         setKnowledgeSources(sourcesValue);
+        setArtifactSummary(artifactValue);
         const activeIngestion = sourcesValue
           .map((source) => source.last_ingestion)
           .find(
@@ -1964,6 +1970,10 @@ export default function App() {
               <p>
                 每轮扫描来源完整快照，只对新增或变化内容重新向量化。
               </p>
+              <p>
+                内容寻址证据 {artifactSummary?.available_artifacts ?? 0} 个，
+                健康副本 {artifactSummary?.healthy_replicas ?? 0} 个。
+              </p>
             </div>
             {knowledgeNotice && (
               <div className="knowledge-notice" role="status">
@@ -2004,6 +2014,14 @@ export default function App() {
                       ).length
                     }
                   </strong>
+                </article>
+                <article>
+                  <span>证据对象</span>
+                  <strong>{artifactSummary?.artifacts ?? 0}</strong>
+                </article>
+                <article>
+                  <span>健康副本</span>
+                  <strong>{artifactSummary?.healthy_replicas ?? 0}</strong>
                 </article>
               </div>
               <div className="knowledge-management-controls">

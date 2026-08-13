@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-gateway"
-version = "0.29.0"
+version = "0.30.0"
 description = "Gateway for locally authenticated Codex agent tasks"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.18,<2",
+  "boto3>=1.42,<2",
   "cryptography>=46,<47",
   "defusedxml>=0.7.1,<1",
   "fastapi>=0.140,<1",

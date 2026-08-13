@@ -9,6 +9,10 @@ from app.models.capability import (
     StandardControl,
 )
 from app.models.knowledge import (
+    Artifact,
+    ArtifactLocation,
+    ArtifactReconciliationRun,
+    ArtifactTransformation,
     CodeDocumentLink,
     CodeRelation,
     CodeSymbol,
@@ -29,6 +33,7 @@ from app.models.knowledge import (
     KnowledgeUsage,
     MemoryCandidate,
     MemoryStatus,
+    ObjectReplica,
     Product,
     ProductVersion,
     RiskRecord,
@@ -76,6 +81,10 @@ from app.models.task_event import AuditCursor, TaskEvent
 
 __all__ = [
     "Base",
+    "Artifact",
+    "ArtifactLocation",
+    "ArtifactReconciliationRun",
+    "ArtifactTransformation",
     "Conversation",
     "CapabilityAsset",
     "CapabilityEvaluation",
@@ -122,6 +131,7 @@ __all__ = [
     "LearningSignal",
     "MemoryCandidate",
     "MemoryStatus",
+    "ObjectReplica",
     "Product",
     "ProductVersion",
     "Project",

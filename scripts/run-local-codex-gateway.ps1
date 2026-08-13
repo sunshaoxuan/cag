@@ -88,6 +88,12 @@ if (-not $env:AGENT_GATEWAY_KNOWLEDGE_ALLOWED_ROOTS) {
         Split-Path $repositoryRoot -Parent
     )
 }
+if (-not $env:AGENT_GATEWAY_ARTIFACT_PRIMARY_ROOT) {
+    $env:AGENT_GATEWAY_ARTIFACT_PRIMARY_ROOT = Join-Path $repositoryRoot ".gateway\artifacts-primary"
+}
+if (-not $env:AGENT_GATEWAY_ARTIFACT_REPLICA_ROOT) {
+    $env:AGENT_GATEWAY_ARTIFACT_REPLICA_ROOT = "C:\ProgramData\CAG\artifacts-replica"
+}
 
 Write-Host "Starting One Agent Gateway with the local Codex runtime authenticated through $authMode."
 Write-Host "Gateway listener: http://0.0.0.0:$Port"

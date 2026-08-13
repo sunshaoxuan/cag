@@ -36,6 +36,8 @@ services:
       AGENT_GATEWAY_RUNTIME_PROVIDER: fake
       AGENT_GATEWAY_KNOWLEDGE_ENABLED: "false"
       AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR: /workspaces/.knowledge-sources
+      AGENT_GATEWAY_ARTIFACT_PRIMARY_ROOT: /workspaces/.artifacts-primary
+      AGENT_GATEWAY_ARTIFACT_REPLICA_ROOT: /artifact-replica
       AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
       AGENT_GATEWAY_PROJECTS_DIR: /projects
       AGENT_GATEWAY_WORKSPACE_ROOT: /workspaces
@@ -59,6 +61,7 @@ services:
       retries: 10
     volumes:
       - agent_gateway_workspaces:/workspaces
+      - agent_gateway_artifact_replica:/artifact-replica
 
   worker:
     build:
@@ -76,6 +79,8 @@ services:
       AGENT_GATEWAY_RUNTIME_PROVIDER: fake
       AGENT_GATEWAY_KNOWLEDGE_ENABLED: "false"
       AGENT_GATEWAY_KNOWLEDGE_SOURCES_DIR: /workspaces/.knowledge-sources
+      AGENT_GATEWAY_ARTIFACT_PRIMARY_ROOT: /workspaces/.artifacts-primary
+      AGENT_GATEWAY_ARTIFACT_REPLICA_ROOT: /artifact-replica
       AGENT_GATEWAY_AUTO_CREATE_SCHEMA: "false"
       AGENT_GATEWAY_PROJECTS_DIR: /projects
       AGENT_GATEWAY_WORKSPACE_ROOT: /workspaces
@@ -88,6 +93,7 @@ services:
         condition: service_healthy
     volumes:
       - agent_gateway_workspaces:/workspaces
+      - agent_gateway_artifact_replica:/artifact-replica
 
   postgres:
     image: pgvector/pgvector:0.8.2-pg16
@@ -155,6 +161,7 @@ volumes:
   agent_gateway_postgres:
   agent_gateway_redis:
   agent_gateway_workspaces:
+  agent_gateway_artifact_replica:
   ollama_models:
     external: true
     name: ollama

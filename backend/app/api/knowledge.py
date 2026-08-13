@@ -15,17 +15,20 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import Response as FastAPIResponse
 from sqlalchemy import and_, func, or_, select
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
     get_app_settings,
+    get_artifact_evidence_service,
     get_database,
     get_knowledge_service,
     get_queue_coordinator,
     get_session,
     get_task_service,
+    require_operations_admin,
 )
 from app.config import Settings
 from app.database import Database
@@ -38,6 +41,8 @@ from app.knowledge.conversion_baseline import (
     KnowledgeConversionBaselineService,
     format_capability_matrix,
 )
+from app.knowledge.artifact_store import ArtifactUnavailableError
+from app.knowledge.artifacts import ArtifactEvidenceService
 from app.queue.coordinator import QueueCoordinator
 from app.models import (
     KnowledgeIngestion,
@@ -121,6 +126,16 @@ class SearchRequest(BaseModel):
     )
 
 
+class ArtifactPutRequest(BaseModel):
+    content: str = Field(max_length=20_000_000)
+    media_type: str = Field(default="text/plain", min_length=1, max_length=255)
+    artifact_kind: str = Field(
+        default="cleaned", pattern=r"^(raw|cleaned|ocr_page|table|manifest)$"
+    )
+    source_entry_id: str | None = None
+    relative_path_snapshot: str | None = Field(default=None, max_length=4096)
+
+
 def baseline_run_response(item: KnowledgeBaselineRun) -> dict[str, Any]:
     return {
         "id": item.id,
@@ -162,6 +177,93 @@ def conversion_manifest_item_response(
 @router.get("/knowledge/conversion/format-capabilities")
 def get_format_capabilities() -> dict[str, Any]:
     return format_capability_matrix()
+
+
+@router.get("/knowledge/artifacts/summary")
+def get_artifact_summary(
+    service: ArtifactEvidenceService = Depends(get_artifact_evidence_service),
+) -> dict[str, int]:
+    return service.summary()
+
+
+@router.put("/knowledge/artifacts")
+def put_artifact(
+    request: ArtifactPutRequest,
+    _: str = Depends(require_operations_admin),
+    service: ArtifactEvidenceService = Depends(get_artifact_evidence_service),
+) -> dict[str, Any]:
+    try:
+        artifact = service.put(
+            content=request.content.encode("utf-8"),
+            media_type=request.media_type,
+            artifact_kind=request.artifact_kind,
+            source_entry_id=request.source_entry_id,
+            relative_path_snapshot=request.relative_path_snapshot,
+        )
+    except ArtifactUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="artifact_unavailable") from exc
+    return service.detail(artifact.sha256)
+
+
+@router.get("/knowledge/artifacts/{checksum}")
+def get_artifact(
+    checksum: str,
+    _: str = Depends(require_operations_admin),
+    service: ArtifactEvidenceService = Depends(get_artifact_evidence_service),
+) -> dict[str, object]:
+    try:
+        return service.detail(checksum)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found") from exc
+
+
+@router.get("/knowledge/artifacts/{checksum}/content")
+def get_artifact_content(
+    checksum: str,
+    _: str = Depends(require_operations_admin),
+    service: ArtifactEvidenceService = Depends(get_artifact_evidence_service),
+) -> FastAPIResponse:
+    try:
+        artifact, content = service.get(checksum)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found") from exc
+    except ArtifactUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="artifact_unavailable") from exc
+    return FastAPIResponse(
+        content=content,
+        media_type=artifact.media_type,
+        headers={
+            "ETag": f'"sha256:{artifact.sha256}"',
+            "Cache-Control": "private, immutable",
+            "X-Content-SHA256": artifact.sha256,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/knowledge/artifacts/reconciliation-runs")
+def reconcile_artifacts(
+    repair: bool = Query(default=True),
+    _: str = Depends(require_operations_admin),
+    service: ArtifactEvidenceService = Depends(get_artifact_evidence_service),
+) -> dict[str, Any]:
+    try:
+        run = service.reconcile(repair=repair)
+    except ArtifactUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="artifact_unavailable") from exc
+    return {
+        "id": run.id,
+        "status": run.status,
+        "checked_artifacts": run.checked_artifacts,
+        "checked_replicas": run.checked_replicas,
+        "repaired_replicas": run.repaired_replicas,
+        "missing_replicas": run.missing_replicas,
+        "corrupt_replicas": run.corrupt_replicas,
+        "orphan_objects": run.orphan_objects,
+        "error": run.error,
+        "created_at": run.created_at,
+        "completed_at": run.completed_at,
+    }
 
 
 @router.post("/knowledge/sources/{source_id}/conversion-baselines")

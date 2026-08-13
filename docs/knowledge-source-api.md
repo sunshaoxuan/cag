@@ -341,3 +341,40 @@ ingestion completes.
 Code knowledge can be queried through `/api/v1/knowledge/code/*`. These
 endpoints expose only approved sources that match the requested Project Tenant
 or stable Product.
+
+## Content-addressed evidence objects
+
+Version 0.30.0 introduces the object evidence foundation. Cleaned evidence,
+allowed raw snapshots, OCR pages, structured tables and manifests use a SHA 256
+object key. PostgreSQL stores the physical Artifact identity, mutable source
+observation, replica address, version, ETag, checksum and integrity status.
+
+```text
+PUT  /api/v1/knowledge/artifacts
+GET  /api/v1/knowledge/artifacts/summary
+GET  /api/v1/knowledge/artifacts/{sha256}
+GET  /api/v1/knowledge/artifacts/{sha256}/content
+POST /api/v1/knowledge/artifacts/reconciliation-runs
+```
+
+An Artifact becomes queryable after two independent replicas pass checksum
+verification and the database transaction commits. Repeated content reuses one
+Artifact physical ID. A missing replica can be restored from the remaining
+healthy replica. When every replica is unavailable, content reads return
+`artifact_unavailable` while the current active knowledge generation continues
+to serve indexed retrieval.
+
+`replicated-filesystem` is the production default for the initial durability
+gate. `s3` configures the primary store through an S3-compatible endpoint such
+as RustFS and retains the independent filesystem replica. The application never
+uses a RustFS-specific API.
+
+Artifact write, metadata, content and reconciliation endpoints require the
+operations administrator headers. The aggregate summary contains counts only
+and remains available to the knowledge management page.
+
+Artifact encryption uses the independent `artifact-evidence` key in Windows
+Credential Manager. Artifact metadata stores a non-secret truncated key ID so
+operators can identify the required key during recovery. This key is separate
+from the enterprise knowledge Chunk key and cannot change the decryptability of
+existing indexed knowledge.

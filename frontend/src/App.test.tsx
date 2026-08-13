@@ -243,6 +243,14 @@ describe("One Agent Gateway conversation page", () => {
             scheduler_poll_seconds: 10,
           });
         }
+        if (url.endsWith("/api/v1/knowledge/artifacts/summary")) {
+          return jsonResponse({
+            artifacts: 3,
+            available_artifacts: 3,
+            replicas: 6,
+            healthy_replicas: 6,
+          });
+        }
         if (url.endsWith("/api/v1/queue/status")) {
           return jsonResponse({
             running: true,
@@ -833,7 +841,7 @@ describe("One Agent Gateway conversation page", () => {
 
   it("registers a GitLab source and follows ingestion stages", async () => {
     render(<App />);
-    expect(screen.getByText("v0.29.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.30.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("link", { name: "企业知识" }));
     await screen.findByRole("heading", { name: "知识来源" });
     expect(screen.getByText(/自动监控运行中/)).toBeInTheDocument();
@@ -1196,6 +1204,7 @@ describe("One Agent Gateway conversation page", () => {
     await waitFor(() => {
       expect(requestCount("/api/v1/knowledge/status")).toBe(1);
       expect(requestCount("/api/v1/knowledge/sources")).toBe(1);
+      expect(requestCount("/api/v1/knowledge/artifacts/summary")).toBe(1);
       expect(requestCount("/api/v1/memory-candidates")).toBe(1);
     });
     expect(

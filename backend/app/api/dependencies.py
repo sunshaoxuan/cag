@@ -11,6 +11,7 @@ from app.services.task_service import TaskService
 from app.tasks.executor import TaskExecutor
 from app.knowledge.service import KnowledgeService
 from app.knowledge.extraction import CustomerKnowledgeExtractionService
+from app.knowledge.artifacts import ArtifactEvidenceService
 from app.approvals.service import ApprovalService
 from app.capabilities.service import CapabilityService
 from app.queue.coordinator import QueueCoordinator
@@ -45,6 +46,10 @@ def get_task_executor(request: Request) -> TaskExecutor:
 
 def get_knowledge_service(request: Request) -> KnowledgeService:
     return request.app.state.knowledge_service
+
+
+def get_artifact_evidence_service(request: Request) -> ArtifactEvidenceService:
+    return request.app.state.artifact_evidence_service
 
 
 def get_customer_extraction_service(

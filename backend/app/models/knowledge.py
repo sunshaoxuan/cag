@@ -418,6 +418,125 @@ class KnowledgeConversionManifestItem(PhysicalIdMixin, Base):
     document = relationship("KnowledgeDocument")
 
 
+class Artifact(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_artifacts"
+
+    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    byte_size: Mapped[int] = mapped_column(BigInteger)
+    media_type: Mapped[str] = mapped_column(String(255))
+    artifact_kind: Mapped[str] = mapped_column(String(32), index=True)
+    retention_policy: Mapped[str] = mapped_column(
+        String(32), default="knowledge_evidence", index=True
+    )
+    encryption: Mapped[str] = mapped_column(String(64), default="application_aes_gcm")
+    status: Mapped[str] = mapped_column(
+        String(32), default="available", index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    replicas = relationship(
+        "ObjectReplica", back_populates="artifact", cascade="all, delete-orphan"
+    )
+    locations = relationship(
+        "ArtifactLocation", back_populates="artifact", cascade="all, delete-orphan"
+    )
+
+
+class ArtifactLocation(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_artifact_locations"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id",
+            "source_entry_id",
+            "location_type",
+            name="uq_artifact_location_evidence",
+        ),
+    )
+
+    artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_artifacts.id", ondelete="CASCADE"), index=True
+    )
+    source_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_source_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    location_type: Mapped[str] = mapped_column(String(32), index=True)
+    relative_path_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    artifact = relationship("Artifact", back_populates="locations")
+    source_entry = relationship("KnowledgeSourceEntry")
+
+
+class ObjectReplica(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_object_replicas"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id", "replica_name", name="uq_object_replica_artifact_name"
+        ),
+    )
+
+    artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_artifacts.id", ondelete="CASCADE"), index=True
+    )
+    replica_name: Mapped[str] = mapped_column(String(64), index=True)
+    backend: Mapped[str] = mapped_column(String(32), index=True)
+    bucket: Mapped[str] = mapped_column(String(255))
+    object_key: Mapped[str] = mapped_column(Text)
+    version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    etag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="healthy", index=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    artifact = relationship("Artifact", back_populates="replicas")
+
+
+class ArtifactTransformation(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_artifact_transformations"
+
+    input_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_artifacts.id", ondelete="RESTRICT"), index=True
+    )
+    output_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_artifacts.id", ondelete="RESTRICT"), index=True
+    )
+    transformation_type: Mapped[str] = mapped_column(String(64), index=True)
+    processor: Mapped[str] = mapped_column(String(128))
+    processor_version: Mapped[str] = mapped_column(String(64))
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+
+class ArtifactReconciliationRun(PhysicalIdMixin, Base):
+    __tablename__ = "knowledge_artifact_reconciliation_runs"
+
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    checked_artifacts: Mapped[int] = mapped_column(Integer, default=0)
+    checked_replicas: Mapped[int] = mapped_column(Integer, default=0)
+    repaired_replicas: Mapped[int] = mapped_column(Integer, default=0)
+    missing_replicas: Mapped[int] = mapped_column(Integer, default=0)
+    corrupt_replicas: Mapped[int] = mapped_column(Integer, default=0)
+    orphan_objects: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class KnowledgeDocument(PhysicalIdMixin, Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (

@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-状态：Phase 0 已由 CAG 0.29.0 实现。Phase 1 至 Phase 7 等待逐阶段实施和验收。
+状态：Phase 0 已由 CAG 0.29.0 实现。Phase 1 已由 CAG 0.30.0 实现对象证据基础。Phase 2 至 Phase 7 等待逐阶段实施和验收。
 
 基线版本：CAG 0.28.5。
 
@@ -314,6 +314,8 @@ RustFS 达到稳定版本且分布式能力通过本地验收以前，关键证�
 
 ### 阶段 1：对象证据基础
 
+实施状态：CAG 0.30.0 已完成内容寻址模型、双副本对象写入、S3 兼容适配器、完整性对账、断路读取和恢复演练。RustFS 分布式耐久性仍须通过本节定义的长期运行门，当前正式主副本使用两个独立文件系统根目录。
+
 目标：建立内容寻址对象模型和 RustFS 兼容适配器。
 
 交付：Artifact、ArtifactLocation、Transformation、ObjectReplica、完整性对账、S3 适配器和第二副本策略。
@@ -405,7 +407,7 @@ RustFS 达到稳定版本且分布式能力通过本地验收以前，关键证�
 
 ## 14. 下一实施目标
 
-CAG 0.29.0 已实现 Phase 0 的持久 Conversion Manifest、规范生命周期、格式能力矩阵、分页查询、过滤和 SHA 256 dry run。该版本不会改写现有知识内容。Phase 1 将根据正式生产 dry run 的数量、格式和转换动作分布确定对象容量、第二副本和 RustFS 验收规模。Phase 2 将在对象证据层可用后实现 MIME、魔数、文本概率和沙箱提取器。
+CAG 0.29.0 已实现 Phase 0 的持久 Conversion Manifest、规范生命周期、格式能力矩阵、分页查询、过滤和 SHA 256 dry run。CAG 0.30.0 已实现 Phase 1 的内容寻址 Artifact、ArtifactLocation、ObjectReplica、ArtifactTransformation、S3 兼容接口、第二副本和完整性对账。Phase 2 将在对象证据层上实现 MIME、魔数、文本概率和沙箱提取器。
 
 ## 15. 当前技术资料
 

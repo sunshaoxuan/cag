@@ -337,6 +337,18 @@ cd backend
 .\.venv\Scripts\python.exe -m app.knowledge.keyring_cli init
 ```
 
+Initialize the independent content-addressed Artifact key under the same
+runtime identity. The command is idempotent and never replaces an existing key:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.knowledge.artifact_keyring_cli init
+```
+
+The Windows host runner defaults the primary Artifact root to the repository
+drive and the independent replica to `C:\ProgramData\CAG\artifacts-replica`.
+Override these roots only when they continue to use separate failure domains.
+
 Both local drives are currently unencrypted. The readiness and standards evidence retain this production admission warning because vector and keyword indices require encrypted host storage for complete static protection.
 
 ## Production gate

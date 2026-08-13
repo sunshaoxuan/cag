@@ -2,9 +2,9 @@
 
 ## Status
 
-Phase 0 accepted in version 0.29.0. Object storage, universal extraction,
-relationship projection, Experience retrieval and graph selection remain
-Proposed.
+Phase 0 accepted in version 0.29.0. Phase 1 object evidence foundation is
+accepted in version 0.30.0. Universal extraction, relationship projection,
+Experience retrieval and graph selection remain Proposed.
 
 ## Context
 
@@ -71,6 +71,15 @@ Document and active Ingestion observations. It establishes canonical lifecycle
 states, a format capability planning matrix and a repeatable manifest Hash. It
 does not copy objects, inspect MIME or magic, rebuild knowledge, write graph
 relations or inject Experience.
+
+Phase 1 persists content-addressed Artifact, ArtifactLocation, ObjectReplica,
+ArtifactTransformation and reconciliation records. The application uses one
+S3-compatible interface and retains an independent second replica. An Artifact
+is published after both replicas pass SHA 256 verification. The initial formal
+runtime uses two separate filesystem roots because the refreshed RustFS project
+status still marks distributed mode under testing. RustFS remains the primary
+S3 compatibility target and requires the roadmap durability gate before it can
+replace the initial primary store.
 
 ## Acceptance
 

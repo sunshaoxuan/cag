@@ -56,6 +56,7 @@ class KnowledgeCipher:
         if len(key) != 32:
             raise ValueError("Knowledge encryption key must be 32 bytes")
         self._cipher = AESGCM(key)
+        self.key_id = hashlib.sha256(key).hexdigest()[:16]
 
     def encrypt(self, text: str) -> str:
         nonce = urandom(12)
@@ -65,6 +66,15 @@ class KnowledgeCipher:
     def decrypt(self, value: str) -> str:
         payload = base64.urlsafe_b64decode(value.encode("ascii"))
         return self._cipher.decrypt(payload[:12], payload[12:], None).decode("utf-8")
+
+    def encrypt_bytes(self, value: bytes) -> bytes:
+        nonce = urandom(12)
+        return nonce + self._cipher.encrypt(nonce, value, None)
+
+    def decrypt_bytes(self, value: bytes) -> bytes:
+        if len(value) < 29:
+            raise ValueError("Encrypted artifact payload is incomplete")
+        return self._cipher.decrypt(value[:12], value[12:], None)
 
     @staticmethod
     def generate_key() -> str:
@@ -78,6 +88,25 @@ def load_knowledge_cipher(settings: Settings) -> KnowledgeCipher | None:
             encoded_key = keyring.get_password(
                 settings.knowledge_keyring_service,
                 settings.knowledge_keyring_username,
+            )
+        except Exception:
+            encoded_key = None
+    if not encoded_key:
+        return None
+    try:
+        key = base64.urlsafe_b64decode(encoded_key.encode("ascii"))
+    except ValueError:
+        key = hashlib.sha256(encoded_key.encode("utf-8")).digest()
+    return KnowledgeCipher(key)
+
+
+def load_artifact_cipher(settings: Settings) -> KnowledgeCipher | None:
+    encoded_key = settings.artifact_encryption_key
+    if not encoded_key:
+        try:
+            encoded_key = keyring.get_password(
+                settings.artifact_keyring_service,
+                settings.artifact_keyring_username,
             )
         except Exception:
             encoded_key = None

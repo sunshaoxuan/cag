@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.29.0 | Evidence |
+| Requirement | Status for 0.30.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -98,7 +98,7 @@ Legend:
 | Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |
 | Independent processing and business versions | Implemented | Active and Superseded Processing Versions, failed refresh protection, immutable Knowledge Blocks, Applicability Revisions and `analysis_context.as_of` selection |
 | Permanent learned knowledge history | Implemented | changed and absent source files retain historical Document Versions, Processing Versions, Blocks and archive Chunks |
-| Content-addressed durable evidence objects | Planned | ADR 0032 and `docs/cag-evidence-experience-evolution-roadmap.md`; S3-compatible raw or cleaned Artifact persistence, replicas, integrity and recovery tests required |
+| Content-addressed durable evidence objects | Implemented | `Artifact`, `ArtifactLocation`, `ObjectReplica`, `ArtifactTransformation`, reconciliation runs, S3-compatible adapter, independent second replica, checksum retrieval and recovery tests |
 | Universal safe text extraction | Planned | MIME, magic and text-likelihood routing plus sandboxed legacy Office, mail, RTF, image OCR, configuration and archive-member extractors required |
 | Existing knowledge conversion baseline | Implemented | Canonical lifecycle states, format capability matrix, persisted Conversion Manifest dry run, repeatable SHA 256, pagination, filters and read-only inventory regression test |
 | Existing knowledge atomic rebuild | Planned | Object backfill, reclean, reindex, shadow comparison, atomic Generation activation and rollback evidence required |

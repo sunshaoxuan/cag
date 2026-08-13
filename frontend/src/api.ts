@@ -78,6 +78,13 @@ export type KnowledgeStatus = {
   dimensions?: number;
 };
 
+export type ArtifactSummary = {
+  artifacts: number;
+  available_artifacts: number;
+  replicas: number;
+  healthy_replicas: number;
+};
+
 export type QueueStatus = {
   running: boolean;
   local_consumers_running: boolean;
@@ -651,6 +658,10 @@ export function auditEventsUrl(afterSequence = 0): string {
 
 export function getKnowledgeStatus(): Promise<KnowledgeStatus> {
   return request<KnowledgeStatus>("/api/v1/knowledge/status");
+}
+
+export function getArtifactSummary(): Promise<ArtifactSummary> {
+  return request<ArtifactSummary>("/api/v1/knowledge/artifacts/summary");
 }
 
 export function getQueueStatus(): Promise<QueueStatus> {
