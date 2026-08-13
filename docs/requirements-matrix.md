@@ -98,6 +98,12 @@ Legend:
 | Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |
 | Independent processing and business versions | Implemented | Active and Superseded Processing Versions, failed refresh protection, immutable Knowledge Blocks, Applicability Revisions and `analysis_context.as_of` selection |
 | Permanent learned knowledge history | Implemented | changed and absent source files retain historical Document Versions, Processing Versions, Blocks and archive Chunks |
+| Content-addressed durable evidence objects | Planned | ADR 0032 and `docs/cag-evidence-experience-evolution-roadmap.md`; S3-compatible raw or cleaned Artifact persistence, replicas, integrity and recovery tests required |
+| Universal safe text extraction | Planned | MIME, magic and text-likelihood routing plus sandboxed legacy Office, mail, RTF, image OCR, configuration and archive-member extractors required |
+| Existing knowledge conversion and atomic rebuild | Planned | Conversion Manifest, reuse, object backfill, reclean, reindex, shadow comparison, atomic Generation activation and rollback evidence required |
+| Evidence, experience and Task relation network | Planned | typed contextual relations, applicability, contradiction, supersession, Outbox projection and reverse impact analysis required |
+| Approved Experience retrieval and Task feedback | Planned | approved MemoryCandidate indexing, Experience Packet injection, actual-use receipt, outcome revalidation and correction flow required |
+| Production graph engine selection | Planned | PostgreSQL adjacency, Apache AGE and independent graph database must use the same million-edge and ten-million-edge benchmark and recovery contract |
 | Cancellation precedence and scheduled rescan control | Implemented | pending cancellation is committed before requeue; scheduled cancellation releases the source lease and advances its next due time; both paths have regression tests |
 | Standards control mapping | Implemented | `docs/standards-control-matrix.md`, `GET /api/v1/standards/controls` |
 | Frontend feedback projection | Implemented | Key, standard and full detail with a configurable visible-row limit |
