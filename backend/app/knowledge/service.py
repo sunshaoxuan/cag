@@ -41,10 +41,12 @@ from app.knowledge.credentials import (
 from app.knowledge.customer_ledger_contracts import value_matches_schema
 from app.knowledge.ollama import OllamaProvider, StructuredGenerationActivity
 from app.knowledge.ocr import TesseractOcrEngine
+from app.knowledge.path_policy import is_historical_path
 from app.knowledge.processing_policy import (
     PROCESSING_POLICY_VERSION,
     processor_fingerprint,
 )
+from app.knowledge.query_normalization import multilingual_query_variants
 from app.knowledge.resources import build_resource_uri
 from app.knowledge.security import KnowledgeCipher, scan_knowledge_text
 from app.models import (
@@ -2040,9 +2042,18 @@ class KnowledgeService:
         if not self.configured:
             raise KnowledgeUnavailableError("Knowledge service is not ready")
         started_at = utc_now()
-        terms = japanese_search_terms(query)
+        query_variants = multilingual_query_variants(query)
+        terms = set().union(
+            *(japanese_search_terms(value) for value in query_variants)
+        )
         query_folded = query.strip().casefold()
-        search_terms = self._lexical_search_terms(query, terms)
+        search_terms = list(
+            dict.fromkeys(
+                term
+                for value in query_variants
+                for term in self._lexical_search_terms(value, terms)
+            )
+        )[:12]
         if event_callback is not None:
             await event_callback(
                 "knowledge.retrieval.stage",
@@ -2124,11 +2135,15 @@ class KnowledgeService:
                 session.scalars(
                     chunk_query.where(
                         or_(
-                            func.lower(
-                                KnowledgeDocument.canonical_path
-                            ).contains(query_folded),
-                            func.lower(KnowledgeSource.subpath).contains(
-                                query_folded
+                            *(
+                                func.lower(
+                                    KnowledgeDocument.canonical_path
+                                ).contains(value)
+                                for value in query_variants
+                            ),
+                            *(
+                                func.lower(KnowledgeSource.subpath).contains(value)
+                                for value in query_variants
                             ),
                         )
                     )
@@ -2173,11 +2188,15 @@ class KnowledgeService:
                     )
                 ][:4]
             text_filters = [
-                or_(
-                    func.lower(KnowledgeChunk.search_text).contains(term),
-                    func.lower(KnowledgeDocument.canonical_path).contains(term),
-                    func.lower(KnowledgeSource.subpath).contains(term),
-                )
+                func.lower(KnowledgeChunk.search_text).contains(term)
+                for term in database_search_terms
+            ]
+            path_filters = [
+                func.lower(KnowledgeDocument.canonical_path).contains(term)
+                for term in database_search_terms
+            ]
+            source_filters = [
+                func.lower(KnowledgeSource.subpath).contains(term)
                 for term in database_search_terms
             ]
             text_query = chunk_query
@@ -2190,22 +2209,55 @@ class KnowledgeService:
                 if profile == "fast" and path_ranked
                 else list(
                     session.scalars(
-                        text_query.order_by(
-                            case(
-                                (
-                                    func.lower(KnowledgeChunk.search_text).contains(
-                                        query_folded
-                                    ),
-                                    0,
-                                ),
-                                else_=1,
-                            ),
-                            KnowledgeChunk.id,
-                        ).limit(self._settings.knowledge_candidate_limit)
+                        text_query.order_by(KnowledgeChunk.id).limit(
+                            self._settings.knowledge_candidate_limit
+                        )
                     )
                 )
             )
-            chunks = [*path_ranked, *text_ranked]
+            path_text_ranked = (
+                []
+                if profile == "fast" and path_ranked
+                else list(
+                    session.scalars(
+                        chunk_query.where(
+                            or_(*path_filters) if path_filters else false()
+                        )
+                        .order_by(
+                            KnowledgeDocument.canonical_path,
+                            KnowledgeChunk.ordinal,
+                        )
+                        .limit(self._settings.knowledge_candidate_limit)
+                    )
+                )
+            )
+            source_text_ranked = (
+                []
+                if profile == "fast" and path_ranked
+                else list(
+                    session.scalars(
+                        chunk_query.where(
+                            or_(*source_filters) if source_filters else false()
+                        )
+                        .order_by(
+                            KnowledgeSource.subpath,
+                            KnowledgeDocument.canonical_path,
+                            KnowledgeChunk.ordinal,
+                        )
+                        .limit(self._settings.knowledge_candidate_limit)
+                    )
+                )
+            )
+            path_ranked = self._current_search_chunks(path_ranked)
+            text_ranked = self._current_search_chunks(text_ranked)
+            path_text_ranked = self._current_search_chunks(path_text_ranked)
+            source_text_ranked = self._current_search_chunks(source_text_ranked)
+            chunks = [
+                *path_ranked,
+                *text_ranked,
+                *path_text_ranked,
+                *source_text_ranked,
+            ]
             vector_ranked: list[KnowledgeChunk] = []
             if self._database.native_vector_search and query_vector is not None:
                 vector_distance = KnowledgeChunk.embedding.op(
@@ -2226,6 +2278,7 @@ class KnowledgeService:
                     ),
                     reverse=True,
                 )[:20]
+            vector_ranked = self._current_search_chunks(vector_ranked)
             symbol_filters = []
             for term in search_terms:
                 symbol_filters.extend(
@@ -2258,6 +2311,11 @@ class KnowledgeService:
                     )
                 )
             )
+            symbols = [
+                item
+                for item in symbols
+                if not is_historical_path(item.document.canonical_path)
+            ]
             candidate_chunks = {item.id: item for item in chunks}
             candidate_chunks.update({item.id: item for item in vector_ranked})
             symbol_document_ids = list({item.document_id for item in symbols})
@@ -2383,6 +2441,7 @@ class KnowledgeService:
                 reasons.setdefault(chunk.id, set()).add("code_document_link")
 
         ranked_ids = sorted(scores, key=scores.get, reverse=True)
+        ranked_ids = self._diversify_ranked_chunks(ranked_ids, by_id)
         if profile == "deep" and ranked_ids:
             requested_limit = limit or self._settings.knowledge_max_chunks
             rerank_ids = ranked_ids[: min(8, max(5, requested_limit))]
@@ -3623,6 +3682,36 @@ class KnowledgeService:
                 "Embedding checkpoint is incomplete"
             )
         return cached
+
+    @staticmethod
+    def _diversify_ranked_chunks(
+        ranked_ids: list[str],
+        chunks_by_id: dict[str, KnowledgeChunk],
+        *,
+        maximum_per_document: int = 2,
+    ) -> list[str]:
+        document_counts: dict[str, int] = {}
+        diversified: list[str] = []
+        overflow: list[str] = []
+        for chunk_id in ranked_ids:
+            document_id = chunks_by_id[chunk_id].document_id
+            count = document_counts.get(document_id, 0)
+            if count < maximum_per_document:
+                diversified.append(chunk_id)
+                document_counts[document_id] = count + 1
+            else:
+                overflow.append(chunk_id)
+        return [*diversified, *overflow]
+
+    @staticmethod
+    def _current_search_chunks(
+        chunks: list[KnowledgeChunk],
+    ) -> list[KnowledgeChunk]:
+        return [
+            chunk
+            for chunk in chunks
+            if not is_historical_path(chunk.document.canonical_path)
+        ]
 
     @staticmethod
     def _lexical_search_terms(query: str, terms: set[str]) -> list[str]:

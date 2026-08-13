@@ -107,9 +107,16 @@ The managed knowledge store is PostgreSQL 16 with pgvector and pg_trgm.
 Embeddings use the native `vector(1024)` type and an HNSW cosine index. Each
 embedding input contains the canonical path and redacted chunk text so customer
 and operational meaning carried by directories remains available to semantic
-retrieval. Lowered
-Chunk text, document paths and symbol names use GIN trigram indexes. Every
-channel has a fixed candidate limit. The `fast` profile performs no model call,
+retrieval. Lowered Chunk text, document paths and symbol names use GIN trigram
+indexes. Chunk text, Document path and Source subpath retrieval execute as
+separate bounded queries before result fusion. Chinese queries additionally
+generate OpenCC simplified, traditional and Japanese Shinjitai variants for
+lexical and path retrieval while retaining the original query for semantic
+embedding. The final ranking prioritizes at most two Chunks from one Document
+before overflow Chunks so one large file cannot consume the entire answer
+context. Normal search excludes historical directory markers and archived
+`#history` Documents through the same path policy used by customer extraction.
+Every channel has a fixed candidate limit. The `fast` profile performs no model call,
 while `balanced` and `deep` add bounded vector and reranking stages. SQLite is
 accepted only by isolated tests and the one-time migration reader.
 

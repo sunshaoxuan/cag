@@ -118,6 +118,12 @@ The production frontend uses its own origin for API and SSE requests. Nginx
 forwards `/api` to the host Gateway, so a browser opened through a LAN IP does
 not resolve the Gateway as the browser machine's loopback address.
 
+The API test console generates `X-Request-ID` and `Idempotency-Key` values with
+`crypto.getRandomValues()` and RFC 4122 version 4 bit layout. The console uses
+the same implementation for HTTPS, localhost and LAN HTTP pages, where
+`crypto.randomUUID()` may be unavailable because the page is outside a secure
+context.
+
 Starting with version 0.22.5, the Operations route places one administrator
 decision panel immediately below the issue title. It remains present for every
 issue status. Occurrence count is shown as impact context and never hides

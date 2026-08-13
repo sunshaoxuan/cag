@@ -58,7 +58,9 @@ listener identity checks, health thresholds and log rotation configuration. Runt
 acceptance checks the scheduled task state, trigger count, retry count,
 supervisor process, all-interface listener, dependency container restart
 policies, forced API-process recovery, readiness, health version and browser
-console.
+console. The runtime test entry removes stale non-formal CAG scheduled tasks and
+asserts that only the formal port 8000 supervisor remains, preventing temporary
+Workers from claiming the shared Redis queue with stale code.
 
 ## Rollback
 

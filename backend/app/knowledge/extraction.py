@@ -17,6 +17,7 @@ from app.config import Settings
 from app.database import Database
 from app.knowledge.security import scan_knowledge_text
 from app.knowledge.extractors import SUPPORTED_EXTENSIONS
+from app.knowledge.path_policy import is_historical_path
 from app.knowledge.service import KnowledgeService, SearchResult
 from app.models import (
     KnowledgeAnalysisScope,
@@ -56,27 +57,6 @@ REMOTE_INFORMATION_DIRECTORIES = {
     "6.リモート接続情報",
 }
 SPECIAL_LEDGER_FIELDS = {"customizations", "vpns", "environments"}
-HISTORICAL_DIRECTORY_PREFIXES = ("旧_", "旧-")
-HISTORICAL_DIRECTORY_NAMES = {
-    "old",
-    "旧",
-    "back",
-    "backup",
-    "bak",
-    "バックアップ",
-}
-
-
-def is_historical_path(canonical_path: str) -> bool:
-    for value in canonical_path.replace("\\", "/").split("/")[:-1]:
-        segment = re.sub(r"\s+", "", _normalized(value))
-        if segment in HISTORICAL_DIRECTORY_NAMES or segment.startswith(
-            HISTORICAL_DIRECTORY_PREFIXES
-        ):
-            return True
-    return False
-
-
 def requested_fields_for_document(
     canonical_path: str,
     requested_fields: list[dict[str, Any]],

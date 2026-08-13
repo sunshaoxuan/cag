@@ -17,6 +17,7 @@ dependencies = [
   "keyring>=25.7,<26",
   "lnkparse3>=1.6,<2",
   "openpyxl>=3.1.5,<3.2",
+  "opencc>=1.4,<2",
   "pgvector>=0.4,<1",
   "psycopg[binary]>=3.3,<4",
   "pydantic>=2.13,<3",

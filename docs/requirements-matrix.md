@@ -14,6 +14,7 @@ Legend:
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
+| LAN HTTP API test console | Implemented | Cryptographically random RFC 4122 v4 request IDs use `crypto.getRandomValues()` in HTTPS, localhost and LAN HTTP browser contexts |
 | Security documentation | Implemented | `docs/security.md` |
 | Phase 1 backend skeleton | Implemented | `backend/app` |
 | Database and migrations | Implemented | `backend/app/models`, `backend/alembic` |
@@ -89,7 +90,9 @@ Legend:
 | Code symbol and relationship graph | Implemented | CodeSymbol, CodeRelation, CodeDocumentLink, migration and idempotency tests |
 | Code and documentation linkage | Implemented | Deterministic path and symbol evidence, detail API and retrieval graph expansion |
 | Multilingual semantic and exact hybrid retrieval | Implemented | Qwen3 path and content embeddings, Japanese, Chinese and English query instruction, exact path and lexical channels, RRF and optional local reranking |
-| Bounded indexed knowledge retrieval | Implemented | pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
+| Bounded indexed knowledge retrieval | Implemented | Separate bounded Chunk text, Document path and Source subpath channels, pg_trgm expression indexes, fixed candidate limits, database statement timeout, profile deadlines and production-scale availability acceptance |
+| Cross-script customer path retrieval | Implemented | OpenCC simplified, traditional and Japanese Shinjitai query variants plus per-Document result diversification |
+| Current-only ordinary knowledge search | Implemented | Shared historical path policy excludes old, backup and archived Document candidates from every retrieval channel |
 | Scoped customer ledger knowledge extraction | Implemented | request schema v1 with analysis Template v2, required-version Scope Repair, Source update isolation, exact current-path Document selection, historical-path exclusion, UNC-safe Shortcut observations, dedicated extraction queue, lease-based liveness, public per-document terminal and model activity progress, stream-inactivity timeout, truthful cancellation, exhaustive manifest, file checkpoints, typed fields, coverage, conflicts, unresolved fields and stable errors |
 | Customer customization and remote ledger classification | Implemented | customization schema, field-specific model output schema, shared ingestion and manifest support policy, SQL and XLSM processing, VPN and Environment field contracts, physical-record apply tests |
 | Customer ledger evidence and review safety | Implemented | candidate and Knowledge Block physical IDs, Document Version citations, structured locations, redacted excerpts, candidates-only output and no-delete policy |

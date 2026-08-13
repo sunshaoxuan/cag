@@ -5,6 +5,20 @@ $supervisorScript = Join-Path $repositoryRoot "scripts\supervise-local-codex-gat
 $migrationScript = Join-Path $repositoryRoot "scripts\migrate-sqlite-to-pgvector.ps1"
 $composePath = Join-Path $repositoryRoot "docker-compose.yml"
 
+Get-ScheduledTask -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -like "CAG Local Codex Gateway *" -and
+        $_.TaskName -ne "CAG Local Codex Gateway"
+    } |
+    ForEach-Object {
+        $arguments = @($_.Actions).Arguments
+        if ($arguments -match '-Port\s+(\d+)') {
+            & $manageScript uninstall `
+                -Port ([int]$Matches[1]) `
+                -TaskName $_.TaskName | Out-Null
+        }
+    }
+
 Describe "Local Codex Gateway PowerShell scripts" {
     It "parses both entrypoint scripts without errors" {
         foreach ($scriptPath in @(
@@ -123,5 +137,16 @@ Describe "Local Codex Gateway PowerShell scripts" {
         $result.AutoStart | Should Be $true
         $result.RestartCount | Should Be 999
         @(Get-ScheduledTask -TaskName $result.TaskName).Triggers.Count | Should Be 3
+    }
+
+    It "leaves only the formal supervised worker after runtime checks" {
+        $managedTasks = @(
+            Get-ScheduledTask -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.TaskName -like "CAG Local Codex Gateway*"
+                }
+        )
+        $managedTasks.Count | Should Be 1
+        $managedTasks[0].TaskName | Should Be "CAG Local Codex Gateway"
     }
 }

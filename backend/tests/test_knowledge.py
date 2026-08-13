@@ -26,6 +26,7 @@ from app.knowledge.ocr import OcrResult
 from app.knowledge.provenance_backfill import backfill_raw_content_hashes
 from app.knowledge.extractors import extract_text_with_metadata
 from app.knowledge.resources import build_resource_uri
+from app.knowledge.query_normalization import multilingual_query_variants
 from app.knowledge.scheduler import KnowledgeScheduler
 from app.knowledge.credentials import SourceCredential
 from app.knowledge.connectors import (
@@ -1100,6 +1101,44 @@ def test_cipher_and_scanner_round_trip(settings: Settings) -> None:
     assert scan.secret_detected is True
     assert scan.prompt_injection_detected is True
     assert "super-secret-value" not in scan.safe_text
+
+
+def test_multilingual_query_variants_include_japanese_character_forms() -> None:
+    assert multilingual_query_variants("一桥大学 VPN") == (
+        "一桥大学 vpn",
+        "一橋大學 vpn",
+        "一橋大学 vpn",
+    )
+
+
+def test_ranked_chunks_are_diversified_by_document() -> None:
+    chunks = {
+        "a1": SimpleNamespace(document_id="a"),
+        "a2": SimpleNamespace(document_id="a"),
+        "a3": SimpleNamespace(document_id="a"),
+        "b1": SimpleNamespace(document_id="b"),
+    }
+    assert KnowledgeService._diversify_ranked_chunks(
+        ["a1", "a2", "a3", "b1"],
+        chunks,
+    ) == ["a1", "a2", "b1", "a3"]
+
+
+def test_search_candidate_filter_excludes_historical_paths() -> None:
+    current = SimpleNamespace(
+        document=SimpleNamespace(canonical_path="customer/VPN/manual.pdf")
+    )
+    old = SimpleNamespace(
+        document=SimpleNamespace(canonical_path="customer/old/manual.pdf")
+    )
+    archived = SimpleNamespace(
+        document=SimpleNamespace(
+            canonical_path="customer/manual.pdf#history/version"
+        )
+    )
+    assert KnowledgeService._current_search_chunks([old, current, archived]) == [
+        current
+    ]
 
 
 def test_invalid_cipher_key_is_rejected() -> None:
