@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_NAME = "agent-gateway"
-APP_VERSION = "0.30.0"
+APP_VERSION = "0.31.0"
 DEFAULT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     knowledge_max_spreadsheet_cells: int = Field(
         default=250_000, ge=1_000, le=2_000_000
     )
+    knowledge_extraction_timeout_seconds: int = Field(default=120, ge=5, le=900)
+    knowledge_max_archive_members: int = Field(default=2_000, ge=1, le=100_000)
+    knowledge_max_archive_uncompressed_bytes: int = Field(default=250_000_000, ge=1_024, le=2_000_000_000)
+    knowledge_max_archive_compression_ratio: int = Field(default=200, ge=1, le=10_000)
     knowledge_ocr_enabled: bool = True
     knowledge_ocr_executable: str = "tesseract"
     knowledge_ocr_languages: str = "jpn+eng"

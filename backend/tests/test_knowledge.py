@@ -70,6 +70,8 @@ from app.models import (
     CodeDocumentLink,
     CodeRelation,
     CodeSymbol,
+    Artifact,
+    ArtifactLocation,
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEmbeddingCache,
@@ -1071,6 +1073,7 @@ def install_fake_knowledge(
         provider=FakeOllamaClient(),
         cipher=load_knowledge_cipher(active_settings),
         credential_store=credential_store,
+        artifact_service=app.state.artifact_evidence_service,
     )
     app.state.knowledge_service = service
     app.state.queue_coordinator._knowledge_service = service
@@ -1513,6 +1516,21 @@ def test_knowledge_api_ingests_searches_and_governs_memory(
             assert entry.raw_content_hash == hashlib.sha256(
                 (project_repository / "README.md").read_bytes()
             ).hexdigest()
+            cleaned = session.scalar(
+                select(Artifact).where(
+                    Artifact.sha256 == document.content_hash,
+                    Artifact.artifact_kind == "cleaned",
+                )
+            )
+            assert cleaned is not None
+            location = session.scalar(
+                select(ArtifactLocation).where(
+                    ArtifactLocation.artifact_id == cleaned.id,
+                    ArtifactLocation.source_entry_id == entry.id,
+                )
+            )
+            assert location is not None
+            assert location.relative_path_snapshot == "README.md"
         resource_uri = search.json()["results"][0]["resource_uri"]
         assert resource_uri.startswith("file:")
         assert resource_uri.endswith("/README.md")
@@ -1611,7 +1629,8 @@ def test_fast_search_and_customer_extraction_are_bounded_and_citation_gated(
         ingestion = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        remote_ingestion = wait_for_ingestion(client, ingestion["id"])
+        assert remote_ingestion["status"] == "completed", remote_ingestion.get("error")
 
         with app.state.database.session_factory() as session:
             active_document = session.scalar(
@@ -1895,7 +1914,8 @@ def test_customer_remote_information_becomes_vpn_and_environment_candidates(
         ingestion = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/ingest"
         ).json()
-        assert wait_for_ingestion(client, ingestion["id"])["status"] == "completed"
+        remote_ingestion = wait_for_ingestion(client, ingestion["id"])
+        assert remote_ingestion["status"] == "completed", remote_ingestion.get("error")
 
         created = client.post(
             "/api/v1/knowledge/extractions/customer-ledger",
@@ -3955,25 +3975,20 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
 
         assert ingestion["status"] == "completed"
         assert ingestion["rejected_files"] == 1
-        assert ingestion["skipped_files"] == 2
+        assert ingestion["skipped_files"] == 1
         assert ingestion["rejection_archive_sha256"]
         audit = client.get(
             f"/api/v1/knowledge/ingestions/{ingestion_id}/rejections"
         )
         assert audit.status_code == 200
         payload = audit.json()
-        assert payload["total"] == 3
+        assert payload["total"] == 2
         assert payload["archive_available"] is True
         by_path = {
             item["relative_path"]: item for item in payload["items"]
         }
         assert by_path["legacy.sql"]["reason_code"] == "encoding_unsupported"
         assert by_path["legacy.sql"]["disposition"] == "rejected"
-        assert (
-            by_path["legacy.doc"]["reason_code"]
-            == "unsupported_extension"
-        )
-        assert by_path["legacy.doc"]["disposition"] == "skipped"
         assert by_path["oversized.txt"]["reason_code"] == "file_too_large"
         assert by_path["oversized.txt"]["file_size"] == 2_048
         with app.state.database.session_factory() as session:
@@ -4014,14 +4029,13 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
             "utf-8"
         ).splitlines()
         archive_header = json.loads(archive_lines[0])
-        assert archive_header["record_count"] == 3
-        assert len(archive_lines) == 4
+        assert archive_header["record_count"] == 2
+        assert len(archive_lines) == 3
         assert {
             json.loads(line)["relative_path"]
             for line in archive_lines[1:]
         } == {
             "legacy.sql",
-            "legacy.doc",
             "oversized.txt",
         }
 
@@ -4030,7 +4044,7 @@ def test_ingestion_persists_and_exports_file_level_rejection_audit(
             session.scalar(
                 select(func.count(KnowledgeIngestionRejection.id))
             )
-            == 3
+            == 2
         )
         stored_ingestion = session.get(KnowledgeIngestion, ingestion_id)
         assert stored_ingestion is not None
@@ -4136,7 +4150,9 @@ def test_processing_routes_inventory_bigint_and_legacy_code_backfill(
         )
         assert entries["service.py"]["processing_mode"] == "code"
         assert entries["guide.md"]["processing_mode"] == "document"
-        assert entries["guide.md"]["extractor"] == "text"
+        assert entries["guide.md"]["extractor"] == "plain-text"
+        assert entries["guide.md"]["detected_magic"] == "plain_text"
+        assert entries["guide.md"]["text_probability"] == 1.0
         assert entries["warning.txt"]["processing_mode"] == "path_only"
         assert all(
             item["raw_content_hash"] == "a" * 64

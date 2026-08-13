@@ -84,9 +84,7 @@ def test_conversion_baseline_is_repeatable_and_read_only(
         )
         assert capabilities.status_code == 200
         capability_payload = capabilities.json()
-        assert capability_payload["routing_boundary"] == (
-            "extension-metadata-planning-only"
-        )
+        assert capability_payload["routing_boundary"] == "content-probe-and-registry"
         assert ".doc" in capability_payload["categories"]["planned_text"]
         assert ".exe" in capability_payload["categories"]["binary_metadata"]
 
@@ -99,11 +97,10 @@ def test_conversion_baseline_is_repeatable_and_read_only(
         assert first_payload["item_count"] == 5
         assert first_payload["active_ingestion_id"] == active_id
         assert first_payload["action_counts"] == {
-            "backfill_object": 1,
+            "backfill_object": 2,
             "metadata_only": 1,
             "path_only": 1,
             "reclean": 1,
-            "safe_unpack": 1,
         }
 
         items_response = client.get(
@@ -117,19 +114,18 @@ def test_conversion_baseline_is_repeatable_and_read_only(
         }
         assert items["guide.txt"]["conversion_action"] == "backfill_object"
         assert items["guide.txt"]["document_id"]
-        assert items["legacy.doc"]["lifecycle_status"] == "processing"
-        assert items["legacy.doc"]["conversion_action"] == "reclean"
+        assert items["legacy.doc"]["lifecycle_status"] == "indexed"
+        assert items["legacy.doc"]["conversion_action"] == "backfill_object"
         assert items["client.exe"]["capability"] == "binary_metadata"
         assert items["client.exe"]["conversion_action"] == "metadata_only"
-        assert items["archive.zip"]["conversion_action"] == "safe_unpack"
+        assert items["archive.zip"]["conversion_action"] == "reclean"
         assert items["empty.txt"]["conversion_action"] == "path_only"
 
         filtered = client.get(
             f"/api/v1/knowledge/conversion-baselines/{first_payload['id']}/items",
-            params={"conversion_action": "reclean", "limit": 1},
+            params={"conversion_action": "backfill_object", "limit": 10},
         ).json()
-        assert filtered["total"] == 1
-        assert filtered["items"][0]["relative_path"] == "legacy.doc"
+        assert filtered["total"] == 2
 
         second_payload = client.post(
             f"/api/v1/knowledge/sources/{source['id']}/conversion-baselines"

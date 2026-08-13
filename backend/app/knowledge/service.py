@@ -41,6 +41,8 @@ from app.knowledge.credentials import (
 from app.knowledge.customer_ledger_contracts import value_matches_schema
 from app.knowledge.ollama import OllamaProvider, StructuredGenerationActivity
 from app.knowledge.ocr import TesseractOcrEngine
+from app.knowledge.artifacts import ArtifactEvidenceService
+from app.knowledge.extraction_framework import ExtractionLimits
 from app.knowledge.path_policy import is_historical_path
 from app.knowledge.processing_policy import (
     PROCESSING_POLICY_VERSION,
@@ -219,11 +221,13 @@ class KnowledgeService:
         provider: OllamaProvider,
         cipher: KnowledgeCipher | None,
         credential_store: KnowledgeCredentialStore | None = None,
+        artifact_service: ArtifactEvidenceService | None = None,
     ) -> None:
         self._database = database
         self._settings = settings
         self._provider = provider
         self._cipher = cipher
+        self._artifact_service = artifact_service
         configured_roots = [
             Path(item).resolve()
             for item in settings.knowledge_allowed_roots.split(";")
@@ -261,6 +265,15 @@ class KnowledgeService:
                 settings.knowledge_max_spreadsheet_cells
             ),
             ocr_engine=self._ocr_engine,
+            extraction_limits=ExtractionLimits(
+                timeout_seconds=settings.knowledge_extraction_timeout_seconds,
+                max_input_bytes=settings.knowledge_max_file_bytes,
+                max_output_characters=settings.knowledge_max_file_bytes,
+                max_archive_members=settings.knowledge_max_archive_members,
+                max_archive_uncompressed_bytes=settings.knowledge_max_archive_uncompressed_bytes,
+                max_archive_compression_ratio=settings.knowledge_max_archive_compression_ratio,
+                max_spreadsheet_cells=settings.knowledge_max_spreadsheet_cells,
+            ),
         )
         self._scheduler_running = False
 
@@ -949,6 +962,23 @@ class KnowledgeService:
                 safe_hash = hashlib.sha256(
                     safe_text.encode("utf-8")
                 ).hexdigest()
+                if self._artifact_service is not None:
+                    with self._database.session_factory() as session:
+                        source_entry_id = session.scalar(
+                            select(KnowledgeSourceEntry.id).where(
+                                KnowledgeSourceEntry.source_id == source_id,
+                                KnowledgeSourceEntry.relative_path == document.path,
+                            )
+                        )
+                    cleaned_artifact = self._artifact_service.put(
+                        content=safe_text.encode("utf-8"),
+                        media_type="text/plain; charset=utf-8",
+                        artifact_kind="cleaned",
+                        source_entry_id=source_entry_id,
+                        relative_path_snapshot=document.path,
+                    )
+                    if safe_hash != cleaned_artifact.sha256:
+                        raise RuntimeError("Cleaned artifact checksum does not match document hash")
                 processing_mode = document.processing_mode
                 fingerprint = processor_fingerprint(
                     processing_mode,
@@ -1555,6 +1585,12 @@ class KnowledgeService:
         ingestion_id: str,
         items: tuple[CollectionObservation, ...],
     ) -> None:
+        items = tuple(
+            {
+                item.relative_path: item
+                for item in items
+            }.values()
+        )
         with self._database.session_factory() as session:
             ingestion = session.get(KnowledgeIngestion, ingestion_id)
             if ingestion is None:
@@ -1603,6 +1639,13 @@ class KnowledgeService:
                     record.content_hash = None
                 record.reason_code = item.reason_code
                 record.raw_content_hash = item.raw_content_hash
+                if item.extractor is not None:
+                    record.extractor = item.extractor
+                    record.extractor_version = item.extractor_version
+                record.retryable = item.retryable
+                record.detected_mime = item.detected_mime
+                record.detected_magic = item.detected_magic
+                record.text_probability = item.text_probability
                 record.present = True
                 record.last_seen_ingestion_id = ingestion_id
                 record.last_seen_at = observed_at
@@ -1704,6 +1747,10 @@ class KnowledgeService:
                         file_size=record.file_size,
                         reason_code=record.reason_code,
                         extractor=record.extractor,
+                        extractor_version=record.extractor_version,
+                        retryable=record.retryable,
+                        detected_mime=record.detected_mime,
+                        detected_magic=record.detected_magic,
                         error_type=record.error_type,
                         error_message=record.error_message,
                     )
@@ -1721,6 +1768,10 @@ class KnowledgeService:
                 record.file_size = selected.file_size
                 record.reason_code = selected.reason_code
                 record.extractor = selected.extractor
+                record.extractor_version = selected.extractor_version
+                record.retryable = selected.retryable
+                record.detected_mime = selected.detected_mime
+                record.detected_magic = selected.detected_magic
                 record.error_type = selected.error_type
                 record.error_message = selected.error_message
                 final_items[selected.relative_path] = selected
@@ -1744,6 +1795,9 @@ class KnowledgeService:
                     entry.processing_status = "rejected"
                 entry.reason_code = item.reason_code
                 entry.extractor = item.extractor
+                entry.retryable = item.retryable
+                entry.detected_mime = item.detected_mime
+                entry.detected_magic = item.detected_magic
                 if item.relative_path not in preserve_entry_versions:
                     entry.extractor_version = item.extractor_version
             session.commit()
@@ -1804,6 +1858,10 @@ class KnowledgeService:
                                 "file_size": record.file_size,
                                 "reason_code": record.reason_code,
                                 "extractor": record.extractor,
+                                "extractor_version": record.extractor_version,
+                                "retryable": record.retryable,
+                                "detected_mime": record.detected_mime,
+                                "detected_magic": record.detected_magic,
                                 "error_type": record.error_type,
                                 "error_message": record.error_message,
                                 "created_at": record.created_at.isoformat(),

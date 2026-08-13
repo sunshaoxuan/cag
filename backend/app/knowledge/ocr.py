@@ -105,6 +105,28 @@ class TesseractOcrEngine:
             pages=len(page_text),
         )
 
+    def extract_image(self, path: Path) -> OcrResult:
+        if not self.available:
+            raise OcrUnavailableError("Tesseract OCR executable is unavailable")
+        completed = self._run(
+            [
+                self._executable,
+                str(path),
+                "stdout",
+                "-l",
+                self._languages,
+                "--dpi",
+                str(self._dpi),
+            ]
+        )
+        return OcrResult(
+            text=completed.stdout.decode("utf-8", errors="replace").strip(),
+            engine="tesseract",
+            engine_version=self._version(),
+            languages=self._languages,
+            pages=1,
+        )
+
     def _version(self) -> str:
         completed = self._run([self._executable, "--version"])
         return completed.stdout.decode(

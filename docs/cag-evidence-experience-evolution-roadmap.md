@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-状态：Phase 0 已由 CAG 0.29.0 实现。Phase 1 已由 CAG 0.30.0 实现对象证据基础。Phase 2 至 Phase 7 等待逐阶段实施和验收。
+状态：Phase 0 已由 CAG 0.29.0 实现。Phase 1 已由 CAG 0.30.0 实现对象证据基础。Phase 2 已由 CAG 0.31.0 实现通用安全提取框架。Phase 3 至 Phase 7 等待逐阶段实施和验收。
 
 基线版本：CAG 0.28.5。
 
@@ -324,6 +324,8 @@ RustFS 达到稳定版本且分布式能力通过本地验收以前，关键证�
 
 ### 阶段 2：通用内容探测和提取器框架
 
+实施状态：CAG 0.31.0 已实现 MIME、魔数和文本概率联合探测、显式处理器注册表、无网络隔离进程、硬超时、输入与输出限制、归档成员与展开量及压缩比限制、稳定失败审计、旧 Office、EML、MSG、RTF、图片 OCR、未知扩展名文本和安全 ZIP 处理。清洗后的完整文本通过 SHA 256 保存为双副本 Artifact，并关联 Source Entry。
+
 目标：所有可安全抽取文本的文件进入清洗流程。
 
 交付：MIME 和魔数探测、文本概率探测、沙箱 Worker、资源限制、处理器注册表、稳定错误码、旧 Office、邮件、RTF、图片 OCR 和文本型配置处理器。
@@ -407,7 +409,7 @@ RustFS 达到稳定版本且分布式能力通过本地验收以前，关键证�
 
 ## 14. 下一实施目标
 
-CAG 0.29.0 已实现 Phase 0 的持久 Conversion Manifest、规范生命周期、格式能力矩阵、分页查询、过滤和 SHA 256 dry run。CAG 0.30.0 已实现 Phase 1 的内容寻址 Artifact、ArtifactLocation、ObjectReplica、ArtifactTransformation、S3 兼容接口、第二副本和完整性对账。Phase 2 将在对象证据层上实现 MIME、魔数、文本概率和沙箱提取器。
+CAG 0.29.0 已实现 Phase 0 的持久 Conversion Manifest、规范生命周期、格式能力矩阵、分页查询、过滤和 SHA 256 dry run。CAG 0.30.0 已实现 Phase 1 的内容寻址 Artifact、ArtifactLocation、ObjectReplica、ArtifactTransformation、S3 兼容接口、第二副本和完整性对账。CAG 0.31.0 已实现 Phase 2 的 MIME、魔数、文本概率、沙箱提取器、稳定失败审计和清洗对象闭环。下一目标是 Phase 3 的现有知识转换与新代重建。
 
 ## 15. 当前技术资料
 

@@ -20,9 +20,16 @@ from app.knowledge.credentials import (
     SourceCredential,
 )
 from app.knowledge.extractors import (
+    ExtractedText,
     SUPPORTED_EXTENSIONS,
     extract_text_with_metadata,
     normalize_text,
+)
+from app.knowledge.content_probe import probe_content
+from app.knowledge.extraction_framework import (
+    ExtractionLimits,
+    StableExtractionError,
+    extract_isolated,
 )
 from app.knowledge.ocr import TesseractOcrEngine
 from app.knowledge.processing_policy import (
@@ -96,6 +103,9 @@ class CollectedDocument:
     extractor: str
     extractor_version: str | None = None
     processor_variant: str | None = None
+    detected_mime: str | None = None
+    detected_magic: str | None = None
+    text_probability: float | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +141,9 @@ class CollectionRejection:
     extractor_version: str | None = None
     error_type: str | None = None
     error_message: str | None = None
+    retryable: bool = False
+    detected_mime: str | None = None
+    detected_magic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +157,12 @@ class CollectionObservation:
     processing_status: str
     reason_code: str | None
     raw_content_hash: str | None = None
+    extractor: str | None = None
+    extractor_version: str | None = None
+    retryable: bool = False
+    detected_mime: str | None = None
+    detected_magic: str | None = None
+    text_probability: float | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +210,7 @@ class SourceConnectorManager:
         max_file_bytes: int,
         max_spreadsheet_cells: int = 250_000,
         ocr_engine: TesseractOcrEngine | None = None,
+        extraction_limits: ExtractionLimits | None = None,
     ) -> None:
         self._cache_root = cache_root.resolve()
         self._allowed_roots = allowed_roots
@@ -201,6 +221,11 @@ class SourceConnectorManager:
         self._max_file_bytes = max_file_bytes
         self._max_spreadsheet_cells = max_spreadsheet_cells
         self._ocr_engine = ocr_engine
+        self._extraction_limits = extraction_limits or ExtractionLimits(
+            max_input_bytes=max_file_bytes,
+            max_output_characters=max_file_bytes,
+            max_spreadsheet_cells=max_spreadsheet_cells,
+        )
 
     @staticmethod
     def normalized_source_key(
@@ -937,18 +962,53 @@ class SourceConnectorManager:
 
             for path, processing_mode, relative_path in directory_files:
                 file_size: int | None = None
+                probe = None
                 try:
                     io_path = _path_for_io(path)
                     file_size = io_path.stat().st_size
-                    extracted = extract_text_with_metadata(
-                        io_path,
-                        max_spreadsheet_cells=(
-                            self._max_spreadsheet_cells
-                        ),
-                        max_output_characters=self._max_file_bytes,
-                        ocr_engine=self._ocr_engine,
-                    )
-                    text = normalize_text(extracted.text)
+                    probe = probe_content(io_path)
+                    if probe.magic_type.startswith("image_"):
+                        if self._ocr_engine is None:
+                            raise StableExtractionError(
+                                "ocr_unavailable",
+                                "Image OCR is not configured",
+                                retryable=True,
+                                processor="tesseract",
+                            )
+                        ocr = self._ocr_engine.extract_image(io_path)
+                        extracted = ExtractedText(
+                            ocr.text,
+                            "image-ocr",
+                            ocr.engine,
+                            ocr.engine_version,
+                            f"image_ocr_v1:{ocr.languages}",
+                        )
+                        text = normalize_text(extracted.text)
+                    elif probe.magic_type in {
+                        "ole_compound", "plain_text", "rfc822", "rtf", "zip"
+                    }:
+                        isolated = extract_isolated(
+                            io_path,
+                            self._extraction_limits,
+                        )
+                        text = normalize_text(isolated.text)
+                        extracted = ExtractedText(
+                            text,
+                            isolated.encoding,
+                            isolated.processor,
+                            isolated.processor_version,
+                            isolated.processor_variant,
+                        )
+                    else:
+                        extracted = extract_text_with_metadata(
+                            io_path,
+                            max_spreadsheet_cells=(
+                                self._max_spreadsheet_cells
+                            ),
+                            max_output_characters=self._max_file_bytes,
+                            ocr_engine=self._ocr_engine,
+                        )
+                        text = normalize_text(extracted.text)
                 except (
                     UnicodeDecodeError,
                     OSError,
@@ -966,6 +1026,7 @@ class SourceConnectorManager:
                         file_size=file_size,
                         reason_code=self._rejection_reason(path, exc),
                         error=exc,
+                        probe=probe,
                     )
                     append_path_document(
                         path,
@@ -1007,7 +1068,31 @@ class SourceConnectorManager:
                         extractor=extracted.extractor,
                         extractor_version=extracted.extractor_version,
                         processor_variant=extracted.processor_variant,
+                        detected_mime=probe.mime_type if probe else None,
+                        detected_magic=probe.magic_type if probe else None,
+                        text_probability=probe.text_probability if probe else None,
                     )
+                )
+                self._report_observation(
+                    observation,
+                    root=root,
+                    path=path,
+                    relative_path=relative_path,
+                    entry_kind="file",
+                    file_size=file_size,
+                    modified_at=datetime.fromtimestamp(
+                        path.stat().st_mtime,
+                        tz=timezone.utc,
+                    ),
+                    processing_mode=processing_mode,
+                    processing_status="processing",
+                    reason_code=None,
+                    raw_content_hash=self._sha256_file(path),
+                    extractor=extracted.extractor,
+                    extractor_version=extracted.extractor_version,
+                    detected_mime=probe.mime_type if probe else None,
+                    detected_magic=probe.magic_type if probe else None,
+                    text_probability=probe.text_probability if probe else None,
                 )
             directories_scanned += 1
             report(
@@ -1080,6 +1165,7 @@ class SourceConnectorManager:
         file_size: int | None,
         reason_code: str,
         error: Exception | None = None,
+        probe=None,
     ) -> None:
         if sink is None:
             return
@@ -1105,15 +1191,20 @@ class SourceConnectorManager:
                 extractor=(
                     "filesystem"
                     if disposition == "skipped"
-                    else cls._extractor_name(path)
+                    else getattr(error, "processor", None)
+                    or cls._extractor_name(path)
                 ),
                 extractor_version=(
-                    cls._extractor_version(path)
+                    getattr(error, "processor_version", None)
+                    or cls._extractor_version(path)
                     if disposition == "rejected"
                     else None
                 ),
                 error_type=type(error).__name__ if error is not None else None,
                 error_message=error_message,
+                retryable=bool(getattr(error, "retryable", False)),
+                detected_mime=probe.mime_type if probe else None,
+                detected_magic=probe.magic_type if probe else None,
             )
         )
 
@@ -1141,6 +1232,12 @@ class SourceConnectorManager:
         processing_status: str,
         reason_code: str | None,
         raw_content_hash: str | None = None,
+        extractor: str | None = None,
+        extractor_version: str | None = None,
+        retryable: bool = False,
+        detected_mime: str | None = None,
+        detected_magic: str | None = None,
+        text_probability: float | None = None,
     ) -> None:
         if sink is None:
             return
@@ -1158,6 +1255,12 @@ class SourceConnectorManager:
                 processing_status=processing_status,
                 reason_code=reason_code,
                 raw_content_hash=raw_content_hash,
+                extractor=extractor,
+                extractor_version=extractor_version,
+                retryable=retryable,
+                detected_mime=detected_mime,
+                detected_magic=detected_magic,
+                text_probability=text_probability,
             )
         )
 

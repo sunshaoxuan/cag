@@ -10,7 +10,7 @@ from app.knowledge.code_intelligence import CODE_LANGUAGE_BY_SUFFIX
 from app.knowledge.extractors import SUPPORTED_EXTENSIONS
 
 
-PROCESSING_POLICY_VERSION = "knowledge-routing-v5"
+PROCESSING_POLICY_VERSION = "knowledge-routing-v6-content-probe"
 CODE_PROCESSOR_VERSION = "structural-code-v4-subpath-embedding"
 DOCUMENT_PROCESSOR_VERSION = "document-text-v5-structured-location"
 PATH_PROCESSOR_VERSION = "path-semantic-v3-subpath-embedding"
@@ -36,7 +36,6 @@ METADATA_ONLY_EXTENSIONS = {
     ".vhdx",
     ".war",
     ".xz",
-    ".zip",
 }
 _DUMP_NAME_PATTERN = re.compile(
     r"(^|[._-])(backup|database[-_]?dump|db[-_]?dump|dump|export)"
@@ -87,12 +86,12 @@ def classify_file(
         return FileProcessingDecision("path_only", "empty_file_path_only")
     if suffix in CODE_LANGUAGE_BY_SUFFIX:
         return FileProcessingDecision("code", None)
-    if suffix in SUPPORTED_EXTENSIONS:
+    if suffix in SUPPORTED_EXTENSIONS or suffix in {
+        ".bmp", ".doc", ".eml", ".gif", ".jpeg", ".jpg", ".msg",
+        ".png", ".ppt", ".rtf", ".tif", ".tiff", ".xls", ".zip"
+    }:
         return FileProcessingDecision("document", None)
-    return FileProcessingDecision(
-        "metadata_only",
-        "unsupported_extension",
-    )
+    return FileProcessingDecision("document", "content_probe_required")
 
 
 def processor_fingerprint(

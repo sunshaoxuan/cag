@@ -211,8 +211,8 @@ def format_capability_matrix() -> dict[str, Any]:
     return {
         "schema_version": BASELINE_SCHEMA_VERSION,
         "policy_version": PROCESSING_POLICY_VERSION,
-        "routing_boundary": "extension-metadata-planning-only",
-        "content_detection_phase": "planned-phase-2",
+        "routing_boundary": "content-probe-and-registry",
+        "content_detection_phase": "implemented-phase-2",
         "categories": categories,
     }
 

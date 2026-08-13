@@ -10,7 +10,7 @@ Legend:
 
 ## Phase status
 
-| Requirement | Status for 0.30.0 | Evidence |
+| Requirement | Status for 0.31.0 | Evidence |
 |---|---|---|
 | Repository and documented architecture | Implemented | `docs/architecture.md` |
 | API documentation | Implemented | `/api-docs`, `docs/api.md`, component and browser tests |
@@ -27,6 +27,8 @@ Legend:
 | Gateway all-interface listener | Implemented | Host runner, managed task listener validation and Compose port publication |
 | Continuous Windows supervision | Implemented | Startup, sign-in and one-minute watchdog triggers, full readiness monitor, failure retry and rotating supervisor log |
 | Unit and API tests | Implemented | `backend/tests` |
+| Universal safe content extraction | Implemented | `content_probe.py`, `extraction_framework.py`, format corpus and archive attack tests |
+| Cleaned content object closure | Implemented | Document content Hash maps to a dual replica Artifact and ArtifactLocation maps back to Source Entry |
 | Isolated Git workspace | Implemented | Distinct workspace test and Compose smoke |
 | Project YAML loader | Implemented | Project registry tests and live Project API |
 | Frontend task page | Implemented | Component tests, production build, browser and screenshot evidence |

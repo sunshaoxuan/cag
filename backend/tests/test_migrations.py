@@ -73,6 +73,27 @@ def test_alembic_upgrade_and_validation_status_round_trip(tmp_path: Path) -> Non
         )
 
     command.upgrade(config, "head")
+    safe_extraction = inspect(engine)
+    entry_columns = {
+        item["name"]
+        for item in safe_extraction.get_columns("knowledge_source_entries")
+    }
+    rejection_columns = {
+        item["name"]
+        for item in safe_extraction.get_columns("knowledge_ingestion_rejections")
+    }
+    assert {
+        "retryable",
+        "detected_mime",
+        "detected_magic",
+        "text_probability",
+    }.issubset(entry_columns)
+    assert {
+        "extractor_version",
+        "retryable",
+        "detected_mime",
+        "detected_magic",
+    }.issubset(rejection_columns)
     with engine.connect() as connection:
         migrated = connection.execute(
             text(

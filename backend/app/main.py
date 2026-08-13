@@ -53,6 +53,13 @@ def create_app(
     project_registry = ProjectRegistry(active_settings.projects_dir)
     task_service = TaskService(project_registry)
     knowledge_cipher = load_knowledge_cipher(active_settings)
+    artifact_evidence_service = ArtifactEvidenceService(
+        database=database,
+        stores=build_artifact_stores(
+            active_settings,
+            load_artifact_cipher(active_settings),
+        ),
+    )
     knowledge_service = KnowledgeService(
         database=database,
         settings=active_settings,
@@ -64,13 +71,7 @@ def create_app(
             timeout_seconds=active_settings.ollama_timeout_seconds,
         ),
         cipher=knowledge_cipher,
-    )
-    artifact_evidence_service = ArtifactEvidenceService(
-        database=database,
-        stores=build_artifact_stores(
-            active_settings,
-            load_artifact_cipher(active_settings),
-        ),
+        artifact_service=artifact_evidence_service,
     )
     workspace_manager = WorkspaceManager(
         root=active_settings.workspace_root,

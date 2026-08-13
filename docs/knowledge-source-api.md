@@ -369,6 +369,20 @@ gate. `s3` configures the primary store through an S3-compatible endpoint such
 as RustFS and retains the independent filesystem replica. The application never
 uses a RustFS-specific API.
 
+## Universal safe extraction
+
+Version 0.31.0 routes files from detected content. The persisted evidence
+contains MIME, magic type and text probability. Untrusted parsers run in a
+network disabled child process with a hard timeout and limits for input,
+output, archive members, expanded bytes and compression ratio. Archive paths,
+links and traversal attempts are rejected before member content is used.
+
+The registry covers plain text with unknown extensions, RTF, EML, MSG, legacy
+OLE Office containers, XLS, safe ZIP text members, OOXML, PDF and image OCR.
+Every rejection records processor, processor version, stable reason code and
+retryability. Cleaned complete text is persisted as a SHA 256 Artifact linked
+to the Source Entry, so it remains readable after its observed path disappears.
+
 Artifact write, metadata, content and reconciliation endpoints require the
 operations administrator headers. The aggregate summary contains counts only
 and remains available to the knowledge management page.

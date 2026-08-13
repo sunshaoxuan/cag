@@ -256,6 +256,10 @@ class KnowledgeIngestionRejection(PhysicalIdMixin, Base):
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reason_code: Mapped[str] = mapped_column(String(64), index=True)
     extractor: Mapped[str] = mapped_column(String(64), default="filesystem")
+    extractor_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    detected_mime: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    detected_magic: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_type: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
@@ -306,8 +310,12 @@ class KnowledgeSourceEntry(PhysicalIdMixin, Base):
         String(64), nullable=True
     )
     extractor_version: Mapped[str | None] = mapped_column(
-        String(32), nullable=True
+        String(64), nullable=True
     )
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    detected_mime: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    detected_magic: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text_probability: Mapped[float | None] = mapped_column(nullable=True)
     present: Mapped[bool] = mapped_column(
         Boolean, default=True, index=True
     )

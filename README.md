@@ -4,7 +4,7 @@ One Agent Gateway 让网站、内部平台和自动化系统通过自然语言 P
 
 ## 当前版本
 
-当前版本为 `0.30.0`。Gateway 监听全部 IPv4 网络接口，由 Windows 监督任务通过 readiness 检查持续管理。监督任务由系统启动、用户登录和每分钟看门狗共同触发，并在进程异常退出后自动恢复。正式运行时使用 PostgreSQL 16、pgvector、pg_trgm 和 Redis，分别承载业务真相、向量与文本召回以及跨进程唤醒。PostgreSQL 和 Redis 容器在 Docker 重启后自动恢复。Qwen3 Embedding 对规范路径和脱敏正文执行多语言语义索引，并与精确路径和关键词召回融合。扫描 PDF 使用日英 OCR。客户台账抽取使用 schema v1，根据 Source 与组织机构属性解析受治理 Scope，完整列举 Scope 文件，并逐文件生成具备 Document Version、位置和摘录证据的候选。Source、Document、Processing 与业务 Knowledge Block 使用独立物理版本，历史数据永久保留。知识转换基线可以在不改写现有知识的情况下，把 Source Entry 状态规范化为明确生命周期，并生成可复跑、可筛选和带 SHA 256 的 Conversion Manifest dry run。内容寻址 Artifact 通过 SHA 256 键保存到两个独立副本，数据库记录可反查的位置、版本、校验和及完整性状态；原路径消失时仍能从健康副本读取清洗证据。
+当前版本为 `0.31.0`。Gateway 监听全部 IPv4 网络接口，由 Windows 监督任务通过 readiness 检查持续管理。监督任务由系统启动、用户登录和每分钟看门狗共同触发，并在进程异常退出后自动恢复。正式运行时使用 PostgreSQL 16、pgvector、pg_trgm 和 Redis，分别承载业务真相、向量与文本召回以及跨进程唤醒。PostgreSQL 和 Redis 容器在 Docker 重启后自动恢复。Qwen3 Embedding 对规范路径和脱敏正文执行多语言语义索引，并与精确路径和关键词召回融合。扫描 PDF 使用日英 OCR。客户台账抽取使用 schema v1，根据 Source 与组织机构属性解析受治理 Scope，完整列举 Scope 文件，并逐文件生成具备 Document Version、位置和摘录证据的候选。Source、Document、Processing 与业务 Knowledge Block 使用独立物理版本，历史数据永久保留。知识转换基线可以在不改写现有知识的情况下，把 Source Entry 状态规范化为明确生命周期，并生成可复跑、可筛选和带 SHA 256 的 Conversion Manifest dry run。内容寻址 Artifact 通过 SHA 256 键保存到两个独立副本，数据库记录可反查的位置、版本、校验和及完整性状态；原路径消失时仍能从健康副本读取清洗证据。
 
 5173 端口提供统一管理台，包含 API 测试、调用监控、在线 API 文档、企业知识、代码知识、长期记忆、能力治理和自运维问题中心。所有运行失败可以进入问题中心，由本机 Codex 执行责任边界判断、改进规划和独立 Review。管理员批准后，内部问题进入隔离改进分支，外部依赖和凭据问题等待管理员登记处理证据，随后统一执行再评估和关闭。每轮问题保留发生记录、方案版本、Review、审批、分支、提交、验证、回滚和关闭时间线。
 

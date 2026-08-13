@@ -3,7 +3,7 @@
 ## Status
 
 Phase 0 accepted in version 0.29.0. Phase 1 object evidence foundation is
-accepted in version 0.30.0. Universal extraction, relationship projection,
+accepted in version 0.30.0. Universal extraction was delivered in 0.31.0. Relationship projection,
 Experience retrieval and graph selection remain Proposed.
 
 ## Context

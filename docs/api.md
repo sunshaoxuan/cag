@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-Current version: `0.30.0`
+Current version: `0.31.0`
 
 Customer ledger extraction schema version 1 accepts a Source physical ID, an
 organization subject physical ID, Catalog scope policy, analysis time,
@@ -36,7 +36,7 @@ Response:
 {
   "status": "ok",
   "service": "agent-gateway",
-  "version": "0.30.0"
+  "version": "0.31.0"
 }
 ```
 
@@ -122,9 +122,8 @@ the same `manifest_sha256`.
 Canonical lifecycle states are `discovered`, `processing`, `indexed`,
 `metadata_only`, `rejected` and `removed`. Conversion actions are
 `backfill_object`, `reclean`, `reindex`, `path_only`, `safe_unpack`,
-`metadata_only`, `reuse` and `blocked`. Phase 0 uses existing extension and
-metadata observations for capability planning. MIME, magic and text-likelihood
-content detection remain Planned for Phase 2.
+`metadata_only`, `reuse` and `blocked`. Phase 2 records MIME, magic and text
+probability observations and routes content through the safe extractor registry.
 PostgreSQL builds every successful Manifest inside one `REPEATABLE READ`
 transaction. A failed batch rolls back all Manifest items and closes the run as
 `failed` with a sanitized error class.
