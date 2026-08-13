@@ -13,3 +13,7 @@
 | Relevant tests pass | Backend, Pester, frontend and build results recorded in `test_results.md` | PASS |
 | UI acceptance is real | Browser DOM, Console and screenshot evidence recorded | PASS |
 | Work stays on master and is delivered to origin/master | Release commit is created on master; remote equality is verified immediately after push | PASS |
+| OneOps primary OneCAG endpoint is reachable | Production connection function returned HTTP 200 and 1 project from port 8001 | PASS |
+| OneOps fallback OneCAG endpoint is reachable | Production connection function returned HTTP 200 and 1 project from port 8002 | PASS |
+| OneOps endpoints remain supervised | Ports 8001 and 8002 each have a formal Running task with three triggers and PT1M watchdog | PASS |
+| OneOps authenticated UI shows the successful result | Browser login state was unavailable and Edge automation timed out | EVIDENCE_MISSING |

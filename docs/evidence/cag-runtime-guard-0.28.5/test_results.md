@@ -12,3 +12,10 @@
 | Browser DOM | PASS, v0.28.5 and primary navigation visible |
 | Browser Console | PASS, 0 warnings, 0 errors |
 | Browser screenshot | PASS, `browser-home.png` |
+| OneOps primary production connection test | PASS, HTTP 200, 1 project, 89 ms |
+| OneOps fallback production connection test | PASS, HTTP 200, 1 project, 3 ms |
+| CAG ports 8000, 8001 and 8002 | PASS, Ready 0.28.5 on all interfaces, Redis and PostgreSQL ready |
+| Formal scheduled-task fleet | PASS, exactly 3 tasks, each Running with 3 triggers and PT1M watchdog |
+| Authenticated OneOps DOM, Console and success screenshot | `evidence_missing`, browser authentication session unavailable and Edge control timed out |
+| CAG supervisor Pester follow-up | PASS, 11 passed |
+| OneOps Agent Gateway settings tests | PASS, 7 passed |

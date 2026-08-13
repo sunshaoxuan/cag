@@ -29,3 +29,25 @@ The formal host runtime reports Ready version 0.28.5 with PostgreSQL, pgvector
 0.8.2 and Redis available. The management UI returns HTTP 200 on port 5173.
 Browser DOM shows v0.28.5, the Browser console has zero warnings and errors,
 and `browser-home.png` records the accepted page.
+
+## OneOps OneCAG follow-up
+
+OneOps was configured with primary endpoint
+`http://192.168.20.54:8001/api/v1` and fallback endpoint
+`http://192.168.20.54:8002/api/v1`. Both listeners were offline because their
+older two-trigger scheduled tasks ended with `0xC000013A` during the same host
+lifecycle interruption. Both formal tasks were re-registered through the
+0.28.5 manager and now have startup, sign-in and one-minute watchdog triggers.
+
+The exact OneOps production function `testAgentGatewayConnection()` returned
+`AGENT_GATEWAY_CONNECTION_SUCCEEDED`, HTTP 200 and one project for both
+endpoints. The primary completed in 89 ms and the fallback in 3 ms. Direct LAN
+requests to both `/api/v1/projects` endpoints returned the project
+`One Agent Gateway`. Obsolete duplicate scheduled tasks named `Backup` and
+`Standby` were removed after confirming they were stopped. The three remaining
+formal tasks manage ports 8000, 8001 and 8002 respectively.
+
+Authenticated OneOps DOM, Console and success screenshot evidence is
+`evidence_missing`. The in-app browser did not retain a Windows-authenticated
+session, and the connected Edge automation surface timed out while loading the
+OneOps page. No credentials were requested or inspected.

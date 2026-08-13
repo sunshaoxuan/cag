@@ -8,3 +8,5 @@
 | `workspaces/.gateway/logs/gateway-supervisor.log` | Persistent local start, health and restart timeline |
 | `browser-home.png` | Browser-rendered 0.28.5 management UI acceptance |
 | `/health/ready` runtime response | Version, queue, Redis, PostgreSQL and pgvector evidence |
+| OneOps `gateway/agent-gateway-settings.mjs` production function | Actual `/projects` connection-test contract and primary/fallback results |
+| Scheduled tasks for ports 8000, 8001 and 8002 | Formal OneOps primary and fallback continuity configuration |

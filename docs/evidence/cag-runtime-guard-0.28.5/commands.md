@@ -10,3 +10,8 @@
 8. Restart the formal managed runtime and inspect Ready version 0.28.5.
 9. Inspect browser DOM, Console and full-page screenshot at `http://127.0.0.1:5173/`.
 10. Run `git diff --check`, commit on master, push to `origin/master`, and compare refs.
+11. Inspect the OneOps-configured primary port 8001 and fallback port 8002.
+12. Re-register both formal scheduled tasks through the 0.28.5 manager.
+13. Call `/api/v1/projects` through each LAN endpoint.
+14. Execute OneOps `testAgentGatewayConnection()` against both configured endpoints.
+15. Remove only the stopped duplicate `Backup` and `Standby` scheduled tasks.
